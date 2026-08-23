@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>pi-webview</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <!-- loader di avvio: copre l'interfaccia finché non ci sono dati -->
+    <div id="boot-loader" class="boot-loader">
+      <div class="boot-loader-content">
+        <span class="spinner"></span>
+        <span id="boot-loader-text">Caricamento…</span>
+      </div>
+    </div>
+
+    <header>
+      <div class="session-wrap">
+        <span id="conn-dot" class="conn-dot conn-connecting" title="connessione…"></span>
+        <div id="session-dropdown" class="dropdown">
+          <button id="session-btn" class="session-btn" title="Sessioni">—</button>
+          <div id="session-menu" class="dropdown-menu" hidden>
+            <div id="session-filters" class="session-filters"></div>
+            <div id="session-items" class="session-items"></div>
+          </div>
+        </div>
+      </div>
+      <span class="spacer"></span>
+      <button
+        id="btn-new-chat"
+        class="icon-btn"
+        title="Nuova chat in un altro pannello"
+      ></button>
+      <button
+        id="btn-settings"
+        class="icon-btn"
+        title="Impostazioni"
+        aria-expanded="false"
+      >
+        ⚙
+      </button>
+    </header>
+
+    <!-- dialog modale impostazioni -->
+    <div id="settings-modal" class="modal-backdrop" hidden>
+      <div class="modal">
+        <div class="modal-head">
+          <span id="settings-modal-title" class="modal-title">Impostazioni</span>
+          <button id="btn-settings-close" class="icon-btn" type="button" title="Chiudi">
+            ✕
+          </button>
+        </div>
+        <div class="settings-row">
+          <label id="settings-lang-label" for="lang">Lingua</label>
+          <select id="lang" class="field-select">
+            <option value="it">Italiano</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <label id="settings-theme-label">Tema</label>
+          <div class="theme-row" role="group" aria-label="Tema">
+            <button data-theme-pref="system" class="theme-btn" title="Tema: sistema">
+              🖥️
+            </button>
+            <button data-theme-pref="light" class="theme-btn" title="Tema: chiaro">
+              ☀️
+            </button>
+            <button data-theme-pref="dark" class="theme-btn" title="Tema: scuro">
+              🌙
+            </button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <label id="settings-history-label" for="settings-history-limit">
+            Storico (messaggi)
+          </label>
+          <input
+            id="settings-history-limit"
+            class="field-number"
+            type="number"
+            min="5"
+            max="1000"
+            step="5"
+          />
+        </div>
+        <div class="settings-row">
+          <label id="settings-version-label">Versione</label>
+          <span id="settings-version" class="settings-version">–</span>
+        </div>
+      </div>
+    </div>
+
+    <main id="messages" aria-live="polite">
+      <div id="thread" class="thread"></div>
+      <button
+        id="scroll-bottom"
+        class="scroll-bottom-btn"
+        type="button"
+        hidden
+        title="Vai in fondo"
+      ></button>
+    </main>
+
+    <!-- pannello stearing: visibile solo quando ci sono messaggi in coda -->
+    <div id="steer-panel" class="steer-panel" hidden></div>
+
+    <footer>
+      <div id="connect-panel" class="connect-panel" hidden>
+        <input id="connect-url" type="text" placeholder="ws://127.0.0.1:PORT?token=…" />
+        <button id="btn-connect">Connetti</button>
+      </div>
+      <div class="input-box">
+        <!-- badge: accavallato sul bordo superiore destro della box di input.
+             Contiene il gauger del contesto (built-in) + gli SLOT riempiti
+             dalle estensioni pi via ctx.ui.setStatus (es. tokens-per-second). -->
+        <div id="stats-badge" class="stats-badge" title="">
+          <span class="stats-part stats-ctx">
+            <svg class="ctx-gauge" viewBox="0 0 36 36" aria-hidden="true">
+              <circle class="ctx-track" cx="18" cy="18" r="15.5"></circle>
+              <circle id="ctx-fill" class="ctx-fill" cx="18" cy="18" r="15.5"></circle>
+            </svg>
+            <span id="ctx-label" class="ctx-label">–</span>
+          </span>
+          <span id="stats-slots" class="stats-slots"></span>
+        </div>
+        <!-- STOP separato: a cavallo dell'angolo in basso a destra
+             dell'input box, visibile solo durante l'elaborazione (piano 0004) -->
+        <button
+          id="stats-stop"
+          class="stats-stop"
+          type="button"
+          title=""
+          hidden
+        ></button>
+        <!-- dropdown autocomplete comandi slash (piano 0003): SOLO comandi
+             estensione; apre verso l'alto sopra l'input box -->
+        <div id="cmd-dropdown" class="cmd-dropdown" hidden>
+          <div id="cmd-list" class="cmd-list"></div>
+          <div class="cmd-footer"><span id="cmd-counter"></span></div>
+        </div>
+        <div id="attachment-row" class="attachment-row"></div>
+        <textarea
+          id="input"
+          rows="3"
+          placeholder="Messaggio per pi — Invio per inviare, Shift+Invio per a capo"
+        ></textarea>
+        <div class="input-toolbar">
+          <button id="trust" class="toolbar-chip trust-indicator" type="button" title="">
+            <span id="trust-icon">🛡</span> <span id="trust-label"></span>
+          </button>
+          <span class="spacer"></span>
+          <button id="btn-model" class="toolbar-chip" type="button" title="Modello">
+            <span id="model-info"></span>
+          </button>
+          <span id="balance-chip" class="balance-chip" title="" hidden></span>
+          <button id="btn-thinking" class="toolbar-chip" type="button" title="Pensiero">
+            <span id="thinking-info"></span>
+          </button>
+          <!-- STOP + invio vicini (2px), gruppo che non si tocca con gli altri -->
+          <span class="send-group">
+            <button
+              id="btn-stop"
+              class="stop-btn"
+              type="button"
+              title=""
+              hidden
+            ></button>
+            <button id="btn-send" class="send-btn" title="Invia">↑</button>
+          </span>
+        </div>
+      </div>
+    </footer>
+
+    <!-- overlay drag & drop -->
+    <div id="drop-overlay" class="drop-overlay" hidden>
+      <div class="drop-overlay-content">
+        <span id="drop-overlay-icon" class="drop-overlay-icon"></span>
+        <span id="drop-overlay-text">Rilascia per allegare</span>
+      </div>
+    </div>
+
+    <script type="module" src="/main.ts"></script>
+  </body>
+</html>

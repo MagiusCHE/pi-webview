@@ -1,0 +1,16 @@
+# File esclusi dal pacchetto VSIX (solo i runtime e i metadati entrano)
+src/**
+tests/**
+tools/**
+docs/**
+node_modules/**
+*.map
+tsconfig*.json
+vite.config.ts
+pnpm-workspace.yaml
+pnpm-lock.yaml
+.gitignore
+.prettierignore
+.prettierrc.json
+dist/web/**.map
+dist/extension/**.map

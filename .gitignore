@@ -1,0 +1,45 @@
+# Node
+node_modules/
+# Build output: dist/ specchia src/ (src è committata, dist no)
+dist/
+out/
+
+# Coverage
+coverage/
+
+# VS Code extension build
+*.vsix
+
+# npm pack output (release.mjs allega e pulisce il .tgz)
+*.tgz
+
+# Env / secrets (mai committare)
+.env
+.env.*
+!.env.example
+*.local.*
+local_*
+private_*
+credentials*.json
+service-account*.json
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor / OS
+.vscode/
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+*.swp
+
+# Temp
+tmp/
+.tmp/
+
+# Pi local state
+.pi/todos/

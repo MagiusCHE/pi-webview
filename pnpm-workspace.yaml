@@ -1,0 +1,7 @@
+allowBuilds:
+  "@vscode/vsce-sign": true
+  esbuild: true
+  keytar: true
+# Impostazioni pnpm 11 (il campo `pnpm` di package.json non è più letto)
+onlyBuiltDependencies:
+  - esbuild

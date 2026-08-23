@@ -1,0 +1,36 @@
+{
+  "name": "@magiusche/pi-webview",
+  "version": "0.1.6",
+  "description": "WebView UI for the pi coding agent, integrated into the IDE (VS Code first)",
+  "type": "module",
+  "license": "MIT",
+  "author": "Magius(CHE)",
+  "homepage": "https://github.com/MagiusCHE/pi-webview",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "webview",
+    "ide",
+    "vscode"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MagiusCHE/pi-webview"
+  },
+  "bin": {
+    "piw": "dist/piw.js"
+  },
+  "files": [
+    "dist",
+    "companion",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./dist/extension.js"
+    ],
+    "image": "https://raw.githubusercontent.com/MagiusCHE/pi-webview/main/media/pi-webview-preview.jpg"
+  }
+}

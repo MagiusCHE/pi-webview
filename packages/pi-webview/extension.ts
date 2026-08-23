@@ -21,6 +21,12 @@ const PKG_NAME = "@magiusche/pi-webview";
 const AUTO_INSTALL_ENV = "PI_WEBVIEW_AUTO_INSTALL";
 const VSIX_REL = join("companion", "pi-webview-ide.vsix");
 
+// Segnale di reload per l'IDE (contratto multi-IDE, docs/concept/0004):
+// quando il companion viene AGGIORNATO mentre l'IDE è aperto, la finestra
+// resta sulla versione vecchia caricata in memoria → scriviamo qui la versione
+// target; il companion dell'IDE (in esecuzione) la legge e chiede il reload.
+const RELOAD_SIGNAL = join(homedir(), ".pi", "pi-webview", "companion-reload.json");
+
 type Notify = (message: string, kind: "info" | "warning" | "error") => void;
 
 // API minimale di pi usata dall'estensione (typed localmente per non
@@ -167,6 +173,23 @@ function ensurePiwBin(): void {
   }
 }
 
+function writeReloadSignal(version: string): void {
+  try {
+    mkdirSync(dirname(RELOAD_SIGNAL), { recursive: true });
+    writeFileSync(RELOAD_SIGNAL, JSON.stringify({ version }, null, 2) + "\n");
+  } catch {
+    // best effort: mai rompere l'installazione per un segnale
+  }
+}
+
+function clearReloadSignal(): void {
+  try {
+    rmSync(RELOAD_SIGNAL, { force: true });
+  } catch {
+    // best effort
+  }
+}
+
 // Rimuove il symlink `piw` dal PATH dell'utente, SOLO se punta al bin di
 // questo pacchetto (mai file regolari utente, mai link che puntano altrove).
 // Replicato qui perché senza postinstall npm la pulizia del link spetta
@@ -207,9 +230,14 @@ export default function (pi: PiApi): void {
       const installed = await installedCompanionVersion("code");
       const vsixVersion = readVsixVersion(vsixPath);
       if (installed !== null && vsixVersion !== undefined && installed === vsixVersion) {
+        clearReloadSignal(); // già aggiornato: nessun segnale pendente
         return; // già installato e aggiornato
       }
       await installCompanion("code", vsixPath);
+      // update (non installazione fresca) → segnala all'IDE aperto il reload
+      if (installed !== null && vsixVersion !== undefined) {
+        writeReloadSignal(vsixVersion);
+      }
       pendingNotify =
         installed === null
           ? "pi-webview: companion installed in VS Code. Reload the window to activate the webview."

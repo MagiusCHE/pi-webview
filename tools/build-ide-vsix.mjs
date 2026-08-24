@@ -34,7 +34,9 @@ const manifest = {
   repository: root.repository,
   engines: { vscode: root.engines.vscode },
   main: "dist/extension/extension.cjs",
-  activationEvents: ["onView:piWebview"],
+  // onStartupFinished: il ripristino dei pannelli (restore) deve girare a
+  // OGNI avvio, anche se la view pi non è visibile (pannello laterale chiuso)
+  activationEvents: ["onStartupFinished", "onView:piWebview"],
   contributes: root.contributes,
 };
 rmSync("dist/companion", { recursive: true, force: true });

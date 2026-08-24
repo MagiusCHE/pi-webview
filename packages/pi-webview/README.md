@@ -106,11 +106,11 @@ It removes, in order:
 
 1. the IDE companion extension (`magiusche.pi-webview-ide`, if installed in VS Code — via `code --uninstall-extension`),
 2. the `piw` link on your `PATH` (`~/.local/bin/piw` / `%APPDATA%\npm\piw.cmd` — only if it points to this package, never user files), and
-3. the package itself from pi (`pi remove @magiusche/pi-webview`).
+3. the package itself from pi (`pi remove npm:@magiusche/pi-webview` — il prefisso `npm:` è richiesto, come per `pi install`).
 
 Then **restart pi** to finish (and **reload the VS Code window** if the companion was removed).
 
-If `pi remove` fails, or you already removed the package manually, do it by hand: `pi remove @magiusche/pi-webview`; if the `piw` link is left behind (now a dangling symlink), remove it manually: `rm ~/.local/bin/piw` (it is a symlink; verify with `ls -la`).
+If `pi remove` fails, or you already removed the package manually, do it by hand: `pi remove npm:@magiusche/pi-webview` (il prefisso `npm:` è richiesto); if the `piw` link is left behind (now a dangling symlink), remove it manually: `rm ~/.local/bin/piw` (it is a symlink; verify with `ls -la`).
 
 ## How it works
 

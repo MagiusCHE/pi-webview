@@ -10,23 +10,40 @@ import { PiWebviewHost } from "./host.ts";
 import type { Frame } from "../../ide/protocol.ts";
 
 const CHATS_KEY = "pi-webview.chats";
+const COLUMNS_KEY = "pi-webview.chatColumns";
 const LEGACY_SESSION_KEY = "pi-webview.sessionPath";
 
 export class PiPanel extends PiWebviewHost {
   readonly panel: vscode.WebviewPanel;
   index: number; // posizione nella lista chat (0 = sidebar)
 
-  constructor(context: vscode.ExtensionContext, index: number, resumeSession?: string) {
+  constructor(
+    context: vscode.ExtensionContext,
+    index: number,
+    resumeSession?: string,
+    column?: number,
+  ) {
     super(context, {
-      onSessionChange: (path) => PiPanelManager.instance(context).update(index, path),
+      // indice risolto per IDENTITÀ al momento della segnalazione (mai
+      // l'indice catturato alla costruzione: dopo un remove() gli indici
+      // scalano e una closure con l'indice vecchio ricreava duplicati)
+      onSessionChange: (path) => {
+        const mgr = PiPanelManager.instance(context);
+        const idx = mgr.indexOfPanel(this);
+        mgr.update(idx >= 0 ? idx : index, path);
+      },
       onNewChat: () => void PiPanelManager.instance(context).openNew(),
     });
     this.index = index;
 
+    // colonna = gruppo editor in cui RICREARE il pannello al reload: se
+    // manca (prima apertura) → ViewColumn.Beside (nuovo gruppo accanto)
+    const targetColumn =
+      column !== undefined && column > 0 ? column : vscode.ViewColumn.Beside;
     this.panel = vscode.window.createWebviewPanel(
       "pi-webview.panel",
       `pi${index > 0 ? ` ${index}` : ""}`,
-      vscode.ViewColumn.Beside,
+      targetColumn,
       {
         enableScripts: true,
         retainContextWhenHidden: true,
@@ -34,12 +51,33 @@ export class PiPanel extends PiWebviewHost {
       },
     );
     this.webview = this.panel.webview;
-    this.panel.webview.html = this.webviewHtml(this.panel.webview);
+    try {
+      this.panel.webview.html = this.webviewHtml(this.panel.webview);
+    } catch (err) {
+      // UI non caricabile (es. dist/web mancante nel vsix): MAI lasciare un
+      // pannello vuoto orfano — dispose e rilancia (openNew/restore mostrano
+      // il messaggio e non lo tracciano)
+      this.panel.dispose();
+      throw new Error(
+        `UI non caricabile: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     this.startPi(resumeSession);
 
     this.panel.webview.onDidReceiveMessage((frame: Frame) => {
       void this.handleFrame(frame);
     });
+
+    // persiste la colonna a ogni cambio di gruppo (drag/riorganizzazione),
+    // così il reload ricrea il pannello nello STESSO gruppo — niente gruppi
+    // vuoti che si accumulano (createWebviewPanel con Beside a ogni reload
+    // aprirebbe un gruppo nuovo, e VS Code tiene quelli vecchi vuoti)
+    this.panel.onDidChangeViewState(() => {
+      const col = this.panel.viewColumn;
+      PiPanelManager.instance(context).setColumn(index, col);
+    });
+    const col = this.panel.viewColumn;
+    if (col) PiPanelManager.instance(context).setColumn(index, col);
 
     this.panel.onDidDispose(() => {
       this.dispose();
@@ -73,6 +111,16 @@ export class PiPanelManager {
         void this.context.workspaceState.update(LEGACY_SESSION_KEY, null);
       }
     }
+    // pulizia una tantum: rimuove duplicati/voci vuote residue (bug storici
+    // di indici stantii: dopo un remove() gli indici scalavano ma le closure
+    // dei pannelli scrivevano ancora sull'indice vecchio → path duplicati)
+    const seen = new Set<string>();
+    const cleaned = this.chats().filter((p) => {
+      if (!p || seen.has(p)) return false;
+      seen.add(p);
+      return true;
+    });
+    if (cleaned.length !== this.chats().length) this.persist(cleaned);
   }
 
   private chats(): string[] {
@@ -83,9 +131,36 @@ export class PiPanelManager {
     void this.context.workspaceState.update(CHATS_KEY, list.length ? list : null);
   }
 
+  /** colonne (gruppi editor) dei pannelli, allineate a chats() per indice */
+  private columns(): (number | undefined)[] {
+    return this.context.workspaceState.get<number[]>(COLUMNS_KEY) ?? [];
+  }
+
+  private persistColumns(cols: (number | undefined)[]): void {
+    const cleaned = cols.filter((c): c is number => typeof c === "number");
+    void this.context.workspaceState.update(COLUMNS_KEY, cleaned.length ? cleaned : null);
+  }
+
+  /** salva la colonna del pannello (per ricrearlo nello stesso gruppo al reload) */
+  setColumn(index: number, column: number | undefined): void {
+    if (index <= 0 || !column) return; // la sidebar (0) non ha colonna editor
+    const cols = this.columns();
+    while (cols.length <= index) cols.push(undefined);
+    cols[index] = column;
+    this.persistColumns(cols);
+  }
+
   /** sessione della chat all'indice i (0 = sidebar), se presente */
   sessionAt(index: number): string | undefined {
     return this.chats()[index];
+  }
+
+  /** indice corrente del pannello (1-based; 0 = sidebar). Risolto per
+   *  IDENTITÀ dell'oggetto, mai per indice catturato: dopo un remove() gli
+   *  indici scalano e le closure con l'indice vecchio ricreavano duplicati. */
+  indexOfPanel(panel: PiPanel): number {
+    const pos = this.panels.indexOf(panel);
+    return pos >= 0 ? pos + 1 : -1;
   }
 
   /** aggiorna la sessione corrente di una chat e persiste */
@@ -119,19 +194,51 @@ export class PiPanelManager {
   openNew(): void {
     const index = this.chats().length; // dopo la sidebar e i pannelli esistenti
     this.update(index, ""); // placeholder: la sessione arriva dalla webview
-    const panel = new PiPanel(this.context, index);
-    this.panels.push(panel);
-    panel.reveal();
+    try {
+      const panel = new PiPanel(this.context, index);
+      this.panels.push(panel);
+      panel.reveal();
+    } catch (err) {
+      // costruzione fallita (es. dist/web illeggibile): il costruttore ha già
+      // fatto dispose del pannello → nessun pannello vuoto orfano in giro
+      void vscode.window.showErrorMessage(
+        `pi-webview: impossibile aprire la chat: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      // togli il placeholder: la chat non esiste
+      const list = this.chats();
+      if (list.length > index) {
+        list.splice(index, 1);
+        if (list.length) {
+          this.persist(list);
+        } else {
+          void this.context.workspaceState.update(CHATS_KEY, null);
+        }
+      }
+    }
   }
 
   /** al riavvio: ricrea i pannelli dalle chat salvate (la sidebar fa da sé) */
   restore(): void {
     const list = this.chats();
+    const cols = this.columns();
     for (let i = 1; i < list.length; i++) {
       const path = list[i];
       if (!path) continue; // chat mai arrivata a una sessione: salta
-      const panel = new PiPanel(this.context, i, path);
-      this.panels.push(panel);
+      try {
+        // ricrea il pannello nella STESSA colonna in cui era: VS Code
+        // ripristina i gruppi editor del layout precedente (quello del panel
+        // resta VUOTO dopo il reload); creare con ViewColumn.Beside a ogni
+        // reload aprirebbe un gruppo NUOVO → i gruppi vuoti si accumulano
+        const panel = new PiPanel(this.context, i, path, cols[i]);
+        this.panels.push(panel);
+      } catch (err) {
+        // pannello non costruibile: dispose già fatto dal costruttore, niente
+        // pannelli vuoti orfani; la sessione resta salvata (riprovata al
+        // prossimo reload — il messaggio spiega il perché)
+        void vscode.window.showErrorMessage(
+          `pi-webview: impossibile ripristinare la chat: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
   }
 }

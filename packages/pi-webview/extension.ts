@@ -18,6 +18,8 @@ const execFileAsync = promisify(execFile);
 
 const COMPANION_ID = "magiusche.pi-webview-ide";
 const PKG_NAME = "@magiusche/pi-webview";
+// `pi remove` vuole il nome CON il prefisso sorgente npm: (come `pi install npm:…`)
+const PKG_REF = `npm:${PKG_NAME}`;
 const AUTO_INSTALL_ENV = "PI_WEBVIEW_AUTO_INSTALL";
 const VSIX_REL = join("companion", "pi-webview-ide.vsix");
 
@@ -327,16 +329,16 @@ export default function (pi: PiApi): void {
           // 2) link `piw` dal PATH (se è il nostro)
           unlinkPiwBin();
           notify("pi-webview: piw binary link removed from PATH.", "info");
-          // 3) rimozione del pacchetto da pi stesso (pi remove)
+          // 3) rimozione del pacchetto da pi stesso (pi remove npm:<nome>)
           try {
-            await runCli("pi", ["remove", PKG_NAME], 60_000);
+            await runCli("pi", ["remove", PKG_REF], 60_000);
             notify(
               "pi-webview: package removed from pi. Restart pi to finish (reload the VS Code window if the companion was removed).",
               "info",
             );
           } catch (err) {
             notify(
-              `pi-webview: pi remove failed (${err instanceof Error ? err.message : String(err)}). Run it manually: pi remove ${PKG_NAME}`,
+              `pi-webview: pi remove failed (${err instanceof Error ? err.message : String(err)}). Run it manually: pi remove ${PKG_REF}`,
               "error",
             );
           }

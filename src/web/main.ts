@@ -86,6 +86,7 @@ const els = {
   cmdList: document.getElementById("cmd-list") as HTMLDivElement,
   cmdCounter: document.getElementById("cmd-counter") as HTMLSpanElement,
   steerPanel: document.getElementById("steer-panel") as HTMLDivElement,
+  selectionPanel: document.getElementById("selection-panel") as HTMLDivElement,
   attachmentRow: document.getElementById("attachment-row") as HTMLDivElement,
   bootLoader: document.getElementById("boot-loader") as HTMLDivElement,
   bootLoaderText: document.getElementById("boot-loader-text") as HTMLSpanElement,
@@ -2580,10 +2581,16 @@ function addStatusLine(text: string): void {
 
 function renderIdeEvent(evt: IdeEvent): void {
   if (evt.type === "selection_changed") {
+    // blocco dedicato (una riga, come lo stearing): appare con la selezione
     const n = evt.ranges?.length ?? 0;
-    addStatusLine(`${t("selection")}: ${evt.filePath ?? "?"} (${n} ${t("ranges")})`);
+    const base = evt.filePath?.split(/[\\/]/).pop() ?? evt.filePath ?? "?";
+    els.selectionPanel.textContent = `${t("selection")}: ${base} (${n})`;
+    els.selectionPanel.title = `${t("selection")}: ${evt.filePath ?? "?"} — ${n} ${t("ranges")}`;
+    const wasHidden = els.selectionPanel.hidden;
+    els.selectionPanel.hidden = false;
+    if (wasHidden) scrollToBottom(true); // il blocco copre l'ultimo messaggio
   } else if (evt.type === "selection_cleared") {
-    addStatusLine(t("selectionCleared"));
+    els.selectionPanel.hidden = true;
   } else if (evt.type === "at_mentioned") {
     addStatusLine(`@ ${evt.filePath ?? "?"}`);
   }

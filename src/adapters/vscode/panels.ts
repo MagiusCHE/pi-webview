@@ -190,12 +190,27 @@ export class PiPanelManager {
     if (next.length !== list.length) this.persist(next);
   }
 
+  /** prima colonna (gruppo editor) disponibile NON bloccata — come l'apertura
+   *  di un file nella vista filesystem: gruppo attivo se sbloccato, altrimenti
+   *  il primo gruppo sbloccato; solo se TUTTI sono bloccati → gruppo nuovo.
+   *  NB: isLocked non è nei tipi @types/vscode 1.125 (esiste nel runtime) →
+   *  cast locale; su VS Code vecchi è undefined (falsy) = non bloccato */
+  private firstUnlockedColumn(): vscode.ViewColumn {
+    const lock = (g: vscode.TabGroup) =>
+      (g as vscode.TabGroup & { isLocked?: boolean }).isLocked === true;
+    const active = vscode.window.tabGroups.activeTabGroup;
+    if (active && !lock(active)) return active.viewColumn;
+    const first = vscode.window.tabGroups.all.find((g) => !lock(g));
+    return first ? first.viewColumn : vscode.ViewColumn.Beside;
+  }
+
   /** apre una NUOVA chat (sessione fresca) in un pannello */
   openNew(): void {
     const index = this.chats().length; // dopo la sidebar e i pannelli esistenti
     this.update(index, ""); // placeholder: la sessione arriva dalla webview
     try {
-      const panel = new PiPanel(this.context, index);
+      // si apre nel gruppo attivo/first-unlocked (mai SEMPRE un gruppo nuovo)
+      const panel = new PiPanel(this.context, index, undefined, this.firstUnlockedColumn());
       this.panels.push(panel);
       panel.reveal();
     } catch (err) {

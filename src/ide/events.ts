@@ -135,12 +135,15 @@ function handleDelta(state: StreamState, delta: AssistantDelta): UiAction {
         | { content?: Array<{ type?: string; id?: string; name?: string }> }
         | undefined;
       const content = partial?.content?.[index];
+      // pi 0.84.3+ (fix #7953): id e toolName arrivano anche a livello TOP
+      // dell'evento RPC (assistantMessageEvent) — fallback per robustezza
+      const top = delta as { id?: string; toolName?: string };
       return {
         kind: "tool_call_start",
         index,
         toolCall: {
-          id: content?.id ?? "",
-          name: content?.name ?? "",
+          id: content?.id ?? top.id ?? "",
+          name: content?.name ?? top.toolName ?? "",
           args: "",
         },
       };

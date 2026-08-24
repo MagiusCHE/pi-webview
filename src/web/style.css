@@ -49,6 +49,11 @@
   --ok: var(--vscode-charts-green, #7bd88f);
   --warn: var(--vscode-charts-yellow, #f0c674);
   --err: var(--vscode-charts-red, #e06c75);
+  /* diff tool: verde/rosso FISSI (i charts del tema VS Code possono essere
+     blu/arancio) */
+  --diff-add: #7bd88f;
+  --diff-rem: #e06c75;
+  --diff-mod: #f0c674;
   --user-bubble: var(--vscode-input-background, #232629);
   /* palette ANSI (16 colori) armonizzata col tema scuro: usata per gli slot
      delle estensioni quando mandano testo colorato (es. setStatus) */
@@ -91,6 +96,11 @@
   --ok: var(--vscode-charts-green, #2e8b57);
   --warn: var(--vscode-charts-yellow, #b8860b);
   --err: var(--vscode-charts-red, #c73542);
+  /* diff tool: verde/rosso FISSI (i charts del tema VS Code possono essere
+     blu/arancio) */
+  --diff-add: #2e8b57;
+  --diff-rem: #c73542;
+  --diff-mod: #b8860b;
   --user-bubble: var(--vscode-input-background, #ececea);
   /* palette ANSI per il tema chiaro: scuri abbastanza da restare leggibili */
   --ansi-0: #e7e9ee;
@@ -597,6 +607,63 @@ header {
   text-align: left;
   font-size: 13.5px;
 }
+/* bubble per messaggi iniettati da un'ALTRA sessione (role custom,
+   es. session-control send) — card collassabile come i tool: una riga con
+   ellipsis chiusa, click per espandere, markdown interpretato dentro */
+.session-card {
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg));
+  overflow: hidden;
+  text-align: left;
+}
+.session-card summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.session-card summary::-webkit-details-marker {
+  display: none;
+}
+.session-card summary::before {
+  content: "▶";
+  font-size: 9px;
+  color: var(--fg-tertiary);
+  transition: transform var(--transition);
+}
+.session-card[open] summary::before {
+  transform: rotate(90deg);
+}
+.session-tag {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-text);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.session-preview {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--fg-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-body {
+  padding: 8px 12px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  font-size: 13px;
+  color: var(--fg);
+  overflow-x: auto;
+}
 
 .assistant-text {
   white-space: pre-wrap;
@@ -831,6 +898,7 @@ header {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* contatore diff standard (badge verde/rosso, vedi .tool-diff sopra) */
 .tool-diff > span + span::before {
   content: "";
   width: 1px;
@@ -839,13 +907,15 @@ header {
   margin-right: 6px;
 }
 .tool-diff .d-add {
-  color: var(--ok);
+  /* verde/rosso FISSI: non --vscode-charts-green/red, che nel tema VS Code
+     corrente risultano blu/arancio */
+  color: var(--diff-add, #7bd88f);
 }
 .tool-diff .d-rem {
-  color: var(--err);
+  color: var(--diff-rem, #e06c75);
 }
 .tool-diff .d-mod {
-  color: var(--warn);
+  color: var(--diff-mod, #f0c674);
 }
 /* pipe muta tra diff e timer */
 .tool-diff + .tool-timer {
@@ -1016,10 +1086,10 @@ footer {
   background: var(--hover);
 }
 .input-box textarea {
-  flex: 1;
+  flex: 0 0 auto; /* NIENTE grow: l'altezza la gestisce l'autogrow (height) */
   resize: none;
-  min-height: 60px;
-  max-height: 240px;
+  min-height: 60px; /* 2 righe: 2×22.5 + padding 15 */
+  max-height: 128px; /* 5 righe: 5×22.5 + padding 15 (autogrow JS) */
   background: transparent;
   color: var(--fg);
   border: none;
@@ -1262,6 +1332,97 @@ footer {
   color: var(--fg-tertiary);
   font-size: 11.5px;
 }
+/* dialoghi estensione INLINE in fondo alla chat (ask_user, ctx.ui.select/
+   confirm/input): niente modali overlay — l'utente legge la cronologia e
+   risponde dal thread. ✕ o Esc = annulla. */
+.inline-dialog-msg {
+  margin-top: 8px;
+}
+.inline-dialog {
+  width: 100%;
+  max-width: 34rem;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.inline-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.inline-dialog-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.inline-dialog-x {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--fg-secondary);
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.inline-dialog-x:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+.inline-dialog-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.inline-dialog-option {
+  text-align: left;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.inline-dialog-option:hover {
+  background: var(--hover);
+  border-color: var(--border-strong);
+}
+.inline-dialog-option:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.inline-dialog-confirm {
+  flex-direction: row;
+}
+.inline-dialog-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.inline-dialog-input {
+  resize: vertical;
+  min-height: 52px;
+  max-height: 128px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 9px;
+}
+.inline-dialog-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .pop-empty {
   padding: 8px 10px;
   color: var(--fg-tertiary);
@@ -1498,6 +1659,29 @@ footer {
 }
 .steer-row:hover {
   background: var(--hover);
+}
+/* messaggi GIÀ inviati a pi, in attesa di iniezione: muted + spinner; NON
+   dequeuabili (la coda di pi non è mutabile via RPC) */
+.steer-row-sending {
+  opacity: 0.7;
+}
+.steer-row-sending:hover {
+  background: transparent;
+}
+.steer-sending-icon {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: steer-spin 0.7s linear infinite;
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--accent) 60%, transparent));
+}
+@keyframes steer-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .steer-row .steer-text {
   flex: 1;

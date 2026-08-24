@@ -109,6 +109,9 @@
     "applyCliHint": "Apply restarts pi with the new command line.",
     "applyCliRestarting": "pi restarting…",
     "cliNoFlags": "No CLI flags registered.",
-    "cliStringNotSupported": "value flag: not supported yet"
+    "cliStringNotSupported": "value flag: not supported yet",
+    "steerDequeueHint": "Only messages not sent yet: in-flight ones are already with pi.",
+    "ok": "OK",
+    "dialogPlaceholder": "Type here…"
   }
 }

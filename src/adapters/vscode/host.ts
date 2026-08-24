@@ -195,10 +195,13 @@ export abstract class PiWebviewHost {
       piCmd.command,
       {
         onEvent: (evt) => {
-          if (evt.type === "extension_ui_request") {
-            this.handleExtensionUi(evt);
-            return;
-          }
+          // TUTTI gli extension_ui_request (select/confirm/input/editor/notify/
+          // setStatus/…) vengono inoltrati ALLA WEBVIEW: i modali compaiono
+          // nella sidebar dove guarda l'utente, non come dialoghi nativi VS
+          // Code in cima all'editor (facili da ignorare → sembra "non
+          // funzioni"). La webview risponde con extension_ui_response, che
+          // handleFrame fa arrivare a pi. I dialoghi nativi erano il motivo
+          // per cui ask_user sembrava "cancellato" a caso.
           this.post({ channel: "rpc", payload: evt as RpcEvent });
         },
         onStderr: (line) => console.warn("[pi]", line),
@@ -209,10 +212,14 @@ export abstract class PiWebviewHost {
           this.post({ channel: "rpc", payload: { type: "connection_closed" } });
         },
       },
-      // marker: l'estensione pi-webview (lato pi) sa che è già integrato (niente re-install)
+      // marker: l'estensione pi-webview (lato pi) sa che è già integrato (niente re-install).
+      // cwd = cartella di lavoro VS Code: senza, pi usa il cwd dell'extension
+      // host (spesso di un'altra workspace) → l'agente risponde la directory
+      // sbagliata anche se la sessione è di un'altra cartella
       {
         env: { ...process.env, PI_WEBVIEW_COMPANION: "1" },
         args: [...sessionArgs, ...cliFlagArgs],
+        ...(this.workspace() ? { cwd: this.workspace() } : {}),
       },
     );
     this.pi.start();
@@ -514,71 +521,6 @@ export abstract class PiWebviewHost {
       vscode.window.onDidChangeTextEditorSelection(pushSelection),
     );
     this.postSelection();
-  }
-
-  // --- Extension UI protocol (gruppo A: dialoghi e notifiche) ---------------
-
-  private handleExtensionUi(req: {
-    id?: string;
-    method?: string;
-    title?: string;
-    message?: string;
-    notifyType?: string;
-    options?: string[];
-    placeholder?: string;
-    prefill?: string;
-  }): void {
-    const respond = (payload: Record<string, unknown>) => {
-      this.pi?.send({ type: "extension_ui_response", ...payload });
-    };
-    switch (req.method) {
-      case "select":
-        void vscode.window
-          .showQuickPick(req.options ?? [], {
-            title: req.title,
-            placeHolder: req.placeholder,
-          })
-          .then((v) =>
-            v === undefined
-              ? respond({ id: req.id, cancelled: true })
-              : respond({ id: req.id, value: v }),
-          );
-        return;
-      case "confirm":
-        void vscode.window
-          .showWarningMessage(req.message ?? req.title ?? "Confermi?", "OK", "Annulla")
-          .then((v) => respond({ id: req.id, confirmed: v === "OK" }));
-        return;
-      case "input":
-        void vscode.window
-          .showInputBox({ prompt: req.title, placeHolder: req.placeholder })
-          .then((v) =>
-            v === undefined
-              ? respond({ id: req.id, cancelled: true })
-              : respond({ id: req.id, value: v }),
-          );
-        return;
-      case "editor":
-        void vscode.window
-          .showInputBox({ prompt: req.title, value: req.prefill })
-          .then((v) =>
-            v === undefined
-              ? respond({ id: req.id, cancelled: true })
-              : respond({ id: req.id, value: v }),
-          );
-        return;
-      case "notify":
-        // le risposte dei comandi estensione (ui.notify) vanno in CHAT, non
-        // in notifiche native VS Code: inoltra alla webview che le rende
-        // come status line nel thread
-        this.post({ channel: "rpc", payload: req as unknown as RpcEvent });
-        return;
-      default:
-        // setStatus/setWidget/setTitle: NON sono dialoghi — inoltrati alla
-        // webview, che li rende negli slot del footer (estensioni → badge)
-        this.post({ channel: "rpc", payload: req as unknown as RpcEvent });
-        return;
-    }
   }
 
   // --- HTML della webview (stesso bundle per view e pannelli) -----------------

@@ -1858,7 +1858,13 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       hideExtensionsBlock();
       const title = (evt.title as string | undefined) ?? "";
       const options = (evt.options as string[] | undefined) ?? [];
-      void showSelect(title, options).then((v) =>
+      // ask_user: la prima domanda divide la card in N card (header = domanda
+      // ellipsis, timer in fondo) — gli args JSON sono già nel body della card
+      if (askUserQuestionCounter === 0) prepareAskUserCards();
+      askUserQuestionCounter++;
+      // INLINE in fondo alla chat (niente modale overlay): l'utente legge la
+      // cronologia e risponde dal thread
+      void inlineSelect(title, options).then((v) =>
         respond(v === undefined ? { cancelled: true } : { value: v }),
       );
       return;
@@ -1867,7 +1873,7 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       settleSentLoader();
       hideExtensionsBlock();
       const msg = (evt.message as string | undefined) ?? (evt.title as string) ?? "";
-      void showConfirm(msg).then((ok) => respond({ confirmed: ok }));
+      void inlineConfirm(msg).then((ok) => respond({ confirmed: ok }));
       return;
     }
     case "input": {
@@ -1875,18 +1881,18 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       hideExtensionsBlock();
       const title = (evt.title as string | undefined) ?? "";
       const prefill = (evt.prefill as string | undefined) ?? "";
-      void showPrompt(prefill, title).then((v) =>
+      void inlinePrompt(prefill, title).then((v) =>
         respond(v === null ? { cancelled: true } : { value: v }),
       );
       return;
     }
     case "editor": {
-      // testo precompilato (es. modifica): stesso modale di input
+      // testo precompilato (es. modifica): stesso blocco di input
       settleSentLoader();
       hideExtensionsBlock();
       const title = (evt.title as string | undefined) ?? "";
       const prefill = (evt.prefill as string | undefined) ?? "";
-      void showPrompt(prefill, title).then((v) =>
+      void inlinePrompt(prefill, title).then((v) =>
         respond(v === null ? { cancelled: true } : { value: v }),
       );
       return;
@@ -1908,78 +1914,232 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
 
 // modale di selezione (estensione pi, ctx.ui.select): lista opzioni con
 // tastiera ↑/↓ + Invio, Esc/click fuori = annulla
-function showSelect(title: string, options: string[]): Promise<string | undefined> {
+// --- dialoghi estensione INLINE in fondo alla chat ---------------------------
+// L'utente deve poter LEGGERE chat e cronologia mentre risponde: il dialogo
+// (select/confirm/input da extension_ui_request) è un blocco in coda al
+// thread, non un modale overlay. Una richiesta alla volta (le estensioni
+// chiedono sequenzialmente); Esc o ✕ = annulla.
+// Alla risposta il blocco COLLASSA in una card tool (come edit/write): una
+// sola riga in ellipsis con la risposta e il timer secondi in fondo.
+let inlineDialog: { el: HTMLElement; cancel: () => void } | null = null;
+
+function closeInlineDialog(): void {
+  const d = inlineDialog;
+  if (!d) return;
+  inlineDialog = null;
+  d.cancel();
+}
+
+// card base del dialogo inline (titolo + timer live + ✕ + corpo), in fondo al
+// thread. dismiss() = annulla (niente card); collapse() = risposta: la card
+// diventa la riga tool compatta (nome + risposta ellipsis + timer congelato).
+function inlineDialogCard(
+  title: string,
+  body: HTMLElement,
+  onCancel: () => void,
+): {
+  el: HTMLElement;
+  dismiss: () => void;
+  collapse: (answer: string) => void;
+} {
+  const wrapper = addMsg("status");
+  wrapper.className = "msg status inline-dialog-msg";
+  const card = document.createElement("div");
+  card.className = "inline-dialog";
+  const head = document.createElement("div");
+  head.className = "inline-dialog-head";
+  const titleEl = document.createElement("span");
+  titleEl.className = "inline-dialog-title";
+  titleEl.textContent = title || "…";
+  const x = document.createElement("button");
+  x.type = "button";
+  x.className = "inline-dialog-x";
+  x.textContent = "✕";
+  x.title = t("cancel");
+  x.addEventListener("click", onCancel);
+  head.append(titleEl, x);
+  card.append(head, body);
+  wrapper.appendChild(card);
+  // FORZA l'autoscroll: è una domanda in attesa di risposta — va vista anche
+  // se l'utente stava leggendo la cronologia più sopra (addMsg usa
+  // stickToBottom e non strapperebbe la vista)
+  scrollToBottom(true);
+  const cleanup = () => {
+    document.removeEventListener("keydown", esc, true);
+  };
+  const dismiss = () => {
+    cleanup();
+    wrapper.remove();
+  };
+  // risposta: NON creare una seconda card — aggiorna la card tool reale
+  // (quella di toolcall_start, che pi finalizza con il risultato) e rimuovi
+  // il blocco dialogo. Un solo box, con la risposta nella riga ellipsis e il
+  // timer in fondo (la card reale lo fa già girare fino a tool_call_end).
+  const collapse = (answer: string) => {
+    cleanup();
+    // ask_user: aggiorna la card della domanda corrente e chiudi (una card
+    // per domanda, riga → risposta)
+    if (collapseAskUserAnswer(answer)) {
+      wrapper.remove();
+      return;
+    }
+    const cards = Array.from(
+      wrapper.parentElement?.querySelectorAll(".tool-card") ?? [],
+    );
+    let target: HTMLElement | null = null;
+    for (const c of cards) {
+      if (c.querySelector(".tool-name")?.textContent === "ask_user") {
+        target = c as HTMLElement;
+      }
+    }
+    if (target) {
+      const args = target.querySelector<HTMLElement>(".tool-args");
+      // multi-domanda nella stessa call: accoda alla riga (separatore ·)
+      const wasAnswered = target.dataset.answered === "true";
+      target.dataset.answered = "true";
+      if (args) {
+        const text = answer || "—";
+        args.textContent = wasAnswered
+          ? `${args.textContent} · ${text}`
+          : ` ${text}`;
+        args.title = answer;
+      }
+      wrapper.remove();
+      return;
+    }
+    // fallback (dialogo senza card tool): crea la riga compatta nel wrapper
+    const d = document.createElement("details");
+    d.className = "tool-card";
+    const s = document.createElement("summary");
+    const name = document.createElement("span");
+    name.className = "tool-name";
+    name.textContent = "ask_user";
+    const args2 = document.createElement("span");
+    args2.className = "tool-args";
+    args2.textContent = answer || "—";
+    args2.title = answer;
+    s.append(name, args2);
+    // corpo espandibile: domanda + risposta (come gli args degli altri tool)
+    const cb = document.createElement("div");
+    cb.className = "code-block";
+    const ch = document.createElement("div");
+    ch.className = "code-header";
+    const label = document.createElement("span");
+    label.className = "code-label";
+    label.textContent = "ask_user";
+    ch.appendChild(label);
+    const pre = document.createElement("pre");
+    pre.textContent = title ? `${title}\n→ ${answer ?? ""}` : (answer ?? "");
+    cb.append(ch, pre);
+    d.append(s, cb);
+    wrapper.replaceChildren(d);
+  };
+  const esc = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      onCancel();
+    }
+  };
+  document.addEventListener("keydown", esc, true);
+  return { el: wrapper, dismiss, collapse };
+}
+
+// selezione con opzioni (ctx.ui.select / ask_user)
+function inlineSelect(title: string, options: string[]): Promise<string | undefined> {
   return new Promise((resolve) => {
-    const backdrop = document.createElement("div");
-    backdrop.className = "modal-backdrop";
-    const card = document.createElement("div");
-    card.className = "modal";
-    const msg = document.createElement("div");
-    msg.className = "modal-message";
-    msg.textContent = title;
-    const list = document.createElement("div");
-    list.className = "modal-select";
-    let sel = 0;
-    const rows: HTMLButtonElement[] = [];
+    closeInlineDialog();
+    let settled = false;
+    const finish = (v: string | undefined) => {
+      if (settled) return;
+      settled = true;
+      inlineDialog = null;
+      if (v === undefined) dialog.dismiss();
+      else dialog.collapse(v);
+      resolve(v);
+    };
+    const body = document.createElement("div");
+    body.className = "inline-dialog-options";
     for (const opt of options) {
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "modal-option";
-      row.textContent = opt;
-      row.addEventListener("click", () => close(opt));
-      list.appendChild(row);
-      rows.push(row);
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "inline-dialog-option";
+      b.textContent = opt;
+      b.addEventListener("click", () => finish(opt));
+      body.appendChild(b);
     }
     if (options.length === 0) {
       const empty = document.createElement("div");
       empty.className = "pop-empty";
       empty.textContent = t("noOptions");
-      list.appendChild(empty);
+      body.appendChild(empty);
     }
-    const actions = document.createElement("div");
-    actions.className = "modal-actions";
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.className = "btn";
-    cancel.textContent = t("cancel");
-    cancel.addEventListener("click", () => close(undefined));
-    actions.appendChild(cancel);
-    const close = (v: string | undefined) => {
-      backdrop.remove();
-      document.removeEventListener("keydown", key, true);
+    const dialog = inlineDialogCard(title, body, () => finish(undefined));
+    inlineDialog = { el: dialog.el, cancel: () => finish(undefined) };
+  });
+}
+
+// conferma (ctx.ui.confirm)
+function inlineConfirm(message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    closeInlineDialog();
+    let settled = false;
+    const finish = (v: boolean) => {
+      if (settled) return;
+      settled = true;
+      inlineDialog = null;
+      if (!v) dialog.dismiss();
+      else dialog.collapse(t("ok"));
       resolve(v);
     };
-    const highlight = () => {
-      rows.forEach((r, i) => r.classList.toggle("selected", i === sel));
-      rows[sel]?.scrollIntoView({ block: "nearest" });
+    const body = document.createElement("div");
+    body.className = "inline-dialog-options inline-dialog-confirm";
+    const ok = document.createElement("button");
+    ok.type = "button";
+    ok.className = "btn inline-dialog-ok";
+    ok.textContent = t("ok");
+    ok.addEventListener("click", () => finish(true));
+    body.appendChild(ok);
+    const dialog = inlineDialogCard(message, body, () => finish(false));
+    inlineDialog = { el: dialog.el, cancel: () => finish(false) };
+  });
+}
+
+// input di testo (ctx.ui.input / editor / "Other" di ask_user)
+function inlinePrompt(prefill: string, title: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    closeInlineDialog();
+    let settled = false;
+    const finish = (v: string | null) => {
+      if (settled) return;
+      settled = true;
+      inlineDialog = null;
+      if (v === null) dialog.dismiss();
+      else dialog.collapse(v);
+      resolve(v);
     };
-    const key = (e: KeyboardEvent) => {
-      if (rows.length === 0) return;
-      if (e.key === "ArrowDown") {
+    const body = document.createElement("div");
+    body.className = "inline-dialog-prompt";
+    const input = document.createElement("textarea");
+    input.className = "inline-dialog-input";
+    input.rows = 2;
+    input.placeholder = title || t("dialogPlaceholder");
+    input.value = prefill;
+    const send = document.createElement("button");
+    send.type = "button";
+    send.className = "btn inline-dialog-ok";
+    send.textContent = t("send");
+    send.addEventListener("click", () => finish(input.value));
+    body.append(input, send);
+    const dialog = inlineDialogCard(title, body, () => finish(null));
+    inlineDialog = { el: dialog.el, cancel: () => finish(null) };
+    // Invio = invia, Shift+Invio = nuova riga
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        sel = (sel + 1) % rows.length;
-        highlight();
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        sel = (sel - 1 + rows.length) % rows.length;
-        highlight();
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        const v = rows[sel]?.textContent;
-        if (v !== undefined) close(v);
-      } else if (e.key === "Escape") {
-        e.stopPropagation();
-        close(undefined);
+        finish(input.value);
       }
-    };
-    highlight();
-    card.append(msg, list, actions);
-    backdrop.appendChild(card);
-    document.body.appendChild(backdrop);
-    document.addEventListener("keydown", key, true);
-    backdrop.addEventListener("click", (e) => {
-      if (e.target === backdrop) close(undefined);
     });
+    input.focus();
   });
 }
 
@@ -2414,6 +2574,176 @@ const toolOutputPre = new Map<string, HTMLPreElement>();
 // timestamp di partenza dei tool nella cronologia (assistant → toolResult)
 const toolStartTimes = new Map<string, number>();
 
+// --- ask_user: UNA CARD PER DOMANDA -------------------------------------------
+// pi chiama ask_user UNA volta con N domande nel payload; la webview divide la
+// card in N card (header = domanda ellipsis + timer), aggiornate alla risposta
+// (header → risposta, risultato nel corpo). Stato persistito anche al resume.
+interface AskUserInfo {
+  cards: HTMLElement[];
+  questions: string[];
+}
+const askUserInfoByTool = new Map<string, AskUserInfo>();
+let askUserQuestionCounter = 0; // domanda corrente (1-based) del tool in corso
+let currentAskUserToolId = "";
+
+// parsing degli args di ask_user: JSON { questions: [...] } (o singolo oggetto)
+function parseAskUserQuestions(
+  argsJson: string,
+): Array<{ question: string; options?: unknown[] }> | null {
+  try {
+    const parsed = JSON.parse(argsJson);
+    const raw = Array.isArray(parsed?.questions)
+      ? parsed.questions
+      : parsed && typeof parsed === "object"
+        ? [parsed]
+        : [];
+    if (raw.length === 0) return null;
+    return raw.map((q: unknown) => ({
+      question:
+        typeof (q as { question?: unknown })?.question === "string"
+          ? ((q as { question?: string }).question as string)
+          : JSON.stringify(q),
+      options: Array.isArray((q as { options?: unknown })?.options)
+        ? ((q as { options?: unknown[] }).options as unknown[])
+        : undefined,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+// header della card ask_user: nome + testo (domanda o risposta) ellipsis + timer
+function setAskUserHeader(card: HTMLElement, text: string): void {
+  const name = card.querySelector(".tool-name")!;
+  name.textContent = "ask_user";
+  card.querySelector(".tool-args")?.remove();
+  const args = document.createElement("span");
+  args.className = "tool-args";
+  args.textContent = ` ${text || "…"}`;
+  args.title = text;
+  name.after(args);
+}
+
+// divide la card singola in N card (una per domanda), header = domanda
+function splitAskUserCard(
+  firstCard: HTMLElement,
+  toolId: string,
+  questions: Array<{ question: string; options?: unknown[] }>,
+): HTMLElement[] {
+  const cards: HTMLElement[] = [firstCard];
+  firstCard.dataset.askUser = "true";
+  setAskUserHeader(firstCard, questions[0]?.question ?? "");
+  const label = firstCard.querySelector(".code-label");
+  if (label) label.textContent = "ask_user";
+  const firstPre = firstCard.querySelector<HTMLPreElement>(".code-block pre");
+  if (firstPre) firstPre.textContent = questions[0]?.question ?? "";
+  // niente timer per le domande: non servono (rimuovi anche dalla prima card,
+  // che lo aveva da buildToolCard)
+  firstCard.querySelector(".tool-timer")?.remove();
+  let prev = firstCard;
+  for (let i = 1; i < questions.length; i++) {
+    const card = buildToolCard({ id: "", name: "ask_user", args: "" });
+    card.dataset.askUser = "true";
+    setAskUserHeader(card, questions[i]?.question ?? "");
+    const pre = card.querySelector<HTMLPreElement>(".code-block pre");
+    if (pre) pre.textContent = questions[i]?.question ?? "";
+    card.querySelector(".tool-timer")?.remove();
+    prev.insertAdjacentElement("afterend", card);
+    cards.push(card);
+    prev = card;
+  }
+  if (toolId) {
+    askUserInfoByTool.set(toolId, {
+      cards,
+      questions: questions.map((q) => q.question),
+    });
+  }
+  return cards;
+}
+
+// applica fn a tutte le card del tool (ask_user: N card; altri: 1)
+function forEachToolCard(toolId: string, fn: (c: HTMLElement) => void): void {
+  const info = askUserInfoByTool.get(toolId);
+  if (info && info.cards.length > 0) info.cards.forEach(fn);
+  else {
+    const first = toolCardsById.get(toolId);
+    if (first) fn(first);
+  }
+}
+
+// il risultato di ask_user ("Q1: …\nA1: …\n\nQ2: …\nA2: …") viene distribuito
+// per domanda: ogni card riceve il suo segmento nel corpo e la risposta nella
+// riga (stato finale, identico anche al resume)
+function distributeAskUserResult(toolId: string, resultText: string): boolean {
+  const info = askUserInfoByTool.get(toolId);
+  if (!info || info.cards.length === 0) return false;
+  const segments = resultText
+    .split(/(?=Q\d+:)/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  info.cards.forEach((card, i) => {
+    const seg = segments[i];
+    if (!seg) return;
+    const pre = ensureToolOutput(card, `${toolId}-q${i}`);
+    pre.textContent = seg;
+    const m = seg.match(/^A\d+:\s*([\s\S]*)$/m);
+    const g = m?.[1];
+    const answer = g ? g.trim() : "";
+    if (answer) {
+      card.dataset.answered = "true";
+      const args = card.querySelector<HTMLElement>(".tool-args");
+      if (args) {
+        args.textContent = ` ${answer}`;
+        args.title = answer;
+      }
+    }
+  });
+  return true;
+}
+
+// alla risposta del dialogo: aggiorna la card della domanda corrente (header →
+// risposta, risultato subito nel corpo — la distribuzione di
+// tool_execution_end lo sovrascrive con lo stesso contenuto, idempotente)
+function collapseAskUserAnswer(answer: string): boolean {
+  if (!currentAskUserToolId) return false;
+  const info = askUserInfoByTool.get(currentAskUserToolId);
+  const i = askUserQuestionCounter - 1;
+  const card = info?.cards[i];
+  if (!card) return false;
+  card.dataset.answered = "true";
+  const args = card.querySelector<HTMLElement>(".tool-args");
+  if (args) {
+    args.textContent = ` ${answer || "—"}`;
+    args.title = answer;
+  }
+  const question = info.questions[i] ?? "";
+  const pre = ensureToolOutput(card, `${currentAskUserToolId}-q${i}`);
+  pre.textContent = `Q${i + 1}: ${question}\nA${i + 1}: ${answer}`;
+  scrollToBottom();
+  return true;
+}
+
+// primo dialogo di un ask_user: gli args (JSON questions) sono già nel body
+// della card → divide in N card e registra lo stato per le risposte
+function prepareAskUserCards(): void {
+  let card: HTMLElement | null = null;
+  for (const c of Array.from(
+    els.thread.querySelectorAll<HTMLElement>(".tool-card"),
+  )) {
+    if (c.querySelector(".tool-name")?.textContent === "ask_user") card = c;
+  }
+  if (!card) return;
+  let toolId = "";
+  for (const [id, c] of toolCardsById) {
+    if (c === card) toolId = id;
+  }
+  const pre = card.querySelector<HTMLPreElement>(".code-block pre");
+  const questions = parseAskUserQuestions(pre?.textContent ?? "");
+  if (!questions || questions.length === 0) return;
+  currentAskUserToolId = toolId;
+  splitAskUserCard(card, toolId, questions);
+}
+
 // timestamp del messaggio (numero epoch ms o string ISO), 0 se assente/non valido
 function parseTs(msg: unknown): number {
   const raw = (msg as { timestamp?: unknown }).timestamp;
@@ -2493,6 +2823,8 @@ function diffStats(diff: string): DiffStats {
 function renderToolDiff(card: HTMLElement, diff: string): void {
   const s = diffStats(diff);
   if (s.added === 0 && s.removed === 0 && s.modified === 0) return;
+  // rimuovi un eventuale badge precedente (es. il +N del write) prima del nuovo
+  card.querySelector(".tool-diff")?.remove();
   const el = document.createElement("span");
   el.className = "tool-diff";
   const parts: Array<[string, string, string]> = [
@@ -2501,6 +2833,7 @@ function renderToolDiff(card: HTMLElement, diff: string): void {
     ["d-mod", "~", String(s.modified)],
   ];
   for (const [cls, sign, count] of parts) {
+    // MAI zeri: insert puro → +100, delete puro → −200, sostituzione → +N −M
     if (count === "0") continue;
     const p = document.createElement("span");
     p.className = cls;
@@ -2511,24 +2844,49 @@ function renderToolDiff(card: HTMLElement, diff: string): void {
   card.querySelector(".tool-timer")?.before(el);
 }
 
+// righe del contenuto di write: il valore "content" negli args (\n escaped).
+// ATTENZIONE: il modello emette "content": "..." (spazio dopo i due punti)
+// e il contenuto può contenere \" (quote escaped) — regex whitespace-tollerante
+function writeLinesFromArgs(argsJson: string): number {
+  const m = argsJson.match(/"content"\s*:\s*"((?:[^"\\\\]|\\\\.)*)"/);
+  const content = m?.[1] ?? "";
+  return content ? (content.match(/\\n/g) ?? []).length + 1 : 0;
+}
+
+// badge +N delle righe scritte (write non ha diff da pi: lo calcoliamo noi)
+function renderWriteLines(card: HTMLElement, lines: number): void {
+  if (lines <= 0) return;
+  card.querySelector(".tool-diff")?.remove();
+  const el = document.createElement("span");
+  el.className = "tool-diff";
+  const p = document.createElement("span");
+  p.className = "d-add";
+  p.textContent = `+${lines}`;
+  el.appendChild(p);
+  card.querySelector(".tool-timer")?.before(el);
+}
+
+// applica fn a tutte le card del tool (ask_user: N card; altri: 1)
 function handleToolExecution(evt: RpcEvent): void {
   const id = evt.toolCallId as string | undefined;
   if (!id) return;
   const card = toolCardsById.get(id);
   if (!card) return;
-  const pre = ensureToolOutput(card, id);
   if (evt.type === "tool_execution_start") {
-    startToolTimer(card);
+    // timer su TUTTE le card (ask_user ne ha una per domanda)
+    forEachToolCard(id, (c) => startToolTimer(c));
+    const pre = ensureToolOutput(card, id);
     pre.textContent = "";
   } else if (evt.type === "tool_execution_update") {
     const part = evt.partialResult as { content?: unknown } | undefined;
     const text = extractTextContent(part?.content);
     if (text) {
+      const pre = ensureToolOutput(card, id);
       pre.textContent += text;
       scrollToBottom();
     }
   } else if (evt.type === "tool_execution_end") {
-    stopToolTimer(card);
+    forEachToolCard(id, (c) => stopToolTimer(c));
     const res = evt.result as
       { content?: unknown; details?: { diff?: string } } | undefined;
     // righe aggiunte/rimosse/modificate dal diff (edit/write/edit-diff)
@@ -2536,6 +2894,12 @@ function handleToolExecution(evt: RpcEvent): void {
     if (diff) renderToolDiff(card, diff);
     const text = extractTextContent(res?.content);
     if (text) {
+      // ask_user: distribuisci il risultato per domanda (una card ciascuna)
+      if (distributeAskUserResult(id, text)) {
+        scrollToBottom();
+        return;
+      }
+      const pre = ensureToolOutput(card, id);
       pre.textContent = text;
       scrollToBottom();
     }
@@ -2551,10 +2915,19 @@ function renderRpcEvent(evt: RpcEvent): void {
     return;
   }
   if (evt.type === "message_start") {
-    const role = (evt as { message?: { role?: string } }).message?.role;
+    const msg = (evt as {
+      message?: { role?: string; customType?: string; content?: unknown; display?: unknown };
+    }).message;
+    const role = msg?.role;
     if (role === "user") {
       // stearing iniettato (o messaggio inviato normalmente: già reso)
       handleUserMessageStart(evt);
+      return;
+    }
+    if (msg && role === "custom" && msg.display !== false) {
+      // messaggio iniettato da un'ALTRA sessione (es. session-control
+      // `send`): bubble in arrivo — la chat deve mostrarlo
+      renderCustomMessageBubble(msg);
       return;
     }
   }
@@ -2653,7 +3026,19 @@ function renderRpcEvent(evt: RpcEvent): void {
       {
         const tc = action.toolCall;
         if (tc.name) {
+          // nuovo tool ask_user: reset contatore — le card si dividono al
+          // primo select (gli args arrivano con i delta, non qui)
+          if (tc.name === "ask_user") {
+            askUserQuestionCounter = 0;
+            currentAskUserToolId = "";
+          }
           const card = ensureToolCard(tc.name);
+          // il timer parte APPENA nasce la card (generazione args inclusa),
+          // non a tool_execution_start: mentre i contatori diff scorrono il
+          // timer gira già. startToolTimer è idempotente (il secondo avvio a
+          // execution_start è un no-op) e stopToolTimer a execution_end lo
+          // congela.
+          startToolTimer(card);
           // nuovo tool: azzera gli args del tool precedente (multi-tool)
           toolsText = "";
           if (toolsPre) toolsPre.textContent = "";
@@ -2661,6 +3046,17 @@ function renderRpcEvent(evt: RpcEvent): void {
             card.querySelector(".tool-name")!,
             toolSummary(tc.name, "", workspacePath ?? undefined),
           );
+          // write/edit: span args VUOTO già da ora — senza, durante lo
+          // streaming il badge diff (flex:0) resta attaccato al nome a
+          // sinistra; l'args (flex:1, anche vuoto) lo spinge a destra prima
+          // del timer, come a fine esecuzione
+          if (tc.name === "write" || tc.name === "edit") {
+            if (!card.querySelector(".tool-args")) {
+              const argsEl = document.createElement("span");
+              argsEl.className = "tool-args";
+              card.querySelector(".tool-name")?.after(argsEl);
+            }
+          }
           const label = card.querySelector(".code-label");
           if (label) label.textContent = tc.name;
           if (tc.id) toolCardsById.set(tc.id, card);
@@ -2673,24 +3069,64 @@ function renderRpcEvent(evt: RpcEvent): void {
       ensureToolCard();
       toolsText += action.delta;
       if (toolsPre) toolsPre.textContent = toolsText;
+      // write: contatore LIVE delle righe — qui i delta SCORRONO davvero (il
+      // contenuto è lungo) e il numero sale in tempo reale. Gli edit NO (args
+      // in raffica): per loro resta solo il diff esatto a fine esecuzione.
+      if (toolsEl) {
+        const tName = toolsEl.querySelector(".tool-name")?.textContent;
+        if (tName === "write") {
+          const lines = (toolsText.match(/\\n/g) ?? []).length;
+          let badge = toolsEl.querySelector<HTMLElement>(".tool-diff");
+          if (!badge) {
+            badge = document.createElement("span");
+            badge.className = "tool-diff";
+            const timerEl = toolsEl.querySelector(".tool-timer");
+            if (timerEl) timerEl.before(badge);
+            else toolsEl.querySelector("summary")?.appendChild(badge);
+          }
+          let p = badge.querySelector<HTMLElement>(".d-add");
+          if (!p) {
+            p = document.createElement("span");
+            p.className = "d-add";
+            badge.appendChild(p);
+          }
+          p.textContent = `+${lines}`;
+        }
+      }
       scrollToBottom();
       break;
     case "tool_call":
       settleSentLoader();
       hideExtensionsBlock();
       if (toolsEl) {
-        renderToolHeader(
-          toolsEl.querySelector(".tool-name")!,
-          toolSummary(
-            action.toolCall.name,
-            action.toolCall.args,
-            workspacePath ?? undefined,
-          ),
-        );
+        const tcName = action.toolCall.name;
+        // ask_user: la riga mostra la domanda/risposta (card divise o risposta
+        // dal dialogo inline) — NON sovrascriverla con gli args al tool_call_end
+        if (toolsEl.dataset.answered !== "true" && toolsEl.dataset.askUser !== "true") {
+          renderToolHeader(
+            toolsEl.querySelector(".tool-name")!,
+            toolSummary(tcName, action.toolCall.args, workspacePath ?? undefined),
+          );
+        }
         const label = toolsEl.querySelector(".code-label");
-        if (label) label.textContent = action.toolCall.name;
+        if (label) label.textContent = tcName;
         if (action.toolCall.id)
           toolCardsById.set(action.toolCall.id, toolsEl as HTMLElement);
+        // write: pi NON restituisce il diff (solo "wrote X bytes") — il +N
+        // delle righe scritte lo calcola la webview dal contenuto negli args.
+        // Fallback su toolsText (JSON grezzo dai delta): a volte il tool_call
+        // arriva con args wrappati come stringa (JSON.stringify di una stringa)
+        // e il regex sul contenuto non matcha.
+        if (tcName === "write") {
+          const argsJson =
+            typeof action.toolCall.args === "string"
+              ? action.toolCall.args
+              : JSON.stringify(action.toolCall.args ?? {});
+          let lines = writeLinesFromArgs(argsJson);
+          if (lines <= 0) lines = writeLinesFromArgs(toolsText);
+          if (lines <= 0 && toolsPre) lines = writeLinesFromArgs(toolsPre.textContent ?? "");
+          renderWriteLines(toolsEl, lines);
+        }
       }
       break;
     case "message_end":
@@ -2710,6 +3146,42 @@ function addStatusLine(text: string): void {
   // NB: addMsg scolla PRIMA che il box esista (wrapper vuoto): il contenuto
   // multilinea lo fa crescere dopo → re-scroll qui, altrimenti il box resta
   // tagliato sotto il fondo visibile ("quasi in fondo ma non del tutto")
+  scrollToBottom();
+}
+
+// card per messaggi INIETTATI da un'altra sessione (role custom, es.
+// session-control): collassabile come i tool (<details>) — UNA riga con
+// ellipsis chiusa, click per espandere, markdown interpretato dentro
+function buildSessionCard(customType: string, text: string): HTMLElement {
+  const d = document.createElement("details");
+  d.className = "session-card";
+  const s = document.createElement("summary");
+  const tag = document.createElement("span");
+  tag.className = "session-tag";
+  tag.textContent = customType;
+  const preview = document.createElement("span");
+  preview.className = "session-preview";
+  preview.textContent = text; // CSS: nowrap + ellipsis → una riga
+  preview.title = text;
+  s.append(tag, preview);
+  const body = document.createElement("div");
+  body.className = "session-body";
+  body.innerHTML = renderMarkdown(text);
+  d.append(s, body);
+  return d;
+}
+
+function renderCustomMessageBubble(msg: {
+  customType?: string;
+  content?: unknown;
+}): void {
+  const raw = extractTextContent(msg.content);
+  const text = raw.replace(/<sender_info>[\s\S]*?<\/sender_info>/g, "").trim();
+  if (!text) return;
+  const wrapper = addMsg("user");
+  const card = buildSessionCard(msg.customType ?? "session", text);
+  card.style.width = "100%";
+  wrapper.appendChild(card);
   scrollToBottom();
 }
 
@@ -2772,6 +3244,9 @@ function renderHistory(messages: unknown[]): void {
   clearToolTimers();
   toolOutputPre.clear();
   toolStartTimes.clear();
+  askUserInfoByTool.clear();
+  askUserQuestionCounter = 0;
+  currentAskUserToolId = "";
   // timestamp dell'ultimo messaggio processato (per stimare la durata del
   // pensiero: gap dal messaggio precedente al messaggio assistant corrente)
   let lastTs = 0;
@@ -2791,6 +3266,20 @@ function renderHistory(messages: unknown[]): void {
       bubble.className = "bubble user";
       bubble.textContent = contentToText(msg.content);
       wrapper.appendChild(bubble);
+    } else if (msg.role === "custom" && (msg as { display?: unknown }).display !== false) {
+      // messaggio iniettato da un'altra sessione (session-control send):
+      // card collassabile come i tool, anche in cronologia (altrimenti
+      // sparirebbe al reload)
+      const raw = contentToText(msg.content);
+      const text = raw.replace(/<sender_info>[\s\S]*?<\/sender_info>/g, "").trim();
+      if (!text) continue;
+      const wrapper = addMsg("user");
+      const card = buildSessionCard(
+        (msg as { customType?: string }).customType ?? "session",
+        text,
+      );
+      card.style.width = "100%";
+      wrapper.appendChild(card);
     } else if (msg.role === "assistant") {
       const blocks = Array.isArray(msg.content) ? (msg.content as HistoryBlock[]) : [];
       const assistantTs = parseTs(msg);
@@ -2818,6 +3307,19 @@ function renderHistory(messages: unknown[]): void {
           // risultato (stessa visualizzazione del runtime)
           if (b.id) toolCardsById.set(b.id, card);
           if (b.id && assistantTs > 0) toolStartTimes.set(b.id, assistantTs);
+          // ask_user con N domande → N card (header = domanda, poi risposta)
+          if (b.name === "ask_user" && b.id) {
+            const questions = parseAskUserQuestions(argsJson);
+            if (questions && questions.length > 0) {
+              const cards = splitAskUserCard(card, b.id, questions);
+              toolCards.push(...cards);
+              continue;
+            }
+          }
+          // write: +N righe (pi non salva il diff → lo calcola dagli args)
+          if (b.name === "write") {
+            renderWriteLines(card, writeLinesFromArgs(argsJson));
+          }
           toolCards.push(card);
         }
       }
@@ -2856,17 +3358,33 @@ function renderHistory(messages: unknown[]): void {
       const tcId = (msg as { toolCallId?: string }).toolCallId;
       const card = tcId ? toolCardsById.get(tcId) : undefined;
       if (card && tcId) {
-        // risultato DENTRO la card del tool (come nel runtime)
-        const pre = ensureToolOutput(card, tcId);
-        pre.textContent = output;
-        // durata reale del tool: timestamp toolResult − timestamp assistant
         const start = toolStartTimes.get(tcId);
         const ts = parseTs(msg);
-        if (start !== undefined && ts > 0 && ts >= start) {
-          const timerEl = card.querySelector<HTMLElement>(".tool-timer");
-          if (timerEl) timerEl.textContent = fmtToolTime(ts - start);
+        // ask_user: distribuisci il risultato per domanda (header → risposta,
+        // segmento nel corpo) e timer su TUTTE le card — stato finale al resume
+        if (distributeAskUserResult(tcId, output)) {
+          if (start !== undefined && ts > 0 && ts >= start) {
+            forEachToolCard(tcId, (c) => {
+              const timerEl = c.querySelector<HTMLElement>(".tool-timer");
+              if (timerEl) timerEl.textContent = fmtToolTime(ts - start);
+            });
+          }
+          scrollToBottom();
+        } else {
+          // risultato DENTRO la card del tool (come nel runtime)
+          const pre = ensureToolOutput(card, tcId);
+          pre.textContent = output;
+          // diff badge (edit): il diff è nei details a livello message
+          const det = (msg as { details?: { diff?: string } }).details;
+          const diff = det?.diff;
+          if (diff) renderToolDiff(card, diff);
+          // durata reale del tool: timestamp toolResult − timestamp assistant
+          if (start !== undefined && ts > 0 && ts >= start) {
+            const timerEl = card.querySelector<HTMLElement>(".tool-timer");
+            if (timerEl) timerEl.textContent = fmtToolTime(ts - start);
+          }
+          scrollToBottom();
         }
-        scrollToBottom();
       } else {
         // nessun match (es. sessioni vecchie): card risultato separata
         const wrapper = addMsg("assistant");
@@ -3645,6 +4163,7 @@ function sendOrStop(): void {
   scrollToBottom(true);
   armExtensionsBlock(); // blocco "Extensions" se il primo output tarda > 3s
   els.input.value = "";
+  resetInputHeight();
   clearAttachments();
   els.input.focus();
 }
@@ -3677,6 +4196,7 @@ function submitSteering(): void {
   renderSteerPanel();
   updateSteerPlaceholder();
   els.input.value = "";
+  resetInputHeight();
   clearAttachments();
   els.input.focus();
 }
@@ -3712,14 +4232,16 @@ function updateSteerPlaceholder(): void {
       : t("messagePlaceholder");
 }
 
-// pannello tra thread e composer: mostra SOLO i messaggi ancora da inviare
-// (coda ombra). Appena un messaggio viene consegnato a pi sparisce dalla box;
-// quando la coda si svuota il pannello si nasconde.
+// pannello tra thread e composer: mostra i messaggi ANCORA da inviare (coda
+// ombra, stile normale) e quelli GIÀ consegnati a pi ma non ancora iniettati
+// (steerPending: stile muted + spinner, NON più dequeuabili — la coda di pi
+// non è mutabile via RPC). Appena pi li processa (message_start) spariscono.
 function renderSteerPanel(): void {
   const panel = els.steerPanel;
   const wasHidden = panel.hidden;
   panel.textContent = "";
-  if (steerShadow.length === 0) {
+  const total = steerShadow.length + steerPending.length;
+  if (total === 0) {
     panel.hidden = true;
     return;
   }
@@ -3733,22 +4255,42 @@ function renderSteerPanel(): void {
   const title = document.createElement("span");
   title.className = "steer-title";
   title.textContent = tpl(t("steerQueueCount"), {
-    n: String(steerShadow.length),
+    n: String(total),
   });
   head.appendChild(title);
   const dequeue = document.createElement("button");
   dequeue.type = "button";
   dequeue.className = "steer-dequeue";
   dequeue.textContent = t("steerDequeue");
+  // solo i messaggi NON ancora inviati tornano nell'editor: gli in-invio
+  // sono già nelle mani di pi e non possono essere recuperati
+  dequeue.title = t("steerDequeueHint");
+  dequeue.disabled = steerShadow.length === 0;
   dequeue.addEventListener("click", () => dequeueSteering());
   head.appendChild(dequeue);
   panel.appendChild(head);
-  for (const m of steerShadow) appendSteerRow(panel, m.text);
+  // ORDINE DI INSERIMENTO PRESERVATO: coda ombra e in-invio uniti per sequenza
+  // (id st-N) — msg1 (in invio) resta al suo posto, msg2, msg3 sotto
+  const seqOf = (m: QueuedMessage): number => {
+    const n = /^st-(\d+)$/.exec(m.id);
+    return n ? Number(n[1]) : 0;
+  };
+  const merged = [...steerShadow, ...steerPending].sort(
+    (a, b) => seqOf(a) - seqOf(b),
+  );
+  for (const m of merged) {
+    appendSteerRow(panel, m.text, steerPending.includes(m));
+  }
 }
 
-function appendSteerRow(panel: HTMLElement, text: string): void {
+function appendSteerRow(panel: HTMLElement, text: string, sending: boolean): void {
   const row = document.createElement("div");
-  row.className = "steer-row";
+  row.className = sending ? "steer-row steer-row-sending" : "steer-row";
+  if (sending) {
+    const icon = document.createElement("span");
+    icon.className = "steer-sending-icon";
+    row.appendChild(icon);
+  }
   const tspan = document.createElement("span");
   tspan.className = "steer-text";
   tspan.textContent = text;
@@ -3766,6 +4308,7 @@ function dequeueSteering(): void {
   persistSteerQueue();
   const current = els.input.value;
   els.input.value = current.trim() ? `${texts}\n\n${current}` : texts;
+  autogrowInput();
   renderSteerPanel();
   els.input.focus();
 }
@@ -3810,6 +4353,34 @@ function deliverSteering(): void {
 // riconciliazione con la coda nativa di pi: NON più mostrata — quando un
 // messaggio viene consegnato sparisce subito dalla box. Resta solo la pulizia
 // interna (message_start rimuove l'item consegnato e mostra la bolla in chat).
+
+// gli "in invio" rimasti fermi quando pi è idle: pi li ha accodati (steer
+// arrivato dopo il check di continuation del turno) ma non parte MAI un turno
+// per iniettarli (la coda steer di pi viene drenata solo all'inizio del turno
+// successivo). Se pi ora non li ha più in coda (pendingMessageCount 0) sono
+// persi/scartati → tornano nella coda ombra e vengono rilanciati come prompt
+// NORMALI (idle → pi li processa subito, niente duplicati perché pi non li ha).
+async function reconcileStuckPending(): Promise<void> {
+  if (steerPending.length === 0) return;
+  try {
+    const res = await rpcRequest(rpc.getState(), "st-reconcile", 4000);
+    if (!res.success) return;
+    const data = res.data as
+      | { pendingMessageCount?: number; isStreaming?: boolean }
+      | undefined;
+    if (!data) return;
+    if (data.isStreaming === false && (data.pendingMessageCount ?? 0) === 0) {
+      const lost = steerPending;
+      steerPending = [];
+      steerShadow.unshift(...lost);
+      persistSteerQueue();
+      renderSteerPanel();
+      deliverSteering(); // idle → prompt normali → processati subito
+    }
+  } catch {
+    // timeout / errore: lascia stare, la prossima occasione riprova
+  }
+}
 
 // messaggio utente iniettato da pi (message_start ruolo user): se era un item
 // in steerPending viene rimosso e mostrato in chat (non era ottimistico); se
@@ -4550,7 +5121,20 @@ els.input.addEventListener("keydown", (e) => {
 els.input.addEventListener("input", () => {
   if (historyIndex >= 0) exitHistoryPreview();
   updateCmdDropdown();
+  autogrowInput(); // 2 righe di default → cresce fino a 5 digitando
 });
+
+// --- autogrow input: 2 righe di default, max 5 righe (line-height 22.5 +
+// padding 15 → min 60px, max 128px; i valori rispecchiano il CSS) -----------
+const INPUT_MAX_HEIGHT = 128;
+function autogrowInput(): void {
+  const el = els.input;
+  el.style.height = "auto";
+  el.style.height = Math.min(el.scrollHeight, INPUT_MAX_HEIGHT) + "px";
+}
+function resetInputHeight(): void {
+  els.input.style.height = "";
+}
 
 // palette comandi: Ctrl+K (o Meta+K su macOS)
 document.addEventListener("keydown", (e) => {
@@ -4571,6 +5155,9 @@ function trackWorking(evt: RpcEvent): void {
     working = false;
     settleSentLoader(); // senza risposta: congela comunque il tempo atteso
     hideExtensionsBlock();
+    // ferma i timer dei tool rimasti attivi (es. tool ABORTATO dallo STOP:
+    // niente tool_execution_end → il timer girerà all'infinito)
+    clearToolTimers();
     void fetchSessionStats(); // context/token aggiornati a fine turno
     void fetchBalance(); // il saldo cambia dopo l'uso
     updateSendButton();
@@ -4580,6 +5167,9 @@ function trackWorking(evt: RpcEvent): void {
     void refreshSessionTitle();
     // stearing: da idle si consegna il prossimo messaggio accodato
     deliverSteering();
+    // stearing: riconcilia gli "in invio" rimasti fermi (pi idle non li ha
+    // più in coda → persi/scartati → torna in coda ombra e rilancio)
+    void reconcileStuckPending();
   }
 }
 

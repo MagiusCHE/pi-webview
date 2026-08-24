@@ -109,6 +109,9 @@
     "applyCliHint": "Applica riavvia pi con la nuova riga di comando.",
     "applyCliRestarting": "pi in riavvio…",
     "cliNoFlags": "Nessun flag CLI registrato.",
-    "cliStringNotSupported": "flag con valore: non ancora supportato"
+    "cliStringNotSupported": "flag con valore: non ancora supportato",
+    "steerDequeueHint": "Solo i messaggi non ancora inviati: gli in-invio sono già in mano a pi.",
+    "ok": "OK",
+    "dialogPlaceholder": "Scrivi qui…"
   }
 }

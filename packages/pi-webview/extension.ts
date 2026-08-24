@@ -266,6 +266,34 @@ export default function (pi: PiApi): void {
     }
   });
 
+  // compattazione fallita/annullata (pi 0.84.3+): inoltra il MOTIVO reale
+  // alla UI (webview → status line in chat; TUI → notifica) — l'evento ha
+  // reason (aborted/error), retryState, source e errorMessage, che il solo
+  // compaction_end non distingue
+  pi.on("session_compact_failed", (event, ctx) => {
+    const ui = (ctx as { ui?: { notify: Notify } }).ui;
+    if (!ui?.notify) return;
+    const e = event as {
+      reason?: string;
+      source?: string;
+      retryState?: string;
+      errorMessage?: string;
+    };
+    const reason =
+      e.reason === "aborted"
+        ? "aborted"
+        : e.reason === "error"
+          ? "failed"
+          : (e.reason ?? "failed");
+    const source = e.source ? ` (${e.source})` : "";
+    const retry = e.retryState ? ` — retry: ${e.retryState}` : "";
+    const err = e.errorMessage ? `: ${e.errorMessage}` : "";
+    ui.notify(
+      `pi-webview: compaction ${reason}${source}${retry}${err}`,
+      "warning",
+    );
+  });
+
   // registrazione differita: getCommands() è uno stub che LANCIAA durante il
   // load ("Extension runtime not initialized") → il dedupe può avvenire solo
   // dopo il bind, al primo session_start (che rpc-mode attende PRIMA di

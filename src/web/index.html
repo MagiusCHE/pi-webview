@@ -89,6 +89,18 @@
           <label id="settings-version-label">Versione</label>
           <span id="settings-version" class="settings-version">–</span>
         </div>
+        <!-- impostazioni di pi.dev: blocco 2 (via /settings, da pi.dev) →
+             placeholder; blocco 3 (flag CLI di lancio) → righe dinamiche
+             dai flag registrati da pi+estensioni + pulsante Applica -->
+        <div class="settings-section">
+          <div class="settings-section-title" id="settings-pidev-title">pi.dev</div>
+          <div class="settings-note" id="settings-pidev-note">…</div>
+          <div id="cli-flags" class="settings-cli-flags"></div>
+          <div class="settings-row" id="cli-apply-row" hidden>
+            <button id="cli-apply" class="btn-primary" type="button">Applica</button>
+            <span class="settings-hint" id="cli-apply-hint">…</span>
+          </div>
+        </div>
       </div>
     </div>
 

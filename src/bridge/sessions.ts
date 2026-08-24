@@ -16,7 +16,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
-import type { SessionInfo } from "../ide/protocol.ts";
+import type { SessionInfo, CliFlags } from "../ide/protocol.ts";
 
 export function defaultSessionDir(): string {
   return join(homedir(), ".pi", "agent", "sessions");
@@ -253,4 +253,73 @@ function decodeProjectFolder(name: string): string | null {
 function encodeProjectFolder(path: string): string {
   const inner = path.replace(/^\//, "").replace(/\//g, "-");
   return `--${inner}--`;
+}
+
+// --- flag CLI per-sessione (blocco 3 settings) --------------------------------
+// Salvati come ENTRY CUSTOM nel file jsonl della sessione (NON nei settings,
+// che crescerebbero per ogni sessione): formato identico a pi.appendCustomEntry
+// ({type:"custom", customType:"pi-webview-cli-flags", data:{...}}). Le entry
+// custom non hanno role → la cronologia le ignora. L'ULTIMA entry vince.
+
+const CLI_FLAGS_CUSTOM_TYPE = "pi-webview-cli-flags";
+
+/** legge i flag CLI attivi della sessione (l'ultima entry custom vince) */
+export function readSessionCliFlags(path: string): CliFlags {
+  if (!existsSync(path)) return {};
+  try {
+    const content = readFileSync(path, "utf-8");
+    let flags: CliFlags = {};
+    for (const raw of content.split("\n")) {
+      if (!raw.trim()) continue;
+      let e: { type?: string; customType?: string; data?: unknown };
+      try {
+        e = JSON.parse(raw) as typeof e;
+      } catch {
+        continue;
+      }
+      if (
+        e.type === "custom" &&
+        e.customType === CLI_FLAGS_CUSTOM_TYPE &&
+        e.data &&
+        typeof e.data === "object"
+      ) {
+        flags = e.data as CliFlags;
+      }
+    }
+    return flags;
+  } catch {
+    return {};
+  }
+}
+
+/** scrive i flag CLI attivi della sessione (append di una entry custom) */
+export function writeSessionCliFlags(path: string, flags: CliFlags): void {
+  if (!existsSync(path)) return;
+  try {
+    // parentId = id dell'ultima entry (il foglio corrente), come pi fa con
+    // appendCustomEntry (parentId: leafId)
+    let parentId: string | undefined;
+    const lines = readFileSync(path, "utf-8").trimEnd().split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const t = (lines[i] ?? "").trim();
+      if (!t) continue;
+      try {
+        parentId = (JSON.parse(t) as { id?: string }).id;
+      } catch {
+        // riga non parseabile: continua a risalire
+      }
+      break;
+    }
+    const entry = {
+      type: "custom",
+      customType: CLI_FLAGS_CUSTOM_TYPE,
+      data: flags,
+      id: randomUUID().slice(0, 8),
+      ...(parentId ? { parentId } : {}),
+      timestamp: new Date().toISOString(),
+    };
+    appendFileSync(path, JSON.stringify(entry) + "\n");
+  } catch {
+    // best effort: mai rompere l'Applica per una scrittura fallita
+  }
 }

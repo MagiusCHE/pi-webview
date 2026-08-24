@@ -53,6 +53,10 @@ export class PiPanel extends PiWebviewHost {
     this.webview = this.panel.webview;
     try {
       this.panel.webview.html = this.webviewHtml(this.panel.webview);
+    // pannello in AREA EDITOR: la selezione allegata è inaffidabile (il focus
+    // sul pannello azzera il contesto dell'editor attivo) → inibisci il blocco
+    // selezione in questa webview (evento panel_mode)
+    this.post({ channel: "rpc", payload: { type: "panel_mode", enabled: true } });
     } catch (err) {
       // UI non caricabile (es. dist/web mancante nel vsix): MAI lasciare un
       // pannello vuoto orfano — dispose e rilancia (openNew/restore mostrano

@@ -11,6 +11,8 @@ import type {
   UserConfig,
   SessionInfo,
   SessionListResult,
+  CliFlags,
+  CliFlagInfo,
 } from "../ide/protocol.ts";
 import { rpc } from "../ide/protocol.ts";
 import {
@@ -65,6 +67,12 @@ const els = {
   themeLabel: document.getElementById("settings-theme-label") as HTMLLabelElement,
   settingsVersionLabel: document.getElementById("settings-version-label") as HTMLLabelElement,
   settingsVersion: document.getElementById("settings-version") as HTMLSpanElement,
+  pidevTitle: document.getElementById("settings-pidev-title") as HTMLDivElement,
+  pidevNote: document.getElementById("settings-pidev-note") as HTMLDivElement,
+  cliFlags: document.getElementById("cli-flags") as HTMLDivElement,
+  cliApplyRow: document.getElementById("cli-apply-row") as HTMLDivElement,
+  cliApply: document.getElementById("cli-apply") as HTMLButtonElement,
+  cliApplyHint: document.getElementById("cli-apply-hint") as HTMLSpanElement,
   themeRow: document.querySelector(".theme-row") as HTMLDivElement,
   newChat: document.getElementById("btn-new-chat") as HTMLButtonElement,
   thread: document.getElementById("thread") as HTMLElement,
@@ -369,10 +377,109 @@ function refreshVersionInfo(): void {
   });
 }
 
+// --- blocco 3: flag CLI di pi (dinamici dai flag registrati) ----------------
+
+let savedCliValues: CliFlags = {};
+let cliDirty = false;
+
+// valori correnti nel form (flag → valore): solo quelli REALMENTE impostati
+// (checkbox spuntate, stringhe non vuote) — il confronto col salvato non deve
+// sporcarsi con i default (checkbox false / input string vuoti)
+function currentCliValues(): CliFlags {
+  const values: CliFlags = {};
+  for (const input of els.cliFlags.querySelectorAll<HTMLInputElement>("input[data-flag]")) {
+    const name = input.dataset.flag ?? "";
+    if (!name) continue;
+    if (input.type === "checkbox") {
+      if (input.checked) values[name] = true;
+    } else if (input.value !== "") {
+      values[name] = input.value;
+    }
+  }
+  return values;
+}
+
+function setCliDirty(): void {
+  cliDirty = JSON.stringify(currentCliValues()) !== JSON.stringify(savedCliValues);
+  els.cliApplyRow.hidden = !cliDirty;
+  if (cliDirty) els.cliApplyHint.textContent = t("applyCliHint");
+}
+
+// righe dinamiche: SOLO i flag esistenti (se l'estensione non c'è, il flag
+// non appare); boolean → checkbox, string → input disabilitato (presto)
+function renderCliFlags(available: CliFlagInfo[], values: CliFlags): void {
+  els.cliFlags.textContent = "";
+  if (available.length === 0) {
+    const none = document.createElement("div");
+    none.className = "settings-note";
+    none.textContent = t("cliNoFlags");
+    els.cliFlags.appendChild(none);
+    return;
+  }
+  for (const flag of available) {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+    const label = document.createElement("label");
+    label.textContent = `--${flag.name}`;
+    if (flag.description) label.title = flag.description;
+    row.appendChild(label);
+    if (flag.type === "boolean") {
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.className = "field-checkbox";
+      input.dataset.flag = flag.name;
+      input.checked = values[flag.name] === true;
+      input.addEventListener("change", setCliDirty);
+      row.appendChild(input);
+    } else {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "field-input";
+      input.disabled = true;
+      input.placeholder = t("cliStringNotSupported");
+      input.dataset.flag = flag.name;
+      row.appendChild(input);
+    }
+    els.cliFlags.appendChild(row);
+  }
+  setCliDirty();
+}
+
+function refreshCliFlags(): void {
+  els.pidevTitle.textContent = "pi.dev";
+  els.pidevNote.textContent = t("settingsPiDevNote");
+  void ideRequest({ type: "getCliFlags" }).then((res) => {
+    if (!res?.ok) return;
+    const data = res.data as { available?: CliFlagInfo[]; values?: CliFlags } | undefined;
+    savedCliValues = data?.values ?? {};
+    renderCliFlags(data?.available ?? [], savedCliValues);
+  });
+}
+
+// Applica: con elaborazione in corso → conferma + dequeue+stop (come lo STOP),
+// poi setCliFlags → il companion riavvia pi in modo trasparente (connection_closed
+// reason restart + pi_restarted → re-init senza reload)
+els.cliApply.addEventListener("click", () => {
+  void (async () => {
+    const doApply = async (): Promise<void> => {
+      els.cliApply.disabled = true;
+      els.cliApplyHint.textContent = t("applyCliRestarting");
+      await ideRequest({ type: "setCliFlags", flags: currentCliValues() });
+    };
+    if (working) {
+      const ok = await showConfirm(t("applyCliWarn"));
+      if (!ok) return;
+      stopWorking(); // dequeue + abort come al solito
+    }
+    await doApply();
+  })();
+});
+
 function openSettings(): void {
   els.settingsModal.hidden = false;
   els.settingsBtn.setAttribute("aria-expanded", "true");
   refreshVersionInfo();
+  refreshCliFlags();
 }
 
 function closeSettings(): void {
@@ -2462,6 +2569,13 @@ function renderRpcEvent(evt: RpcEvent): void {
     // stearing: dopo la compattazione riparte la consegna della coda
     deliverSteering();
   } else if (evt.type === "connection_closed") {
+    if (evt.reason === "restart") {
+      // riavvio VOLUTO (Applica CLI flags): pi sta ripartendo con la nuova
+      // riga di comando → niente errore; il re-init arriva con pi_restarted
+      piRestarting = true;
+      updateSendButton();
+      return;
+    }
     // pi è morto (processo terminato): sblocca tutto e avvisa
     if (compacting) finishCompaction(true, (evt.errorMessage as string) ?? undefined);
     hideSentLoader();
@@ -2469,6 +2583,26 @@ function renderRpcEvent(evt: RpcEvent): void {
     working = false;
     updateSendButton();
     addStatusLine(t("piDied"));
+  } else if (evt.type === "panel_mode") {
+    // webview in un PANNELLO editor (non sidebar): la selezione allegata è
+    // inaffidabile (il focus sul pannello azzera il contesto dell'editor
+    // attivo) → inibisci il blocco selezione
+    panelMode = evt.enabled === true;
+    if (panelMode) els.selectionPanel.hidden = true;
+  } else if (evt.type === "pi_restarted") {
+    // riavvio completato: ri-inizializza SENZA reload (trasparente): stato
+    // sessione + config; la sessione corrente è ripresa dal companion con
+    // --session, currentSessionPath è ancora in memoria
+    piRestarting = false;
+    updateSendButton();
+    // reset UI Applica: i valori applicati sono ora quelli salvati
+    els.cliApply.disabled = false;
+    els.cliApplyRow.hidden = true;
+    els.cliApplyHint.textContent = "";
+    savedCliValues = currentCliValues();
+    if (compacting) finishCompaction(true, "riavvio");
+    requestConfig();
+    if (!demoMode) void refreshSessions();
   }
   // richieste UI delle estensioni pi (ctx.ui.*) → modali webview (standalone)
   if (evt.type === "extension_ui_request") {
@@ -2580,18 +2714,25 @@ function addStatusLine(text: string): void {
 }
 
 function renderIdeEvent(evt: IdeEvent): void {
-  if (evt.type === "selection_changed") {
-    // blocco dedicato (una riga, come lo stearing): appare con la selezione
-    const n = evt.ranges?.length ?? 0;
-    const base = evt.filePath?.split(/[\\/]/).pop() ?? evt.filePath ?? "?";
-    els.selectionPanel.textContent = `${t("selection")}: ${base} (${n})`;
-    els.selectionPanel.title = `${t("selection")}: ${evt.filePath ?? "?"} — ${n} ${t("ranges")}`;
-    const wasHidden = els.selectionPanel.hidden;
-    els.selectionPanel.hidden = false;
-    if (wasHidden) scrollToBottom(true); // il blocco copre l'ultimo messaggio
-  } else if (evt.type === "selection_cleared") {
-    els.selectionPanel.hidden = true;
-  } else if (evt.type === "at_mentioned") {
+  if (evt.type === "selection_changed" || evt.type === "selection_cleared") {
+    // pannello editor: blocco selezione INIBITO (il focus sul pannello
+    // azzera il contesto dell'editor attivo → mostrarlo sarebbe confuso)
+    if (panelMode) return;
+    if (evt.type === "selection_changed") {
+      // blocco dedicato (una riga, come lo stearing): appare con la selezione
+      const n = evt.ranges?.length ?? 0;
+      const base = evt.filePath?.split(/[\\/]/).pop() ?? evt.filePath ?? "?";
+      els.selectionPanel.textContent = `${t("selection")}: ${base} (${n})`;
+      els.selectionPanel.title = `${t("selection")}: ${evt.filePath ?? "?"} — ${n} ${t("ranges")}`;
+      const wasHidden = els.selectionPanel.hidden;
+      els.selectionPanel.hidden = false;
+      if (wasHidden) scrollToBottom(true); // il blocco copre l'ultimo messaggio
+    } else {
+      els.selectionPanel.hidden = true;
+    }
+    return;
+  }
+  if (evt.type === "at_mentioned") {
     addStatusLine(`@ ${evt.filePath ?? "?"}`);
   }
 }
@@ -2896,6 +3037,10 @@ function startCompactionFromUi(): void {
 // --- pulsante invio/stop e info box (modello, credito, trust) -----------------
 
 let working = false;
+// riavvio VOLUTO di pi in corso (Applica CLI flags): la send resta disabilitata
+let piRestarting = false;
+// webview in un pannello editor (non sidebar): il blocco selezione è inibito
+let panelMode = false;
 let modelInfoText = "";
 let creditText = ""; // pi non espone il credito rimanente: resta vuoto finché disponibile
 let creditBalance = 0; // saldo numerico (per la soglia di colore della chip)
@@ -2922,10 +3067,12 @@ let currentModel: { provider?: string; name?: string; id?: string } | null = nul
 function updateSendButton(): void {
   // il pulsante è SEMPRE Invia (mai più STOP): durante l'elaborazione assume
   // un'evidenza diversa (classe .working) e Invio accoda (stearing); lo STOP
-  // sta nel blocco pensiero (piano 0004)
+  // sta nel blocco pensiero (piano 0004). Durante il riavvio di pi (Applica
+  // CLI flags) è disabilitato.
   els.send.innerHTML = sendIcon();
   els.send.title = working ? t("steerSendHint") : t("send");
   els.send.classList.toggle("working", working);
+  els.send.disabled = piRestarting;
 }
 
 function renderModelInfo(): void {

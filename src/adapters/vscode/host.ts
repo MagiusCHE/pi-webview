@@ -3,9 +3,13 @@
 // le richieste IDE (config, sessioni, trust, allegati, selezione).
 
 import * as vscode from "vscode";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { existsSync, readFileSync } from "node:fs";
 import { PiProcess } from "../../bridge/pi-process.ts";
 import { resolvePi, checkBashOnWindows } from "../../bridge/spawn.ts";
+
+const execFileAsync = promisify(execFile);
 import { ConfigStore, readCompactionSettings } from "../../bridge/config.ts";
 import {
   listSessions,
@@ -13,6 +17,8 @@ import {
   getSessionInfo,
   renameSessionFile,
   deleteSessionFile,
+  readSessionCliFlags,
+  writeSessionCliFlags,
 } from "../../bridge/sessions.ts";
 import { getTrust, setTrust } from "../../bridge/trust.ts";
 import { saveAttachment, pathExists } from "../../bridge/attachments.ts";
@@ -25,6 +31,9 @@ import type {
   RpcEvent,
   SessionListResult,
   SteerQueueItem,
+  CliFlags,
+  CliFlagInfo,
+  SelectionRange,
 } from "../../ide/protocol.ts";
 
 export interface PiHostCallbacks {
@@ -39,11 +48,95 @@ export abstract class PiWebviewHost {
   protected webview: vscode.Webview | null = null;
   protected config = new ConfigStore();
   private selectionTimer: ReturnType<typeof setTimeout> | null = null;
+  /** sessione corrente (aggiornata via storeSession): serve al riavvio di pi */
+  protected currentSessionPath: string | undefined;
+  /** true durante un riavvio voluto (setCliFlags): l'exit di pi non è un crash */
+  private restarting = false;
 
   constructor(
     protected context: vscode.ExtensionContext,
     protected cb: PiHostCallbacks,
   ) {}
+
+  /** flag CLI di lancio di pi, persistiti per workspace (blocco 3 settings) */
+  protected cliFlags(): CliFlags {
+    return (
+      this.context.workspaceState.get<CliFlags>("pi-webview.cliFlags") ?? {
+        sessionControl: false,
+      }
+    );
+  }
+
+  /** riavvia pi con le opzioni di lancio correnti (setCliFlags): la webview
+   *  riceve connection_closed(reason restart) + pi_restarted per re-inizializzarsi
+   *  senza reload (trasparente); la sessione corrente viene ripresa con --session */
+  protected restartPi(): void {
+    const sessionPath = this.currentSessionPath;
+    this.restarting = true;
+    this.pi?.dispose();
+    this.pi = null;
+    this.post({
+      channel: "rpc",
+      payload: { type: "connection_closed", reason: "restart" } satisfies RpcEvent,
+    });
+    this.startPi(sessionPath);
+    this.restarting = false;
+    this.post({ channel: "rpc", payload: { type: "pi_restarted" } satisfies RpcEvent });
+  }
+
+  // --- flag CLI di lancio (blocco 3 settings) --------------------------------
+
+  /** flag registrati da pi + estensioni, letti da `pi --help` (sezione
+   *  "Extension CLI Flags"); parsati una volta e cacheati per host */
+  private cachedFlags: CliFlagInfo[] | null = null;
+
+  private async fetchAvailableFlags(): Promise<CliFlagInfo[]> {
+    if (this.cachedFlags) return this.cachedFlags;
+    try {
+      const piCmd = resolvePi();
+      if (!piCmd.found) return [];
+      const { stdout } = await execFileAsync(
+        piCmd.command,
+        ["--help"],
+        { timeout: 15_000 },
+      );
+      const out = stdout.replace(/\x1b\[[0-9;]*m/g, ""); // strip ANSI
+      const section = out.split("Extension CLI Flags:")[1]?.split(/\n\s*\n/)[0] ?? "";
+      const flags: CliFlagInfo[] = [];
+      for (const line of section.split(/\r?\n/)) {
+        const m = /^\s*--([a-z0-9-]+)( <value>)?\s+(.+)$/.exec(line.trim());
+        if (m) {
+          flags.push({
+            name: m[1] ?? "",
+            type: m[2] ? "string" : "boolean",
+            description: m[3] ?? "",
+          });
+        }
+      }
+      this.cachedFlags = flags;
+      return flags;
+    } catch {
+      return [];
+    }
+  }
+
+  /** valori attivi (flag → valore) della SESSIONE CORRENTE: letti dalla
+   *  entry custom nel file jsonl della sessione (per-sessione, non globali) */
+  protected cliFlagValues(): CliFlags {
+    return readSessionCliFlags(this.currentSessionPath ?? "");
+  }
+
+  /** argomenti CLI per i flag attivi (es. --session-control, --preset <v>) */
+  private cliFlagArgs(): string[] {
+    const args: string[] = [];
+    for (const [name, value] of Object.entries(this.cliFlagValues())) {
+      if (value === true) args.push(`--${name}`);
+      else if (typeof value === "string" && value !== "") {
+        args.push(`--${name}`, value);
+      }
+    }
+    return args;
+  }
 
   protected workspace(): string | undefined {
     const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -93,6 +186,10 @@ export abstract class PiWebviewHost {
 
     const sessionArgs =
       sessionPath && existsSync(sessionPath) ? ["--session", sessionPath] : [];
+    // se si riprende una sessione, è quella (eventualmente forkata) la corrente
+    if (sessionArgs.length > 0) this.currentSessionPath = sessionPath;
+    // flag CLI dalle impostazioni (blocco 3: es. --session-control)
+    const cliFlagArgs = this.cliFlagArgs();
 
     this.pi = new PiProcess(
       piCmd.command,
@@ -106,6 +203,7 @@ export abstract class PiWebviewHost {
         },
         onStderr: (line) => console.warn("[pi]", line),
         onExit: () => {
+          if (this.restarting) return; // riavvio voluto: non è un crash
           void vscode.window.showWarningMessage("pi è terminato in modo inatteso");
           // avvisa la webview: sblocca la UI (working/compact) e mostra l'errore
           this.post({ channel: "rpc", payload: { type: "connection_closed" } });
@@ -114,7 +212,7 @@ export abstract class PiWebviewHost {
       // marker: l'estensione pi-webview (lato pi) sa che è già integrato (niente re-install)
       {
         env: { ...process.env, PI_WEBVIEW_COMPANION: "1" },
-        args: sessionArgs,
+        args: [...sessionArgs, ...cliFlagArgs],
       },
     );
     this.pi.start();
@@ -157,6 +255,8 @@ export abstract class PiWebviewHost {
         return;
       case "storeSession":
         this.cb.onSessionChange(req.path);
+        // traccia la sessione corrente: serve al riavvio (Applica CLI flags)
+        this.currentSessionPath = req.path;
         this.respond(req.id, true);
         return;
       case "openNewChat":
@@ -190,6 +290,25 @@ export abstract class PiWebviewHost {
               ?.packageJSON?.version ?? null,
         });
         return;
+      case "getCliFlags":
+        // flag disponibili (pi + estensioni, da `pi --help`) + valori attivi
+        void this.fetchAvailableFlags().then((available) =>
+          this.respond(req.id, true, {
+            available,
+            values: this.cliFlagValues(),
+          }),
+        );
+        return;
+      case "setCliFlags": {
+        // applica: scrive nella sessione (entry custom nel jsonl) + riavvia pi
+        // con la nuova riga di comando (la webview ha già fatto dequeue+stop
+        // se c'era un'elaborazione)
+        const next: CliFlags = req.flags ?? {};
+        writeSessionCliFlags(this.currentSessionPath ?? "", next);
+        this.respond(req.id, true, { flags: next });
+        this.restartPi();
+        return;
+      }
       case "forkSession":
         try {
           const ws = this.workspace();
@@ -316,9 +435,31 @@ export abstract class PiWebviewHost {
 
   // --- selezione editor ------------------------------------------------------
 
+  /** ultima selezione nota (persiste anche quando il focus va sulla webview
+   *  o sul terminale: la selezione NON deve sparire cliccando nell'input) */
+  private lastSelection: {
+    filePath?: string;
+    workspaceFolder?: string;
+    ranges: SelectionRange[];
+  } | null = null;
+
   postSelection(): void {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.uri.scheme !== "file") {
+      // nessun editor di testo attivo (focus su webview/terminale/pannello):
+      // NON azzerare — ri-pubblica l'ultima selezione nota (se c'è). VS Code
+      // tratta il WebviewPanel come "editor attivo" → senza questo il focus
+      // sull'input della webview cancellerebbe la selezione allegata.
+      if (this.lastSelection) {
+        this.post({
+          channel: "ide",
+          payload: {
+            type: "selection_changed",
+            ...this.lastSelection,
+          } satisfies IdeEvent,
+        });
+        return;
+      }
       this.post({
         channel: "ide",
         payload: {
@@ -338,16 +479,28 @@ export abstract class PiWebviewHost {
           end: { line: s.end.line, character: s.end.character },
         },
       }));
-    const evt: IdeEvent =
-      ranges.length > 0
-        ? {
-            type: "selection_changed",
-            filePath: doc.uri.fsPath,
-            workspaceFolder: vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath,
-            ranges,
-          }
-        : { type: "selection_cleared", reason: "empty-selection" };
-    this.post({ channel: "ide", payload: evt });
+    if (ranges.length > 0) {
+      // selezione presente: la ricordo (per il caso "focus sulla webview")
+      this.lastSelection = {
+        filePath: doc.uri.fsPath,
+        workspaceFolder: vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath,
+        ranges,
+      };
+      this.post({
+        channel: "ide",
+        payload: {
+          type: "selection_changed",
+          ...this.lastSelection,
+        } satisfies IdeEvent,
+      });
+      return;
+    }
+    // selezione VUOTA nel file attivo: l'utente ha davvero deselezionato
+    this.lastSelection = null;
+    this.post({
+      channel: "ide",
+      payload: { type: "selection_cleared", reason: "empty-selection" } satisfies IdeEvent,
+    });
   }
 
   /** selezione editor → questa webview (debounce) */

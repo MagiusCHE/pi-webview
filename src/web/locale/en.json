@@ -103,6 +103,12 @@
     "compactStopAsk": "Compaction in progress. Do you want to stop it?",
     "compactStopUnavailable": "Stopping the compaction is not possible yet: requires a pi.dev core change.",
     "settingsVersionPiw": "piw version",
-    "settingsVersionAddon": "VS Code addon version"
+    "settingsVersionAddon": "VS Code addon version",
+    "settingsPiDevNote": "pi.dev /settings are managed from the pi terminal.",
+    "applyCliWarn": "The ongoing work will be interrupted and pi will restart with the new options. Continue?",
+    "applyCliHint": "Apply restarts pi with the new command line.",
+    "applyCliRestarting": "pi restarting…",
+    "cliNoFlags": "No CLI flags registered.",
+    "cliStringNotSupported": "value flag: not supported yet"
   }
 }

@@ -103,6 +103,12 @@
     "compactStopAsk": "Compattazione in corso. Vuoi fermarla?",
     "compactStopUnavailable": "Fermare la compattazione non è ancora possibile: richiede una modifica del core di pi.dev.",
     "settingsVersionPiw": "Versione piw",
-    "settingsVersionAddon": "Versione addon VS Code"
+    "settingsVersionAddon": "Versione addon VS Code",
+    "settingsPiDevNote": "Le impostazioni /settings di pi.dev si gestiscono dal terminale pi.",
+    "applyCliWarn": "L'elaborazione in corso verrà interrotta e pi verrà riavviato con le nuove opzioni. Continuare?",
+    "applyCliHint": "Applica riavvia pi con la nuova riga di comando.",
+    "applyCliRestarting": "pi in riavvio…",
+    "cliNoFlags": "Nessun flag CLI registrato.",
+    "cliStringNotSupported": "flag con valore: non ancora supportato"
   }
 }

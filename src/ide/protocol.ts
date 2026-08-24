@@ -124,6 +124,8 @@ export type IdeRequest =
   | { type: "listSessions"; workspace?: string; id?: string }
   | { type: "getWorkspace"; id?: string }
   | { type: "getVersion"; id?: string }
+  | { type: "getCliFlags"; id?: string }
+  | { type: "setCliFlags"; flags: CliFlags; id?: string }
   | { type: "listDir"; path: string; id?: string }
   | {
       type: "setWorkspace";
@@ -189,6 +191,23 @@ export interface IdeResponse {
 // vars --vscode-*); standalone si usa la preferenza salvata in config.json.
 
 export type ThemePreference = "light" | "dark" | "system";
+
+// --- flag CLI di lancio di pi (blocco 3 delle impostazioni) ------------------
+// Disponibili dinamicamente: sono i flag registrati da pi e dalle sue
+// estensioni (es. --session-control del pacchetto pi-agent-extensions): se
+// l'estensione non è installata, il flag non esiste e non appare.
+
+export type CliFlagValue = boolean | string;
+
+/** valori attivi (flag → valore), persistiti per workspace */
+export type CliFlags = Record<string, CliFlagValue>;
+
+/** descrizione di un flag registrato (da `pi --help` → Extension CLI Flags) */
+export interface CliFlagInfo {
+  name: string;
+  type: "boolean" | "string";
+  description?: string;
+}
 
 export type LocaleId = "it" | "en";
 

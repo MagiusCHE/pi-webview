@@ -144,8 +144,12 @@ The companion spawns `pi --mode rpc` and bridges the UI via `postMessage` (same 
 - **Sessions** — switch, filter by folder, fork of sessions from other folders (same behavior as pi), new session
 - **Composer controls** — model picker, thinking level, project trust (writes `~/.pi/agent/trust.json`, with confirmation for full access)
 - **Attachments** — paste or drag & drop of files and images, with inline previews
+- **Editor selection context** — when pi-webview runs in the **sidebar view**, selecting text in the editor shows a discreet one-line selection block (attach context for your messages). **In editor-area panels** ("new chat in a new panel") the selection mode is **inhibited**: a webview panel steals editor focus, which would clear the attached selection — so the block is hidden there and selection works only from the sidebar.
 - **Extension status** — status/widget lines set by pi extensions (`setStatus` / `setWidget`) rendered live in the chat footer
 - **Themes** (light/dark/system) and **i18n** (it/en)
+- **Settings modal** — three groups: (1) webview preferences (language, theme, history limit, version), (2) pi.dev `/settings` (placeholder — managed from the pi terminal), (3) **pi.dev CLI launch flags**, listed **dynamically** from the flags registered by pi and its extensions (`pi --help` → "Extension CLI Flags", e.g. `--session-control` from pi-agent-extensions; a flag appears only if its extension is installed). Boolean flags are toggles; string flags are shown as not-yet-supported. Changes reveal an **Apply** button that **restarts pi transparently** with the new command line (no webview reload): the current session is resumed, and if work is in progress pi asks for confirmation and dequeues/stops first.
+
+  CLI flags are **per-session**: they are stored as a `pi-webview-cli-flags` custom entry **inside the session's `.jsonl` file** (last one wins — never in the shared settings), so each open session keeps its own flags and the settings storage never grows with the session count. New sessions start without flags; forks inherit the parent's flags entry.
 
 ## Security
 

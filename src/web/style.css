@@ -1012,12 +1012,13 @@ footer {
 }
 
 .input-box {
-  position: relative; /* ancora il badge accavallato sul bordo superiore */
+  position: relative; /* ancora STOP (angolo basso-dx) e dropdown comandi */
   max-width: var(--thread-max-width);
   margin-inline: auto;
   background: var(--input-bg);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-lg);
+  border-top: none; /* niente bordo superiore: lo dà la stats-badge saldata sopra */
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg); /* angoli alti aperti */
   display: flex;
   flex-direction: column;
   transition:
@@ -1088,20 +1089,25 @@ footer {
 .input-box textarea {
   flex: 0 0 auto; /* NIENTE grow: l'altezza la gestisce l'autogrow (height) */
   resize: none;
-  min-height: 60px; /* 2 righe: 2×22.5 + padding 15 */
-  max-height: 128px; /* 5 righe: 5×22.5 + padding 15 (autogrow JS) */
+  height: 32px; /* UNA riga da fermo (20.3 + padding 12) — cresce con l'autogrow */
+  min-height: 32px;
+  max-height: 120px; /* 5 righe: 5×21 + padding 15 (autogrow JS) */
   background: transparent;
   color: var(--fg);
   border: none;
   border-radius: 0;
-  padding: 11px 14px 4px;
+  padding: 8px 14px 4px;
   font-family: var(--font-sans);
-  font-size: 15px;
-  line-height: 1.5;
+  font-size: 14px; /* come il testo della chat */
+  line-height: 1.45;
   outline: none;
 }
 .input-box textarea::placeholder {
   color: color-mix(in srgb, var(--fg-secondary) 55%, transparent);
+  white-space: nowrap; /* NON andare a capo: il placeholder lungo gonfierebbe
+     la box (l'autogrow usa lo scrollHeight) — una riga + ellipsis */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .input-toolbar {
@@ -1926,23 +1932,27 @@ footer {
   display: block;
 }
 
-/* --- badge: accavallato sul bordo superiore destro della box di input ---
+/* --- badge contesto/slot: barra ADIACENTE sopra la inputbox (niente gap) ---
    gauger del contesto (barra teal) + slot riempiti dalle estensioni pi
-   (ctx.ui.setStatus). Quando la finestra si restringe i componenti in eccesso
-   spariscono e resta un ellipsis (…). */
+   (ctx.ui.setStatus). Larghezza gestita COME la inputbox: fluida, centrata,
+   max 56rem. Angoli inferiori squadrati e bordo inferiore rimosso: si salda
+   col bordo superiore della box (margin-bottom negativo per evitare doppio
+   bordo). Quando la finestra si restringe i componenti in eccesso spariscono
+   e resta un ellipsis (…). */
 .stats-badge {
-  position: absolute;
-  top: -11px;
-  right: -1px; /* coincide col bordo esterno della box (bordo 1px incluso) */
-  z-index: 40;
   display: flex;
   align-items: center;
   gap: 7px;
-  max-width: calc(100% - 28px);
+  width: 100%;
+  max-width: var(--thread-max-width);
+  margin-inline: auto;
+  margin-bottom: -1px; /* si sovrappone al bordo superiore della inputbox */
+  position: relative;
+  z-index: 40;
   background: var(--surface-elevated);
   border: 1px solid var(--border-strong); /* stesso colore del bordo della box di input */
-  border-radius: 999px;
-  border-bottom-right-radius: 0; /* si salda con l'angolo della box */
+  border-bottom: none;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0; /* angoli bassi squadrati: saldato alla box */
   padding: 3px 12px;
   color: var(--fg-secondary);
   font-size: 12px;

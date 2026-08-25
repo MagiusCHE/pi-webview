@@ -5121,15 +5121,17 @@ els.input.addEventListener("keydown", (e) => {
 els.input.addEventListener("input", () => {
   if (historyIndex >= 0) exitHistoryPreview();
   updateCmdDropdown();
-  autogrowInput(); // 2 righe di default → cresce fino a 5 digitando
+  autogrowInput(); // UNA riga di default → cresce di una riga alla volta fino a 5
 });
 
-// --- autogrow input: 2 righe di default, max 5 righe (line-height 22.5 +
-// padding 15 → min 60px, max 128px; i valori rispecchiano il CSS) -----------
-const INPUT_MAX_HEIGHT = 128;
+// --- autogrow input: UNA riga di default (32px), max 5 righe (line-height 21 +
+// padding 15 → max 120px; font 14px come la chat) ------------------------
+const INPUT_MAX_HEIGHT = 120;
 function autogrowInput(): void {
   const el = els.input;
-  el.style.height = "auto";
+  // MAI "auto": con max-height CSS la box si gonfia subito al max. Misura da
+  // 0px così scrollHeight riflette il contenuto reale → crescita riga per riga.
+  el.style.height = "0px";
   el.style.height = Math.min(el.scrollHeight, INPUT_MAX_HEIGHT) + "px";
 }
 function resetInputHeight(): void {

@@ -127,20 +127,21 @@
         <input id="connect-url" type="text" placeholder="ws://127.0.0.1:PORT?token=…" />
         <button id="btn-connect">Connetti</button>
       </div>
+      <!-- badge contesto/slot: barra ADIACENTE alla inputbox (sopra, senza gap),
+           stessa larghezza fluida (max 56rem centrato). Contiene il gauger del
+           contesto (built-in) + gli SLOT riempiti dalle estensioni pi via
+           ctx.ui.setStatus (es. tokens-per-second). -->
+      <div id="stats-badge" class="stats-badge" title="">
+        <span class="stats-part stats-ctx">
+          <svg class="ctx-gauge" viewBox="0 0 36 36" aria-hidden="true">
+            <circle class="ctx-track" cx="18" cy="18" r="15.5"></circle>
+            <circle id="ctx-fill" class="ctx-fill" cx="18" cy="18" r="15.5"></circle>
+          </svg>
+          <span id="ctx-label" class="ctx-label">–</span>
+        </span>
+        <span id="stats-slots" class="stats-slots"></span>
+      </div>
       <div class="input-box">
-        <!-- badge: accavallato sul bordo superiore destro della box di input.
-             Contiene il gauger del contesto (built-in) + gli SLOT riempiti
-             dalle estensioni pi via ctx.ui.setStatus (es. tokens-per-second). -->
-        <div id="stats-badge" class="stats-badge" title="">
-          <span class="stats-part stats-ctx">
-            <svg class="ctx-gauge" viewBox="0 0 36 36" aria-hidden="true">
-              <circle class="ctx-track" cx="18" cy="18" r="15.5"></circle>
-              <circle id="ctx-fill" class="ctx-fill" cx="18" cy="18" r="15.5"></circle>
-            </svg>
-            <span id="ctx-label" class="ctx-label">–</span>
-          </span>
-          <span id="stats-slots" class="stats-slots"></span>
-        </div>
         <!-- STOP separato: a cavallo dell'angolo in basso a destra
              dell'input box, visibile solo durante l'elaborazione (piano 0004) -->
         <button
@@ -159,7 +160,7 @@
         <div id="attachment-row" class="attachment-row"></div>
         <textarea
           id="input"
-          rows="2"
+          rows="1"
           placeholder="Messaggio per pi — Invio per inviare, Shift+Invio per a capo"
         ></textarea>
         <div class="input-toolbar">

@@ -2,6 +2,7 @@
 // on Windows the npm shim is `pi.cmd`, elsewhere `pi`.
 
 import { accessSync, constants } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 export function piBinName(platform: NodeJS.Platform = process.platform): string {
@@ -23,7 +24,7 @@ export function findOnPath(
         accessSync(candidate, constants.X_OK);
         return candidate;
       } catch {
-        // prossimo candidato
+        // next candidate
       }
     }
   }
@@ -40,6 +41,38 @@ export function resolvePi(platform: NodeJS.Platform = process.platform): PiResol
   const bin = piBinName(platform);
   const path = findOnPath(bin, platform);
   return { command: bin, found: path !== null, path };
+}
+
+// Fallback when the extension host PATH misses the shell-only dirs (VS Code
+// launched from a desktop icon does not inherit the shell PATH: ~/.local/bin,
+// npm global bin, pnpm bin, homebrew…). Checks the well-known locations and
+// returns the first executable, or null. The resolved absolute path is then
+// spawned directly (PiProcess spawns the command as-is).
+export function findPiFallback(
+  platform: NodeJS.Platform = process.platform,
+): PiResolution | null {
+  const home = homedir();
+  const candidates =
+    platform === "win32"
+      ? process.env.APPDATA
+        ? [join(process.env.APPDATA, "npm", piBinName(platform))]
+        : []
+      : [
+          join(home, ".local", "bin", piBinName(platform)),
+          join(home, ".npm-global", "bin", piBinName(platform)),
+          join(home, ".local", "share", "pnpm", piBinName(platform)),
+          "/usr/local/bin/" + piBinName(platform),
+          "/opt/homebrew/bin/" + piBinName(platform),
+        ];
+  for (const p of candidates) {
+    try {
+      accessSync(p, constants.X_OK);
+      return { command: p, found: true, path: p };
+    } catch {
+      // not there / not executable: next candidate
+    }
+  }
+  return null;
 }
 
 // pi on Windows requires a bash shell (Git Bash / Cygwin / MSYS2 / WSL):

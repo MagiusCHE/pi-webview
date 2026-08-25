@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, readFileSync } from "node:fs";
 import { PiProcess } from "../../bridge/pi-process.ts";
-import { resolvePi, checkBashOnWindows } from "../../bridge/spawn.ts";
+import { resolvePi, findPiFallback, checkBashOnWindows } from "../../bridge/spawn.ts";
 
 const execFileAsync = promisify(execFile);
 import { ConfigStore, readCompactionSettings } from "../../bridge/config.ts";
@@ -153,7 +153,21 @@ export abstract class PiWebviewHost {
 
   /** spawns pi --mode rpc; with sessionPath resumes that session (--session) */
   protected startPi(sessionPath?: string): void {
-    const piCmd = resolvePi();
+    let piCmd = resolvePi();
+    // extension host PATH may miss the shell-only dirs (desktop-launched VS
+    // Code): before declaring "not found", check the well-known locations
+    // (~/.local/bin, npm global, pnpm, homebrew…). If found, spawn the
+    // absolute path directly.
+    if (!piCmd.found) {
+      const fallback = findPiFallback();
+      if (fallback) {
+        console.warn(
+          "[pi-webview] 'pi' not in the extension host PATH, using fallback:",
+          fallback.path,
+        );
+        piCmd = fallback;
+      }
+    }
     if (!piCmd.found) {
       // the binary may exist in the user's shell but NOT in the extension
       // host PATH (VS Code launched from a desktop icon does not inherit the

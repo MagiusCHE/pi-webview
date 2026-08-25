@@ -54,7 +54,7 @@ test("ConfigStore: default, patch e persistenza", () => {
     const onDisk = JSON.parse(readFileSync(join(dir, "config.json"), "utf-8"));
     // il default include historyLimit (feature limite cronologia): la patch
     // riparte dal config completo, non solo da theme
-    assert.deepEqual(onDisk, { theme: "dark", historyLimit: 30 });
+    assert.deepEqual(onDisk, { theme: "dark", historyLimit: 120 });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

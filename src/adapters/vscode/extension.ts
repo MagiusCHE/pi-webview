@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { PiWebviewProvider } from "./provider.ts";
 import { PiPanelManager } from "./panels.ts";
-import { logLine } from "./host.ts";
+import { hostT, hostLocale, logLine, resetLogIfOversized } from "./host.ts";
 
 let provider: PiWebviewProvider | null = null;
 
@@ -33,13 +33,18 @@ function checkReloadSignal(context: vscode.ExtensionContext): void {
     rmSync(RELOAD_SIGNAL, { force: true });
     if (!signal.version || !installedVersion) return;
     if (signal.version === installedVersion) return; // already on the new version
+    const locale = hostLocale();
     void vscode.window
       .showInformationMessage(
-        `pi-webview: companion aggiornato da ${installedVersion} a ${signal.version}. Riavvia la finestra per attivare la nuova versione.`,
-        "Ripristina",
+        hostT(
+          locale,
+          `pi-webview: companion aggiornato da ${installedVersion} a ${signal.version}. Riavvia la finestra per attivare la nuova versione.`,
+          `pi-webview: companion updated from ${installedVersion} to ${signal.version}. Reload the window to activate the new version.`,
+        ),
+        hostT(locale, "Ripristina", "Reload"),
       )
       .then((choice) => {
-        if (choice === "Ripristina") {
+        if (choice === "Ripristina" || choice === "Reload") {
           void vscode.commands.executeCommand("workbench.action.reloadWindow");
         }
       });
@@ -51,6 +56,7 @@ function checkReloadSignal(context: vscode.ExtensionContext): void {
 export function activate(context: vscode.ExtensionContext): void {
   // deterministic log (see host.ts logLine): confirms which companion version
   // is actually loaded on a user machine → ~/.pi/pi-webview/companion.log
+  resetLogIfOversized(); // session startup: reset the log if it exceeds 2MB
   logLine(`activate version=${context.extension.packageJSON.version ?? "?"}`);
   provider = new PiWebviewProvider(context);
 

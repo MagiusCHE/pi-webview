@@ -17,6 +17,9 @@ export interface PiProcessCallbacks {
   onEvent: (event: Record<string, unknown>) => void;
   onExit?: (code: number | null, signal: NodeJS.Signals | null, error?: string) => void;
   onStderr?: (line: string) => void;
+  /** OSC 777 notify (turn complete etc.): the TUI shows it as a desktop
+   *  notification — surface it in the UI, never as chat text */
+  onNotify?: (n: { title: string; body: string }) => void;
   log?: (msg: string) => void;
 }
 
@@ -81,10 +84,46 @@ export class PiProcess {
     child.stdout.on("data", (chunk: Buffer) => parser.push(chunk));
     child.stdout.on("end", () => parser.flush());
 
+    // stderr: OSC-aware handling. pi writes terminal notifications (OSC 777
+    // notify/title, e.g. "\x1b]777;notify;π;<answer>\x07") meant for the TUI.
+    // CRITICAL: the OSC has NO trailing \n — a newline-split buffer would keep
+    // it stuck until another line or the stream close (i.e. only at process
+    // death). Extract complete OSC sequences at the BUFFER level (they may
+    // also span chunks), then emit the remaining text split by newlines.
+    let stderrBuffer = "";
     child.stderr.on("data", (chunk: Buffer) => {
-      for (const line of chunk.toString("utf-8").split("\n")) {
+      stderrBuffer += chunk.toString("utf-8");
+      // complete OSC sequences anywhere in the buffer (no newline needed)
+      for (;;) {
+        const oscStart = stderrBuffer.indexOf("\u001b]");
+        if (oscStart < 0) break;
+        const after = stderrBuffer.slice(oscStart + 2);
+        const termIdx = after.search(/\u0007|\u001b\\/);
+        if (termIdx === -1) break; // incomplete OSC: wait for more data
+        const content = after.slice(0, termIdx);
+        // OSC 777 notify: internal TUI message — surface it via onNotify,
+        // never as chat text
+        const notifyPrefix = "777;notify;";
+        if (content.startsWith(notifyPrefix)) {
+          const rest = content.slice(notifyPrefix.length);
+          const semi = rest.indexOf(";");
+          const title = semi === -1 ? "" : rest.slice(0, semi);
+          const body = semi === -1 ? rest : rest.slice(semi + 1);
+          if (title || body.trim()) this.cb.onNotify?.({ title, body });
+        }
+        // drop the OSC, keep the surrounding text
+        stderrBuffer = stderrBuffer.slice(0, oscStart) + after.slice(termIdx + 1);
+      }
+      // remaining buffer: newline-terminated lines
+      let idx: number;
+      while ((idx = stderrBuffer.indexOf("\n")) !== -1) {
+        const line = stderrBuffer.slice(0, idx);
+        stderrBuffer = stderrBuffer.slice(idx + 1);
         if (line.trim()) this.cb.onStderr?.(line);
       }
+    });
+    child.stderr.on("end", () => {
+      if (stderrBuffer.trim()) this.cb.onStderr?.(stderrBuffer);
     });
 
     // spawn failed (e.g. ENOENT/EACCES: binary not executable): do NOT retry,

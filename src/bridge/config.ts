@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import type { CompactionSettings, UserConfig } from "../ide/protocol.ts";
 
-export const DEFAULT_CONFIG: UserConfig = { theme: "system", historyLimit: 30 };
+export const DEFAULT_CONFIG: UserConfig = { theme: "system", historyLimit: 120 };
 
 // default thresholds of pi's automatic compaction (config ~/.pi/config.json)
 const DEFAULT_COMPACTION = { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000 };

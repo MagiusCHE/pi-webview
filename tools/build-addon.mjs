@@ -50,6 +50,7 @@ await build({
 });
 
 cpSync("dist/web", "packages/pi-webview/dist/web", { recursive: true });
+cpSync("media/icon.png", "packages/pi-webview/dist/web/icon.png");
 cpSync("dist/pi-webview-ide.vsix", "packages/pi-webview/companion/pi-webview-ide.vsix");
 
 console.log("✓ package pi assemblato → packages/pi-webview/");

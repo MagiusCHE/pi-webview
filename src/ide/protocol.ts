@@ -150,7 +150,9 @@ export type IdeRequest =
   | { type: "renameSession"; path: string; name: string; id?: string }
   | { type: "deleteSession"; path: string; id?: string }
   | { type: "storeSteerQueue"; items: SteerQueueItem[]; id?: string }
-  | { type: "getSteerQueue"; id?: string };
+  | { type: "getSteerQueue"; id?: string }
+  | { type: "notifyDesktop"; title: string; body: string; id?: string }
+  | { type: "debugNotify"; count: number; id?: string };
 
 /** queued message (steering): only persisted text (no images) */
 export interface SteerQueueItem {
@@ -223,6 +225,10 @@ export interface UserConfig {
   locale?: LocaleId;
   /** max number of messages shown in history (resume and runtime) */
   historyLimit?: number;
+  /** where turn-complete notifications go: desktop (default) | vscode | off.
+   *  The "vscode" value only makes sense in the VS Code companion; in the
+   *  browser only desktop/off are offered. */
+  notifications?: "desktop" | "vscode" | "off";
 }
 
 export type IdeEvent =

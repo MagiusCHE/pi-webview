@@ -6,7 +6,7 @@
 // (--session <path>).
 
 import * as vscode from "vscode";
-import { PiWebviewHost } from "./host.ts";
+import { PiWebviewHost, hostT, hostLocale } from "./host.ts";
 import type { Frame } from "../../ide/protocol.ts";
 
 const CHATS_KEY = "pi-webview.chats";
@@ -221,7 +221,11 @@ export class PiPanelManager {
       // construction failed (e.g. dist/web unreadable): the constructor
       // already disposed the panel → no orphan empty panel around
       void vscode.window.showErrorMessage(
-        `pi-webview: impossibile aprire la chat: ${err instanceof Error ? err.message : String(err)}`,
+        hostT(
+          hostLocale(),
+          `pi-webview: impossibile aprire la chat: ${err instanceof Error ? err.message : String(err)}`,
+          `pi-webview: cannot open the chat: ${err instanceof Error ? err.message : String(err)}`,
+        ),
       );
       // remove the placeholder: the chat does not exist
       const list = this.chats();
@@ -255,7 +259,11 @@ export class PiPanelManager {
         // orphan empty panels; the session stays saved (retried on the next
         // reload — the message explains why)
         void vscode.window.showErrorMessage(
-          `pi-webview: impossibile ripristinare la chat: ${err instanceof Error ? err.message : String(err)}`,
+          hostT(
+            hostLocale(),
+            `pi-webview: impossibile ripristinare la chat: ${err instanceof Error ? err.message : String(err)}`,
+            `pi-webview: cannot restore the chat: ${err instanceof Error ? err.message : String(err)}`,
+          ),
         );
       }
     }

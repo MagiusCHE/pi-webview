@@ -5,7 +5,7 @@
 import * as vscode from "vscode";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PiProcess } from "../../bridge/pi-process.ts";
@@ -13,10 +13,24 @@ import { resolvePi, findPiFallback, findPiViaShell, checkBashOnWindows } from ".
 
 const execFileAsync = promisify(execFile);
 
+// localization for host-side user-facing strings: no hardcoded Italian —
+// every visible message respects the configured locale (config.json)
+export function hostT(locale: string | undefined, it: string, en: string): string {
+  return locale === "en" ? en : it;
+}
+export function hostLocale(): string | undefined {
+  try {
+    return new ConfigStore().get().locale;
+  } catch {
+    return undefined;
+  }
+}
+
 // Deterministic companion log: `console.*` of extensions may NOT land in the
 // VS Code exthost.log (it often goes only to the Developer Tools console /
 // window.log). This file is always written, independent of VS Code log
 // routing → on a user machine check ~/.pi/pi-webview/companion.log.
+const MAX_LOG_BYTES = 2 * 1024 * 1024; // 2MB: reset only at session startup
 export function logLine(msg: string): void {
   try {
     const dir = join(homedir(), ".pi", "pi-webview");
@@ -25,6 +39,92 @@ export function logLine(msg: string): void {
   } catch {
     // best effort: never break the host because of logging
   }
+}
+
+// called ONLY at session startup (activate): if the log already exceeds 2MB,
+// reset it — the log must never grow unbounded across sessions
+export function resetLogIfOversized(): void {
+  try {
+    const file = join(homedir(), ".pi", "pi-webview", "companion.log");
+    if (statSync(file).size > MAX_LOG_BYTES) writeFileSync(file, "");
+  } catch {
+    // missing file: nothing to reset
+  }
+}
+
+// stderr forwarding quota: keep the terminal parity without flooding the
+// thread if pi prints a burst of lines
+let stderrWindowStart = 0;
+let stderrCount = 0;
+function stderrAllowed(): boolean {
+  const now = Date.now();
+  if (now - stderrWindowStart > 5000) {
+    stderrWindowStart = now;
+    stderrCount = 0;
+  }
+  return stderrCount++ < 25;
+}
+
+// notification throttle + dedupe: pi can emit several notify OSC in a burst
+let lastNotifyAt = 0;
+let lastNotifyKey = "";
+let hostNotifySeq = 0;
+function notifyThrottled(key: string, fn: () => void): void {
+  const now = Date.now();
+  if (now - lastNotifyAt < 2000) return;
+  if (key !== "" && key === lastNotifyKey && now - lastNotifyAt < 5000) return;
+  lastNotifyAt = now;
+  lastNotifyKey = key;
+  fn();
+}
+
+// REAL desktop notification, not an in-app VS Code toast (which on Linux may
+// never reach the OS): notify-send (Linux) / osascript (macOS), falling back
+// to the VS Code toast when the tool is missing or fails. The "vscode"
+// setting forces the in-app toast; "off" disables notifications entirely.
+function nativeNotify(
+  title: string,
+  body: string,
+  setting: "desktop" | "vscode" | "off",
+  locale: string | undefined,
+  iconPath: string | undefined,
+): void {
+  if (setting === "off") return;
+  // turn-complete notification (extension title "π"): meaningful title,
+  // body = the message only (no π leak). Localized via the config locale.
+  const isTurnComplete = title === "π";
+  const taskDone = locale === "en" ? "Task completed!" : "Task completato!";
+  const summary = isTurnComplete ? `π pi-webview: ${taskDone}` : title || "pi";
+  const toast = () =>
+    void vscode.window.showInformationMessage(`${summary}: ${body}`);
+  if (setting === "vscode") {
+    toast();
+    return;
+  }
+  if (process.platform === "linux") {
+    // turn-complete: header = the meaningful title, message as the body,
+    // with the pi-webview icon (media/icon.png of the extension)
+    const args = isTurnComplete
+      ? ["-a", summary, body]
+      : ["-a", "pi", summary, body];
+    const withIcon = iconPath ? ["-i", iconPath, ...args] : args;
+    execFile("notify-send", withIcon, { timeout: 5000 }, (err) => {
+      if (err) toast(); // notify-send missing/failed: in-app toast as fallback
+    });
+    return;
+  }
+  if (process.platform === "darwin") {
+    execFile(
+      "osascript",
+      ["-e", `display notification ${JSON.stringify(body)} with title ${JSON.stringify(summary)}`],
+      { timeout: 5000 },
+      (err) => {
+        if (err) toast();
+      },
+    );
+    return;
+  }
+  toast();
 }
 import { ConfigStore, readCompactionSettings } from "../../bridge/config.ts";
 import {
@@ -211,7 +311,13 @@ export abstract class PiWebviewHost {
       return;
     }
     const bashWarning = checkBashOnWindows();
-    if (bashWarning) void vscode.window.showWarningMessage(bashWarning);
+    if (bashWarning) {
+      // checkBashOnWindows returns the Italian text: localize at the call site
+      const locale = this.config.get().locale;
+      void vscode.window.showWarningMessage(
+        hostT(locale, bashWarning, "pi on Windows requires a bash shell (Git Bash, Cygwin, MSYS2 or WSL) in PATH"),
+      );
+    }
 
     // a session saved in ANOTHER workspace (header cwd ≠ open folder) must be
     // FORKED into the current workspace before resuming (like pi's
@@ -228,8 +334,9 @@ export abstract class PiWebviewHost {
       } catch (err) {
         // fork failed: keep the original session but warn (the UI would
         // show a session outside the workspace: better to flag it)
+        const locale = this.config.get().locale;
         void vscode.window.showWarningMessage(
-          `pi-webview: impossibile riprendere la sessione nel workspace corrente: ${
+          `${hostT(locale, "pi-webview: impossibile riprendere la sessione nel workspace corrente", "pi-webview: cannot resume the session in the current workspace")}: ${
             err instanceof Error ? err.message : String(err)
           }`,
         );
@@ -259,17 +366,65 @@ export abstract class PiWebviewHost {
           // "cancelled".
           this.post({ channel: "rpc", payload: evt as RpcEvent });
         },
-        onStderr: (line) => console.warn("[pi]", line),
+        onStderr: (line) => {
+          console.warn("[pi]", line);
+          // debug: raw stderr → companion.log (does the OSC 777 arrive here?)
+          logLine(`stderr: ${line.slice(0, 160)}`);
+          // terminal parity: forward pi stderr to the webview (capped)
+          if (stderrAllowed()) {
+            this.post({ channel: "rpc", payload: { type: "pi_stderr", line } });
+          }
+        },
+        onNotify: ({ title, body }) => {
+          // OSC 777 notify from an extension: surface it, but "Ready for
+          // input" (emitted by pi at startup) is noise — log only.
+          if (title === "Ready for input" || title === "Ready") {
+            logLine(`notify ignored (noise) title=${title}`);
+            return;
+          }
+          const setting = this.config.get().notifications ?? "desktop";
+          if (setting === "off") {
+            logLine(`notify off (setting) title=${title}`);
+            return;
+          }
+          if (!vscode.window.state.focused) {
+            logLine(`notify shown #${++hostNotifySeq} title=${title} setting=${setting}`);
+            notifyThrottled(`${title}:${body}`, () =>
+              nativeNotify(
+                title,
+                body,
+                setting,
+                this.config.get().locale,
+                vscode.Uri.joinPath(this.context.extensionUri, "media", "icon.png").fsPath,
+              ),
+            );
+          } else {
+            logLine(`notify skipped (window focused) title=${title}`);
+          }
+        },
         onExit: (_code, _signal, error) => {
           logLine(`pi exited error=${error ?? "none"}`);
           if (this.restarting) return; // intentional restart: not a crash
           // asks the user to verify pi from a terminal with the SAME command
           // line used here, so the real error becomes visible
-          const hint = `Verifica che pi funzioni lanciando \`${this.piCommand}\` dal terminale.`;
+          const locale = this.config.get().locale;
+          const hint = hostT(
+            locale,
+            `Verifica che pi funzioni lanciando \`${this.piCommand}\` dal terminale.`,
+            `Verify pi works by running \`${this.piCommand}\` from a terminal.`,
+          );
           void vscode.window.showWarningMessage(
             error
-              ? `pi non è partito (${error}). ${hint}`
-              : `pi è terminato in modo inatteso. ${hint}`,
+              ? hostT(
+                  locale,
+                  `pi non è partito (${error}). ${hint}`,
+                  `pi failed to start (${error}). ${hint}`,
+                )
+              : hostT(
+                  locale,
+                  `pi è terminato in modo inatteso. ${hint}`,
+                  `pi terminated unexpectedly. ${hint}`,
+                ),
           );
           // notifies the webview: unlocks the UI (working/compact) and shows the error
           this.post({
@@ -294,10 +449,19 @@ export abstract class PiWebviewHost {
 
   /** real "pi not found" error, shown only after PATH + dirs + shell probe all miss */
   private showPiMissing(piCmd: { command: string }): void {
+    const locale = this.config.get().locale;
     const install = "npm install -g @earendil-works/pi-coding-agent";
-    const hint = `Se da terminale \`command -v pi\` funziona, il problema è il PATH: VS Code avviato da icona/desktop non eredita la shell. Avvialo dal terminale o aggiungi la cartella di pi al PATH. Altrimenti installalo con \`${install}\``;
+    const hint = hostT(
+      locale,
+      `Se da terminale \`command -v pi\` funziona, il problema è il PATH: VS Code avviato da icona/desktop non eredita la shell. Avvialo dal terminale o aggiungi la cartella di pi al PATH. Altrimenti installalo con \`${install}\``,
+      `If \`command -v pi\` works in a terminal, the issue is the PATH: VS Code launched from an icon/desktop does not inherit the shell. Launch it from a terminal or add the pi folder to the PATH. Otherwise install it with \`${install}\``,
+    );
     void vscode.window.showErrorMessage(
-      `Comando '${piCmd.command}' non trovato nel PATH di VS Code. ${hint}`,
+      hostT(
+        locale,
+        `Comando '${piCmd.command}' non trovato nel PATH di VS Code. ${hint}`,
+        `Command '${piCmd.command}' not found in the VS Code PATH. ${hint}`,
+      ),
     );
     this.post({
       channel: "rpc",
@@ -481,6 +645,21 @@ export abstract class PiWebviewHost {
             "pi-webview.steerQueue",
           ) ?? [],
         });
+        return;
+      case "notifyDesktop":
+        // turn-complete notification requested by the webview (VS Code path):
+        // real desktop notification via notify-send/osascript
+        logLine(`notifyDesktop title=${req.title}`);
+        notifyThrottled(`${req.title}:${req.body}`, () =>
+          nativeNotify(
+            req.title,
+            req.body,
+            this.config.get().notifications ?? "desktop",
+            this.config.get().locale,
+            vscode.Uri.joinPath(this.context.extensionUri, "media", "icon.png").fsPath,
+          ),
+        );
+        this.respond(req.id, true);
         return;
       case "getTrust": {
         const ws = this.workspace() ?? "";

@@ -9,7 +9,8 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
-import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, extname, join, normalize } from "node:path";
 import { randomBytes } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
@@ -29,6 +30,28 @@ import { getTrust, setTrust } from "./trust.ts";
 import { saveAttachment, pathExists } from "./attachments.ts";
 import { fetchProviderBalance } from "./balance.ts";
 import { clearLock } from "./lock.ts";
+
+// same deterministic log as the VS Code companion: ~/.pi/pi-webview/companion.log
+const MAX_LOG_BYTES = 2 * 1024 * 1024; // 2MB: reset only at session startup
+function bridgeLog(msg: string): void {
+  try {
+    const dir = join(homedir(), ".pi", "pi-webview");
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, "companion.log"), `${new Date().toISOString()} ${msg}\n`);
+  } catch {
+    // best effort
+  }
+}
+// called ONLY at bridge startup: reset the log if it exceeds 2MB
+function resetBridgeLogIfOversized(): void {
+  try {
+    const file = join(homedir(), ".pi", "pi-webview", "companion.log");
+    if (statSync(file).size > MAX_LOG_BYTES) writeFileSync(file, "");
+  } catch {
+    // missing file: nothing to reset
+  }
+}
+let notifySeq = 0;
 
 // pi-webview package version (the "piw"): climbs from dist/ (bridge.cjs)
 // to the nearest package.json (in dev: src/bridge → repo root)
@@ -154,6 +177,7 @@ function parseIntent(url: URL): Intent {
 }
 
 function main(): void {
+  resetBridgeLogIfOversized(); // session startup: reset the log if it exceeds 2MB
   const opts = parseArgs(process.argv.slice(2));
   const log = opts.debug ? (msg: string) => console.error(`[bridge] ${msg}`) : () => {};
 
@@ -177,6 +201,17 @@ function main(): void {
   const configStore = new ConfigStore();
 
   // --- HTTP server (health, config, optional static serve) -----------------
+// stderr forwarding quota (terminal parity, no thread flooding)
+let stderrWindowStart = 0;
+let stderrCount = 0;
+function stderrAllowed(): boolean {
+  const now = Date.now();
+  if (now - stderrWindowStart > 5000) {
+    stderrWindowStart = now;
+    stderrCount = 0;
+  }
+  return stderrCount++ < 25;
+}
   const http = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (url.pathname === "/health") {
@@ -241,7 +276,23 @@ function main(): void {
         {
           onEvent: (event) => send({ channel: "rpc", payload: event as RpcEvent }),
           onStderr: (line) => {
-            if (line.trim()) console.error(`[pi:err] ${line}`);
+            if (!line.trim()) return;
+            console.error(`[pi:err] ${line}`);
+            // terminal parity: forward pi stderr to the webview (capped)
+            if (stderrAllowed()) {
+              send({ channel: "rpc", payload: { type: "pi_stderr", line } });
+            }
+          },
+          // OSC 777 notify (turn complete etc.): the webview turns it into a
+          // browser notification when the window is hidden
+          onNotify: (n) => {
+            const seq = ++notifySeq;
+            console.error(`[bridge] notify #${seq} title=${n.title}`);
+            bridgeLog(`bridge notify #${seq} title=${n.title} body=${(n.body ?? "").slice(0, 60)}`);
+            send({
+              channel: "rpc",
+              payload: { type: "pi_notify", title: n.title, body: n.body },
+            });
           },
           log,
         },
@@ -414,6 +465,17 @@ function main(): void {
       }
       if (req.type === "getSteerQueue") {
         respond(req.id ?? "", { ok: true, data: { items: steerQueueStore.items } });
+        return;
+      }
+      // standalone: the webview shows browser notifications itself — nothing to do
+      if (req.type === "notifyDesktop") {
+        respond(req.id ?? "", { ok: true });
+        return;
+      }
+      // debug: webview-side notify counter (double-notification investigation)
+      if (req.type === "debugNotify") {
+        bridgeLog(`webview pi_notify #${String(req.count ?? "?")}`);
+        respond(req.id ?? "", { ok: true });
         return;
       }
       if (req.type === "forkSession") {

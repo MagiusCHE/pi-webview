@@ -45,6 +45,8 @@ writeFileSync("dist/companion/package.json", JSON.stringify(manifest, null, 2) +
 cpSync("dist/extension", "dist/companion/dist/extension", { recursive: true });
 cpSync("dist/web", "dist/companion/dist/web", { recursive: true });
 cpSync("media", "dist/companion/media", { recursive: true });
+// notification icon for the webview (served from dist/web)
+cpSync("media/icon.png", "dist/web/icon.png");
 cpSync("README.md", "dist/companion/README.md");
 cpSync("LICENSE", "dist/companion/LICENSE");
 

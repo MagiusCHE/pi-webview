@@ -54,6 +54,9 @@
   --diff-add: #7bd88f;
   --diff-rem: #e06c75;
   --diff-mod: #f0c674;
+  /* system box levels: FIXED colors, WCAG AA (≥4.5:1) on the dark surface */
+  --level-err-text: #f48771; /* VS Code editorError foreground */
+  --level-warn-text: #cca700; /* VS Code editorWarning foreground */
   --user-bubble: var(--vscode-input-background, #232629);
   /* ANSI palette (16 colors) harmonized with the dark theme: used for the
      extension slots when they send colored text (e.g. setStatus) */
@@ -101,6 +104,9 @@
   --diff-add: #2e8b57;
   --diff-rem: #c73542;
   --diff-mod: #b8860b;
+  /* system box levels: FIXED colors, WCAG AA (≥4.5:1) on the light surface */
+  --level-err-text: #b32737;
+  --level-warn-text: #8a5a00;
   --user-bubble: var(--vscode-input-background, #ececea);
   /* ANSI palette for the light theme: dark enough to stay readable */
   --ansi-0: #e7e9ee;
@@ -690,6 +696,28 @@ header {
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* system boxes by level (terminal parity): colored left bar + marker.
+   Text uses FIXED high-contrast colors (the theme charts can be muted). */
+.status-line.level-error {
+  border-left-color: var(--level-err-text, var(--err));
+  color: var(--level-err-text, var(--err));
+  background: color-mix(in srgb, var(--err) 12%, var(--surface-elevated));
+}
+.status-line.level-error::before {
+  content: "✖ ";
+}
+.status-line.level-warn {
+  border-left-color: var(--level-warn-text, var(--warn));
+  color: var(--level-warn-text, var(--warn));
+  background: color-mix(in srgb, var(--warn) 12%, var(--surface-elevated));
+}
+.status-line.level-warn::before {
+  content: "⚠ ";
+}
+.status-line.level-info::before {
+  content: "ℹ ";
+  color: var(--fg-tertiary);
+}
 
 /* --- thinking: loader while processing, content at the end --- */
 .thinking-card {
@@ -754,6 +782,36 @@ header {
 }
 /* thinking timer: same mono as the tool timers + right padding to
    align with the right border of the tool cards (summary 10px) */
+/* extensions box: clickable header (toggles the panel), timer on the right */
+.extensions-head {
+  cursor: pointer;
+  user-select: none;
+}
+.extensions-panel {
+  padding: 6px 10px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+  color: var(--fg-secondary);
+}
+.extensions-note {
+  color: var(--fg-tertiary);
+  font-style: italic;
+  margin-bottom: 8px;
+}
+.extensions-label {
+  font-weight: 600;
+  color: var(--fg);
+  margin: 6px 0 2px;
+}
+.extensions-item {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 1px 0;
+}
+.extensions-item.muted {
+  color: var(--fg-tertiary);
+}
 .thinking-head .thinking-timer {
   font-family: var(--font-mono);
   font-size: 11.5px;

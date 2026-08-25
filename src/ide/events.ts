@@ -14,6 +14,8 @@ export interface FinalizedMessage {
   text: string;
   thinking: string;
   toolCalls: ToolCallInfo[];
+  /** provider/turn error (message stopReason "error"): shown as an error box */
+  errorMessage?: string;
 }
 
 export interface StreamState {
@@ -41,6 +43,7 @@ export type UiAction =
   | { kind: "tool_call_start"; index: number; toolCall: ToolCallInfo }
   | { kind: "tool_call"; index: number; toolCall: ToolCallInfo }
   | { kind: "message_end"; message: FinalizedMessage }
+  | { kind: "system_note"; level: "error" | "warn" | "info"; text: string }
   | { kind: "none" };
 
 export function handleRpcEvent(state: StreamState, evt: RpcEvent): UiAction {
@@ -74,8 +77,20 @@ export function handleRpcEvent(state: StreamState, evt: RpcEvent): UiAction {
       const toolCalls = indexes
         .map((i) => state.toolCallsByIndex.get(i))
         .filter((t): t is ToolCallInfo => t !== undefined);
+      // provider/turn failure: the authoritative final message carries the
+      // error (message.errorMessage / stopReason "error") — surface it.
+      const rawMsg = evt.message as { errorMessage?: unknown; stopReason?: unknown } | undefined;
+      const errorMessage =
+        typeof rawMsg?.errorMessage === "string" && rawMsg.errorMessage.length > 0
+          ? rawMsg.errorMessage
+          : rawMsg?.stopReason === "error"
+            ? "Unknown provider error"
+            : undefined;
       state.active = false;
-      return { kind: "message_end", message: { text, thinking, toolCalls } };
+      return {
+        kind: "message_end",
+        message: { text, thinking, toolCalls, errorMessage },
+      };
     }
 
     case "agent_start":
@@ -89,6 +104,36 @@ export function handleRpcEvent(state: StreamState, evt: RpcEvent): UiAction {
       // No separate status line: the state is shown by the thinking
       // block (loader) and the tool cards.
       return { kind: "none" };
+
+    // provider auto-retry (e.g. 503): what the terminal console shows
+    case "auto_retry_start": {
+      const attempt = Number(evt.attempt ?? 0);
+      const max = Number(evt.maxAttempts ?? 0);
+      const delay = Number(evt.delayMs ?? 0) / 1000;
+      const err = String(evt.errorMessage ?? "Unknown error");
+      return {
+        kind: "system_note",
+        level: "warn",
+        text: `Retrying (${attempt}/${max}) in ${delay.toFixed(1)}s — ${err}`,
+      };
+    }
+    case "auto_retry_end": {
+      const ok = evt.success === true;
+      const final = evt.finalError as string | undefined;
+      return ok
+        ? { kind: "none" }
+        : {
+            kind: "system_note",
+            level: "error",
+            text: final ?? "Retry exhausted — giving up",
+          };
+    }
+    case "summarization_retry_scheduled": {
+      const err = String(evt.errorMessage ?? "");
+      return err
+        ? { kind: "system_note", level: "warn", text: `Compaction retry: ${err}` }
+        : { kind: "none" };
+    }
 
     default:
       return { kind: "none" };

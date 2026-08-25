@@ -64,6 +64,8 @@ const els = {
   langLabel: document.getElementById("settings-lang-label") as HTMLLabelElement,
   historyInput: document.getElementById("settings-history-limit") as HTMLInputElement,
   historyLabel: document.getElementById("settings-history-label") as HTMLLabelElement,
+  notificationsLabel: document.getElementById("settings-notifications-label") as HTMLLabelElement,
+  notifications: document.getElementById("notifications") as HTMLSelectElement,
   themeLabel: document.getElementById("settings-theme-label") as HTMLLabelElement,
   settingsVersionLabel: document.getElementById("settings-version-label") as HTMLLabelElement,
   settingsVersion: document.getElementById("settings-version") as HTMLSpanElement,
@@ -269,9 +271,12 @@ const THEME_KEY: Record<ThemePreference, string> = {
 let themePref: ThemePreference = "system";
 
 // limit of messages shown in history (resume and runtime): comes from the
-// config (historyLimit), default 30 — the user changes it in the settings
-const DEFAULT_HISTORY_LIMIT = 30;
+// config (historyLimit), default 120 — the user changes it in the settings
+const DEFAULT_HISTORY_LIMIT = 120;
 let historyLimit = DEFAULT_HISTORY_LIMIT;
+// where turn-complete notifications go (config "notifications"):
+// "desktop" (default) | "vscode" (VS Code toast) | "off"
+let notificationsPref: "desktop" | "vscode" | "off" = "desktop";
 let configId = 0;
 
 // dev params ?theme= / ?lang= (to check without config)
@@ -320,6 +325,24 @@ function applyUiStrings(): void {
   els.historyInput.value = String(historyLimit);
   els.themeLabel.textContent = t("theme");
   els.lang.value = currentLocale;
+  // notifications setting: options depend on the runtime — VS Code offers the
+  // in-app toast as well, the browser only desktop/off
+  els.notificationsLabel.textContent = t("settingsNotifications");
+  const notifyOptions: Array<{ value: "desktop" | "vscode" | "off"; label: string }> = [
+    { value: "desktop", label: t("notifyDesktop") },
+    ...(runtime.isVsCode ? [{ value: "vscode" as const, label: t("notifyVscode") }] : []),
+    { value: "off", label: t("notifyOff") },
+  ];
+  if (els.notifications.options.length !== notifyOptions.length) {
+    els.notifications.textContent = "";
+    for (const o of notifyOptions) {
+      const opt = document.createElement("option");
+      opt.value = o.value;
+      opt.textContent = o.label;
+      els.notifications.appendChild(opt);
+    }
+  }
+  els.notifications.value = notificationsPref;
   updateStatus();
   updateThemeButtons();
   populateSessionMenu();
@@ -343,6 +366,9 @@ function requestConfig(): void {
       if (typeof cfg.historyLimit === "number" && cfg.historyLimit >= 1) {
         historyLimit = Math.floor(cfg.historyLimit);
       }
+      if (cfg.notifications === "desktop" || cfg.notifications === "vscode" || cfg.notifications === "off") {
+        notificationsPref = cfg.notifications;
+      }
       applyUiStrings();
     }
   });
@@ -359,6 +385,9 @@ function handleIdeResponse(res: IdeResponse): void {
     if (isLocaleId(loc)) setLocale(loc);
     if (typeof cfg.historyLimit === "number" && cfg.historyLimit >= 1) {
       historyLimit = Math.floor(cfg.historyLimit);
+    }
+    if (cfg.notifications === "desktop" || cfg.notifications === "vscode" || cfg.notifications === "off") {
+      notificationsPref = cfg.notifications;
     }
     applyUiStrings();
   }
@@ -765,6 +794,20 @@ els.historyInput.addEventListener("change", () => {
     },
   });
   void loadHistory(); // re-applies the truncation to the current history
+});
+
+els.notifications.addEventListener("change", () => {
+  const v = els.notifications.value;
+  if (v !== "desktop" && v !== "vscode" && v !== "off") return;
+  notificationsPref = v;
+  transport?.send({
+    channel: "ide",
+    payload: {
+      type: "setConfig",
+      patch: { notifications: v },
+      id: `cfg-${++configId}`,
+    },
+  });
 });
 
 watchThemeChanges(() => applyTheme(themePref));
@@ -1603,7 +1646,7 @@ function showExtensionsBlock(): void {
   const card = document.createElement("div");
   card.className = "thinking-card";
   const head = document.createElement("div");
-  head.className = "thinking-head";
+  head.className = "thinking-head extensions-head";
   const label = document.createElement("span");
   label.className = "thinking-label";
   label.textContent = t("extensions");
@@ -1614,6 +1657,60 @@ function showExtensionsBlock(): void {
   extensionsTimerEl.textContent = "0s";
   head.append(label, spinner, extensionsTimerEl);
   card.appendChild(head);
+  // click → panel with what we CAN know about extensions at this moment
+  // (pi does not expose which extension is executing): status signals
+  // received via setStatus + available extension commands
+  const panel = document.createElement("div");
+  panel.className = "extensions-panel";
+  panel.hidden = true;
+  const note = document.createElement("div");
+  note.className = "extensions-note";
+  note.textContent = t("extPanelNoInfo");
+  panel.appendChild(note);
+  const statusList = document.createElement("div");
+  statusList.className = "extensions-status";
+  const statusLabel = document.createElement("div");
+  statusLabel.className = "extensions-label";
+  statusLabel.textContent = t("extPanelStatus");
+  statusList.append(statusLabel);
+  for (const text of statusSlots.values()) {
+    const item = document.createElement("div");
+    item.className = "extensions-item";
+    item.textContent = stripAnsi(text);
+    statusList.appendChild(item);
+  }
+  if (statusSlots.size === 0) {
+    const none = document.createElement("div");
+    none.className = "extensions-item muted";
+    none.textContent = t("extPanelNone");
+    statusList.appendChild(none);
+  }
+  panel.appendChild(statusList);
+  const cmdList = document.createElement("div");
+  cmdList.className = "extensions-status";
+  const cmdLabel = document.createElement("div");
+  cmdLabel.className = "extensions-label";
+  cmdLabel.textContent = t("extPanelCommands");
+  cmdList.append(cmdLabel);
+  const cmds = slashCommands.slice(0, 12);
+  if (cmds.length === 0) {
+    const none = document.createElement("div");
+    none.className = "extensions-item muted";
+    none.textContent = t("extPanelNone");
+    cmdList.appendChild(none);
+  }
+  for (const c of cmds) {
+    const item = document.createElement("div");
+    item.className = "extensions-item";
+    item.textContent = `/${c.name}`;
+    if (c.description) item.title = c.description;
+    cmdList.appendChild(item);
+  }
+  panel.appendChild(cmdList);
+  card.appendChild(panel);
+  head.addEventListener("click", () => {
+    panel.hidden = !panel.hidden;
+  });
   wrapper.appendChild(card);
   extensionsStartedAt = performance.now();
   extensionsClock = setInterval(() => {
@@ -2363,6 +2460,10 @@ function renderToolHeader(el: HTMLElement, summary: ToolSummary): void {
   }
 }
 
+// track the last assistant text of the current turn: used to synthesize the
+// turn-complete desktop notification at agent_settled (pi does not emit one)
+let lastAssistantText = "";
+
 function finalizeMessage(msg: FinalizedMessage): void {
   if (currentText) {
     // thinking before the text: the slot is already before .md in the DOM
@@ -2419,6 +2520,11 @@ function finalizeMessage(msg: FinalizedMessage): void {
       (currentText ? currentText.textContent.trim().length > 0 : false);
     if (!hasContent) currentMsg.remove();
   }
+  // remember the answer for the turn-complete notification
+  if (msg.text.trim()) lastAssistantText = msg.text.trim();
+  // provider/turn failure: show the error as its own box (the terminal
+  // console shows it, the webview must not swallow it)
+  if (msg.errorMessage) addSystemBox("error", msg.errorMessage);
   currentMsg = null;
   currentText = null;
   thinkingSlot = null;
@@ -2991,6 +3097,43 @@ function renderRpcEvent(evt: RpcEvent): void {
     handleExtensionUiRequest(evt);
     return;
   }
+  // extension errors (rpc-mode emits extension_error): one box per error
+  if (evt.type === "extension_error") {
+    const path = String(evt.extensionPath ?? "");
+    const err = evt.error as { message?: unknown } | undefined;
+    const msg = String(err?.message ?? evt.error ?? "Extension error");
+    addSystemBox("error", path ? `${path}: ${msg}` : msg);
+    return;
+  }
+  // raw pi stderr lines (terminal parity): forwarded by the host/bridge.
+  // Terminal protocol (OSC notify/title, CSI colors…) is stripped: pi.dev
+  // renders it as UI, here it would be garbage.
+  if (evt.type === "pi_stderr") {
+    const line = cleanConsoleText(String(evt.line ?? ""));
+    if (!line) return;
+    const level = /^error|^fatal|^✗|error:/i.test(line)
+      ? "error"
+      : /^warning|^warn|⚠/i.test(line)
+        ? "warn"
+        : "info";
+    addSystemBox(level, line);
+    return;
+  }
+  // OSC 777 notify from pi (turn complete etc.): internal TUI notification —
+  // never chat text; browser notification only when the window is hidden
+  if (evt.type === "pi_notify") {
+    const title = String(evt.title ?? "");
+    const body = cleanConsoleText(String(evt.body ?? ""));
+    if (body) {
+      // debug: how many times the webview receives the notify (double check)
+      transport?.send({
+        channel: "ide",
+        payload: { type: "debugNotify", count: ++webviewNotifyCount },
+      });
+      handlePiNotify(title, body);
+    }
+    return;
+  }
   if (
     evt.type === "tool_execution_start" ||
     evt.type === "tool_execution_update" ||
@@ -3141,8 +3284,121 @@ function renderRpcEvent(evt: RpcEvent): void {
     case "message_end":
       finalizeMessage(action.message);
       break;
+    case "system_note":
+      // one box per level (error/warn/info), like the terminal console
+      addSystemBox(action.level, action.text);
+      break;
     default:
       break;
+  }
+}
+
+// strip terminal escape sequences (OSC/CSI: colors, titles, notify…) plus
+// stray control chars — the terminal protocol pi writes must not reach the
+// chat as garbage. Also strips UNTERMINATED OSC (sequence cut by the line
+// split before its BEL) and stray BEL bytes.
+function cleanConsoleText(text: string): string {
+  return stripAnsi(text)
+    .replace(/\u001b\][^\u0007\u001b]*$/g, "") // unterminated OSC tail
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .trim();
+}
+
+// "Error: 503: {\"type\":\"server_error\",\"message\":\"…\"}" →
+// "503 Server error: …" — parse the provider error JSON and render it
+// readable: <code> <type with spaces and capitalized>: <message>
+function formatProviderError(text: string): string {
+  const m = /^(?:Error:\s*(\d{3})\s*:)?\s*(\{.*\})$/s.exec(text);
+  if (!m) return text;
+  try {
+    const data = JSON.parse(m[2] ?? "") as { type?: unknown; message?: unknown };
+    const type =
+      typeof data.type === "string"
+        ? data.type.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())
+        : "";
+    const msg = typeof data.message === "string" ? data.message : text;
+    const code = m[1] ? `${m[1]} ` : "";
+    return type ? `${code}${type}: ${msg}` : `${code}${msg}`;
+  } catch {
+    return text;
+  }
+}
+
+// system box with a level: one per error/warn/info, styled by class
+// (.level-error / .level-warn / .level-info). Prefix marker via CSS.
+function addSystemBox(level: "error" | "warn" | "info", text: string): void {
+  const clean = formatProviderError(cleanConsoleText(text));
+  if (!clean) return;
+  const wrapper = addMsg("status");
+  const line = document.createElement("div");
+  line.className = `status-line level-${level}`;
+  line.textContent = clean;
+  line.title = clean;
+  wrapper.appendChild(line);
+  scrollToBottom();
+}
+
+// OSC 777 notify events received by the webview (debug: double-check)
+let webviewNotifyCount = 0;
+
+// browser notifications (standalone/piw) ---------------------------------
+// pi's OSC 777 notify → real browser notification, only when the window is
+// hidden (the user is looking elsewhere); when focused nothing is shown (the
+// chat itself is the notification, like pi.dev).
+let browserNotifyLastAt = 0;
+function browserNotifyThrottled(fn: () => void): void {
+  const now = Date.now();
+  if (now - browserNotifyLastAt < 2000) return;
+  browserNotifyLastAt = now;
+  fn();
+}
+// request the notification permission on the FIRST user gesture (click/key):
+// browsers reject/ignore requestPermission from a hidden/non-gesture context
+let permissionRequested = false;
+function requestNotifyPermission(): void {
+  if (permissionRequested || !("Notification" in window)) return;
+  permissionRequested = true;
+  if (Notification.permission === "default") {
+    void Notification.requestPermission().catch(() => {
+      /* prompt unavailable: keep silent */
+    });
+  }
+}
+document.addEventListener("pointerdown", requestNotifyPermission, { once: true });
+document.addEventListener("keydown", requestNotifyPermission, { once: true });
+
+function handlePiNotify(title: string, body: string): void {
+  // the notifications setting decides (browser offers desktop/off only)
+  if (notificationsPref === "off") return;
+  if (document.visibilityState !== "hidden" && document.hasFocus()) return;
+  const showBox = () => addSystemBox("info", title ? `${title} — ${body}` : body);
+  if (!("Notification" in window)) {
+    // no Notifications API (insecure context etc.): never lose the info
+    showBox();
+    return;
+  }
+  const show = () =>
+    browserNotifyThrottled(() => {
+      try {
+        // Chrome shows the origin as header (not changeable); the body carries
+        // the app prefix + localized reason, then the message on a new line.
+        // icon: served from dist/web/icon.png (copied at build time)
+        new Notification("", {
+          body: `π pi-webview - ${t("notifyTaskDone")}\n${body}`,
+          icon: runtime.isVsCode ? undefined : "/icon.png",
+        });
+      } catch {
+        showBox(); // creation failed: fall back to the chat box
+      }
+    });
+  if (Notification.permission === "granted") show();
+  else if (Notification.permission === "default") {
+    void Notification.requestPermission().then((p) => {
+      if (p === "granted") show();
+      else showBox(); // denied: never lose the info
+    });
+  } else {
+    showBox(); // denied previously: never lose the info
   }
 }
 
@@ -3359,6 +3615,14 @@ function renderHistory(messages: unknown[]): void {
         wrapper.appendChild(md);
       }
       for (const c of toolCards) wrapper.appendChild(c);
+      // failed turn (provider error): the session entry keeps the error —
+      // surface it in history too (terminal parity)
+      const errMsg =
+        (msg as { errorMessage?: unknown }).errorMessage ??
+        (msg as { message?: { errorMessage?: unknown } }).message?.errorMessage;
+      if (typeof errMsg === "string" && errMsg.length > 0) {
+        addSystemBox("error", errMsg);
+      }
     } else if (msg.role === "toolResult" || msg.role === "bashExecution") {
       const output =
         msg.role === "bashExecution"

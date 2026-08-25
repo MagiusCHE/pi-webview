@@ -1,6 +1,6 @@
-// Allegati incollati nella chat: salvataggio su disco (temp) e check dei path.
-// I file incollati dal browser non hanno un path reale → si salvano in una
-// cartella temporanea; per immagini/video i modelli non-vision ricevono il path.
+// Attachments pasted in the chat: save to disk (temp) and path checks.
+// Files pasted from the browser have no real path → saved in a temp folder;
+// for images/videos non-vision models receive the path.
 
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";

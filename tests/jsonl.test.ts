@@ -22,8 +22,8 @@ test("gestisce \\r\\n e chunk parziali", () => {
 test("una riga molto lunga con JSON su più righe resta unita", () => {
   const lines: string[] = [];
   const p = createJsonlParser((l) => lines.push(l));
-  // \n dentro una stringa JSON NON è un separatore di riga nel protocollo,
-  // ma qui testiamo che il parser gestisca byte arbitrari senza rompersi
+  // \n inside a JSON string is NOT a line separator in the protocol,
+  // but here we test that the parser handles arbitrary bytes without breaking
   p.push('{"multi":"line\\ninside"}\n{"done":true}\n');
   assert.deepEqual(lines, ['{"multi":"line\\ninside"}', '{"done":true}']);
 });

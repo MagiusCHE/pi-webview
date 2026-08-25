@@ -28,7 +28,7 @@ test("listSessions: header, nome da session_info, primo messaggio, ordine mtime"
     mkdirSync(proj1, { recursive: true });
     mkdirSync(proj2, { recursive: true });
 
-    // s1: con nome (session_info) e primo messaggio utente
+    // s1: with name (session_info) and first user message
     const s1 = join(proj2, "2026-07-01_aaa.jsonl");
     writeFileSync(
       s1,
@@ -43,10 +43,10 @@ test("listSessions: header, nome da session_info, primo messaggio, ordine mtime"
         }) +
         "\n",
     );
-    // s2: solo header (nessun nome/messaggio)
+    // s2: header only (no name/message)
     const s2 = join(proj1, "2026-07-02_bbb.jsonl");
     writeFileSync(s2, header("id-3", "/work/proj-one") + "\n");
-    // s3: header corrotto → presente ma senza id
+    // s3: corrupted header → present but without id
     const s3 = join(proj1, "2026-07-03_ccc.jsonl");
     writeFileSync(s3, "{non-json\n");
     writeFileSync(join(proj1, "ignorato.txt"), "no");
@@ -58,7 +58,7 @@ test("listSessions: header, nome da session_info, primo messaggio, ordine mtime"
 
     const sessions = listSessions(root);
     assert.equal(sessions.length, 3);
-    // s3 (corrotta) più recente → prima
+    // s3 (corrupted) most recent → first
     assert.equal(sessions[0]?.id, undefined);
     assert.equal(sessions[1]?.id, "id-3");
     assert.equal(sessions[2]?.id, "id-2");
@@ -70,10 +70,10 @@ test("listSessions: header, nome da session_info, primo messaggio, ordine mtime"
   }
 });
 
-test("listSessions: filtro per workspace (header.cwd e nome cartella)", () => {
+test("listSessions: workspace filter (header.cwd and folder name)", () => {
   const root = mkdtempSync(join(tmpdir(), "pi-webview-sessions-"));
   try {
-    // niente trattini nei nomi: - è il separatore usato da pi nel nome cartella
+    // no dashes in names: - is the separator pi uses in the folder name
     const proj1 = join(root, "--work-projone--");
     const proj2 = join(root, "--work-projtwo--");
     mkdirSync(proj1, { recursive: true });
@@ -81,7 +81,7 @@ test("listSessions: filtro per workspace (header.cwd e nome cartella)", () => {
 
     writeFileSync(join(proj1, "a.jsonl"), header("id-1", "/work/projone") + "\n");
     writeFileSync(join(proj2, "b.jsonl"), header("id-2", "/work/projtwo") + "\n");
-    // senza header.cwd: match via nome cartella decodificato
+    // without header.cwd: match via decoded folder name
     writeFileSync(join(proj2, "c.jsonl"), "{type-less\n");
 
     const filtered = listSessions(root, "/work/projtwo");
@@ -132,12 +132,12 @@ test("forkSession: copia la sessione nel workspace con header aggiornato", () =>
     assert.equal(headerLine.cwd, "/work/projtwo");
     assert.equal(headerLine.parentSession, source);
     assert.ok(headerLine.id && headerLine.id !== "id-2");
-    // entry copiate, header originale escluso
+    // entries copied, original header excluded
     assert.equal(lines.length, 3);
     assert.equal(lines[1].type, "session_info");
     assert.equal(lines[1].name, "Sessione vecchia");
     assert.equal(lines[2].type, "message");
-    // l'originale non è toccato
+    // the original is not touched
     assert.ok(readFileSync(source, "utf-8").includes("id-2"));
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -185,7 +185,7 @@ test("readSessionInfo: conteggio su TUTTO il file e ultima attività dai timesta
     const proj = join(root, "--work-projone--");
     mkdirSync(proj, { recursive: true });
     const path = join(proj, "2026-07-01_a.jsonl");
-    // oltre i 512KB del vecchio limite: il conteggio deve includere tutto
+    // beyond the old 512KB limit: the count must include everything
     const lines = [header("id-1", "/work/projone")];
     for (let i = 0; i < 30; i++) {
       lines.push(
@@ -197,7 +197,7 @@ test("readSessionInfo: conteggio su TUTTO il file e ultima attività dai timesta
         }),
       );
     }
-    // 40KB di padding in fondo per superare il vecchio limite
+    // 40KB of padding at the end to exceed the old limit
     const big = "x".repeat(600 * 1024);
     writeFileSync(path, lines.join("\n") + "\n" + big + "\n");
 
@@ -205,7 +205,7 @@ test("readSessionInfo: conteggio su TUTTO il file e ultima attività dai timesta
     assert.ok(s);
     assert.equal(s.messageCount, 30, "conteggio su tutto il file");
     assert.equal(s.firstMessage, "messaggio 0");
-    // ultima attività = timestamp dell'ultimo messaggio, non mtime del file
+    // last activity = timestamp of the last message, not the file mtime
     assert.equal(s.lastActivity, Date.parse("2026-07-01T12:29:00.000Z"));
   } finally {
     rmSync(root, { recursive: true, force: true });

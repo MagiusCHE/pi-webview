@@ -1,5 +1,5 @@
-// Gestione del processo `pi --mode rpc` condivisa tra bridge standalone e
-// adapter IDE: spawn, parsing JSONL, backpressure sullo stdin, restart con
+// Shared `pi --mode rpc` process management between the standalone bridge and
+// the IDE adapter: spawn, JSONL parsing, stdin backpressure, restart with
 // backoff. (concept 0002 D3/D5)
 
 import { spawn } from "node:child_process";
@@ -15,7 +15,7 @@ export interface PiProcessOptions {
 
 export interface PiProcessCallbacks {
   onEvent: (event: Record<string, unknown>) => void;
-  onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
+  onExit?: (code: number | null, signal: NodeJS.Signals | null, error?: string) => void;
   onStderr?: (line: string) => void;
   log?: (msg: string) => void;
 }
@@ -27,12 +27,13 @@ export class PiProcess {
   private sending = false;
   private queue: unknown[] = [];
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null;
+  private spawnError = false; // spawn fallito: il successivo evento 'exit' va ignorato
   private command: string;
   private cb: PiProcessCallbacks;
   private opts: PiProcessOptions;
 
-  // niente parameter properties nel constructor: non supportate dallo
-  // strip-only TS di Node (src/bridge/ è eseguita direttamente da Node)
+  // no parameter properties in the constructor: unsupported by the
+  // strip-only TS of Node (src/bridge/ is run directly by Node)
   constructor(command: string, cb: PiProcessCallbacks, opts: PiProcessOptions = {}) {
     this.command = command;
     this.cb = cb;
@@ -44,10 +45,11 @@ export class PiProcess {
   }
 
   start(): void {
+    this.spawnError = false;
     const args = ["--mode", "rpc", ...(this.opts.args ?? [])];
     this.cb.log?.(`spawn: ${this.command} ${args.join(" ")}`);
-    // su Windows pi è uno shim .cmd: va eseguito tramite cmd /c
-    // (Node quotta gli argomenti in modo sicuro quando shell è false)
+    // on Windows pi is a .cmd shim: run it through cmd /c
+    // (Node quotes arguments safely when shell is false)
     const child =
       process.platform === "win32"
         ? spawn("cmd", ["/c", this.command, ...args], {
@@ -85,12 +87,27 @@ export class PiProcess {
       }
     });
 
-    // dopo 30s di vita il processo è considerato stabile: azzera il contatore
+    // spawn failed (e.g. ENOENT/EACCES: binary not executable): do NOT retry,
+    // it will not heal itself → onExit right away with the error message
+    child.on("error", (err) => {
+      if (this.stopping) return;
+      this.spawnError = true;
+      if (this.stabilityTimer) {
+        clearTimeout(this.stabilityTimer);
+        this.stabilityTimer = null;
+      }
+      this.child = null;
+      this.cb.log?.(`spawn pi fallito: ${err.message}`);
+      this.cb.onExit?.(null, null, err.message);
+    });
+
+    // after 30s of life the process is considered stable: reset the counter
     this.stabilityTimer = setTimeout(() => {
       this.restarts = 0;
     }, 30_000);
 
     child.on("exit", (code, signal) => {
+      if (this.spawnError) return; // already handled by the 'error' handler
       if (this.stabilityTimer) {
         clearTimeout(this.stabilityTimer);
         this.stabilityTimer = null;

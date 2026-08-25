@@ -28,10 +28,10 @@ test("findOnPath trova un eseguibile nella PATH", () => {
   }
 });
 
-test("checkBashOnWindows: avviso solo su windows", () => {
+test("checkBashOnWindows: warning only on windows", () => {
   assert.equal(checkBashOnWindows("linux"), null);
   assert.equal(checkBashOnWindows("darwin"), null);
-  // su windows, senza bash in PATH, deve restituire l'avviso
+  // on windows, without bash in PATH, it must return the warning
   const oldPath = process.env.PATH;
   process.env.PATH = "/percorso/senza/bash";
   try {

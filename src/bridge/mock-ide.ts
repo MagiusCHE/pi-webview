@@ -1,5 +1,5 @@
-// Simulazione di un IDE per testare l'IDE bridge protocol senza IDE reale
-// (piano 0001, flag --mock-ide). Risposte deterministiche e fake.
+// IDE simulation for testing the IDE bridge protocol without a real IDE
+// (plan 0001, --mock-ide flag). Deterministic and fake responses.
 
 import type { Frame, IdeEvent, IdeRequest, IdeResponse } from "../ide/protocol.ts";
 

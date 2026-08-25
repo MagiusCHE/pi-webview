@@ -1,7 +1,7 @@
-// Lock del bridge standalone (piano 0005): garantisce UN solo bridge in
-// ascolto per utente. Il file vive in ~/.pi/pi-webview/bridge.json e viene
-// validato a ogni avvio di `piw` (pid vivo + health check col token) — un
-// lock "appeso" da un crash è innocuo e viene sovrascritto.
+// Standalone bridge lock (plan 0005): guarantees ONE bridge listening per
+// user. The file lives in ~/.pi/pi-webview/bridge.json and is validated at
+// every `piw` startup (live pid + health check with the token) — a lock left
+// over by a crash is harmless and gets overwritten.
 
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -44,11 +44,11 @@ export function clearLock(): void {
   try {
     rmSync(lockPath(), { force: true });
   } catch {
-    // irrilevante: il lock verrà comunque validato al prossimo avvio
+    // irrelevant: the lock will be validated anyway on the next start
   }
 }
 
-/** true se il processo con quel pid è vivo (o non si può sapere). */
+/** true if the process with that pid is alive (or unknown). */
 export function pidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -58,7 +58,7 @@ export function pidAlive(pid: number): boolean {
   }
 }
 
-/** health check del bridge: risponde 200 solo con il token giusto. */
+/** bridge health check: answers 200 only with the right token. */
 export async function healthCheck(
   port: number,
   token: string,

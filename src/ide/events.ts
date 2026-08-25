@@ -1,6 +1,6 @@
-// Mappatura eventi RPC di pi → azioni di UI (concept 0001, piano 0001 step 6).
-// Lo stato di streaming viene assemblato dai delta: message_end è lo snapshot
-// autorevole (docs/rpc.md).
+// Mapping pi RPC events → UI actions (concept 0001, plan 0001 step 6).
+// The streaming state is assembled from deltas: message_end is the
+// authoritative snapshot (docs/rpc.md).
 
 import type { RpcEvent, AssistantDelta } from "./protocol.ts";
 
@@ -86,8 +86,8 @@ export function handleRpcEvent(state: StreamState, evt: RpcEvent): UiAction {
     case "queue_update":
     case "tool_execution_start":
     case "tool_execution_end":
-      // Nessuna status line separata: lo stato è mostrato dal blocco
-      // pensiero (loader) e dalle card dei tool.
+      // No separate status line: the state is shown by the thinking
+      // block (loader) and the tool cards.
       return { kind: "none" };
 
     default:
@@ -129,14 +129,14 @@ function handleDelta(state: StreamState, delta: AssistantDelta): UiAction {
       return { kind: "none" };
     }
     case "toolcall_start": {
-      // il NOME del tool è già qui (partial.content[index]), non serve
-      // aspettare toolcall_end: la card nasce subito col nome vero
+      // the tool NAME is already here (partial.content[index]), no need to
+      // wait for toolcall_end: the card is born right away with the real name
       const partial = delta.partial as
         | { content?: Array<{ type?: string; id?: string; name?: string }> }
         | undefined;
       const content = partial?.content?.[index];
-      // pi 0.84.3+ (fix #7953): id e toolName arrivano anche a livello TOP
-      // dell'evento RPC (assistantMessageEvent) — fallback per robustezza
+      // pi 0.84.3+ (fix #7953): id and toolName also arrive at the TOP level
+      // of the RPC event (assistantMessageEvent) — fallback for robustness
       const top = delta as { id?: string; toolName?: string };
       return {
         kind: "tool_call_start",

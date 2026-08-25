@@ -1,4 +1,4 @@
-// Blocca installazioni con npm/yarn/altri manager: questo progetto usa pnpm.
+// Blocks installs with npm/yarn/other managers: this project uses pnpm.
 const agent = process.env.npm_config_user_agent ?? "";
 if (!agent.startsWith("pnpm/")) {
   console.error("");

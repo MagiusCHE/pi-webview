@@ -1,8 +1,8 @@
-// Entry point dell'extension VS Code (piano 0002).
-// Sidebar (webview "pi") + pannelli "nuova chat" (PiPanelManager), comandi
-// attach-selection / focus / new-chat. Inoltre consuma il reload signal:
-// quando l'estensione pi aggiorna il companion mentre la finestra è aperta,
-// la versione caricata in memoria resta la vecchia → notifica di reload.
+// VS Code extension entry point (plan 0002).
+// Sidebar (webview "pi") + "new chat" panels (PiPanelManager), commands
+// attach-selection / focus / new-chat. Also consumes the reload signal:
+// when the pi extension updates the companion while the window is open,
+// the loaded in-memory version stays the old one → notify reload.
 
 import * as vscode from "vscode";
 import { existsSync, mkdirSync, readFileSync, rmSync, watch } from "node:fs";
@@ -13,13 +13,13 @@ import { PiPanelManager } from "./panels.ts";
 
 let provider: PiWebviewProvider | null = null;
 
-// Segnale di reload scritto dall'estensione pi quando il companion viene
-// AGGIORNATO mentre l'IDE è aperto (contratto multi-IDE: docs/concept/0004).
+// Reload signal written by the pi extension when the companion is UPDATED
+// while the IDE is open (multi-IDE contract: docs/concept/0004).
 const RELOAD_SIGNAL = join(homedir(), ".pi", "pi-webview", "companion-reload.json");
 
-// Legge il segnale e reagisce: se la versione caricata è già quella del segnale
-// (VS Code riavviato dopo l'update) → pulizia silenziosa; se è più vecchia →
-// notifica di reload della finestra. Il segnale viene sempre rimosso qui.
+// Reads the signal and reacts: if the loaded version already matches the
+// signal (VS Code restarted after the update) → silent cleanup; if it is
+// older → notify window reload. The signal is always removed here.
 function checkReloadSignal(context: vscode.ExtensionContext): void {
   try {
     if (!existsSync(RELOAD_SIGNAL)) return;
@@ -31,7 +31,7 @@ function checkReloadSignal(context: vscode.ExtensionContext): void {
       | undefined;
     rmSync(RELOAD_SIGNAL, { force: true });
     if (!signal.version || !installedVersion) return;
-    if (signal.version === installedVersion) return; // già sulla nuova versione
+    if (signal.version === installedVersion) return; // already on the new version
     void vscode.window
       .showInformationMessage(
         `pi-webview: companion aggiornato da ${installedVersion} a ${signal.version}. Riavvia la finestra per attivare la nuova versione.`,
@@ -43,7 +43,7 @@ function checkReloadSignal(context: vscode.ExtensionContext): void {
         }
       });
   } catch {
-    // best effort: mai rompere l'attivazione per un segnale
+    // best effort: never break activation because of a signal
   }
 }
 
@@ -57,22 +57,22 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("pi-webview.attachSelection", () => {
       provider?.postSelection();
     }),
-    // icona nella barra superiore (editor/title, come Codex/pi-x-ide): porta
-    // il pannello pi in foreground (focus della view + reveal del container)
+    // icon in the top bar (editor/title, like Codex/pi-x-ide): brings the
+    // pi panel to the foreground (view focus + container reveal)
     vscode.commands.registerCommand("pi-webview.focus", () => {
       void vscode.commands.executeCommand("piWebview.focus").then(
         () => undefined,
         () => void vscode.commands.executeCommand("workbench.view.extension.pi-webview"),
       );
     }),
-    // nuova chat in un pannello separato (icona nel header della webview)
+    // new chat in a separate panel (icon in the webview header)
     vscode.commands.registerCommand("pi-webview.newChat", () => {
       PiPanelManager.instance(context).openNew();
     }),
   );
 
-  // reload signal: check all'avvio (copre il segnale scritto a VS Code chiuso)
-  // + watcher sulla dir (copre l'update mentre la finestra è APERTA)
+  // reload signal: check at startup (covers the signal written while VS Code
+  // was closed) + watcher on the dir (covers the update while the window is OPEN)
   checkReloadSignal(context);
   try {
     mkdirSync(dirname(RELOAD_SIGNAL), { recursive: true });
@@ -81,11 +81,11 @@ export function activate(context: vscode.ExtensionContext): void {
     });
     context.subscriptions.push({ dispose: () => watcher.close() });
   } catch {
-    // watch non disponibile: il check all'avvio copre il caso riavvio
+    // watch unavailable: the startup check covers the restart case
   }
 
-  // al riavvio riapri le chat salvate: la sidebar riprende da sola la chat 0
-  // (--session), qui si ricreano i pannelli con le loro sessioni
+  // on restart reopen the saved chats: the sidebar resumes chat 0 on its
+  // own (--session); here the panels are recreated with their sessions
   PiPanelManager.instance(context).restore();
 }
 

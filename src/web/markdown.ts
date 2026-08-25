@@ -1,10 +1,10 @@
-// Rendering markdown dei messaggi dell'assistente.
-// marked (GFM) + DOMPurify per sanitizzare l'output del modello.
+// Markdown rendering of the assistant messages.
+// marked (GFM) + DOMPurify to sanitize the model output.
 
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 
-// I link del modello si aprono in nuova scheda, con rel di sicurezza.
+// Model links open in a new tab, with safety rel attributes.
 DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   if (node.tagName === "A") {
     node.setAttribute("target", "_blank");

@@ -1,17 +1,17 @@
-// Assembla il package pi (installabile con `pi install ./packages/pi-webview`):
-// 1) compila l'estensione pi-side → packages/pi-webview/dist/extension.js (ESM)
-// 2) compila bridge + CLI standalone → packages/pi-webview/dist/{bridge,piw}.js
-// 3) copia la UI buildata (dist/web) e il vsix companion nel package
+// Assembles the pi package (installable with `pi install ./packages/pi-webview`):
+// 1) builds the pi-side extension → packages/pi-webview/dist/extension.js (ESM)
+// 2) builds bridge + standalone CLI → packages/pi-webview/dist/{bridge,piw}.js
+// 3) copies the built UI (dist/web) and the companion vsix into the package
 
 import { build } from "esbuild";
 import { cpSync, mkdirSync, existsSync } from "node:fs";
 
 if (!existsSync("dist/pi-webview-ide.vsix")) {
-  console.error("vsix companion mancante: esegui prima `pnpm package:ide`");
+  console.error("companion vsix missing: run `pnpm package:ide` first");
   process.exit(1);
 }
 if (!existsSync("dist/web/index.html")) {
-  console.error("UI buildata mancante: esegui prima `pnpm package:ide` (vite build)");
+  console.error("built UI missing: run `pnpm package:ide` first (vite build)");
   process.exit(1);
 }
 
@@ -27,8 +27,8 @@ await build({
   logLevel: "info",
 });
 
-// bridge standalone (serve la UI e parla con pi --mode rpc).
-// Output CJS: `ws` è CJS e non si bundle-a in ESM puro (dynamic require).
+// standalone bridge (serves the UI and talks to pi --mode rpc).
+// CJS output: `ws` is CJS and does not bundle into pure ESM (dynamic require).
 await build({
   entryPoints: ["src/bridge/index.ts"],
   bundle: true,
@@ -38,7 +38,7 @@ await build({
   logLevel: "info",
 });
 
-// CLI `piw` (bin npm): shebang nel banner perché esbuild non lo preserva
+// `piw` CLI (npm bin): shebang in the banner because esbuild does not preserve it
 await build({
   entryPoints: ["src/bridge/piw.ts"],
   bundle: true,

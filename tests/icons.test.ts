@@ -19,7 +19,7 @@ test("trustIcon: warn filled con fill currentColor e stesso path", () => {
   const filled = trustIcon("warn-filled");
   const outline = trustIcon("warn-outline");
   assert.match(filled, /fill="currentColor"/);
-  // stesso triangolo: il path interno coincide
+  // same triangle: the inner path matches
   const path = /<path d="([^"]+)"\/>/;
   assert.equal(filled.match(path)?.[1], outline.match(path)?.[1]);
 });
@@ -31,6 +31,6 @@ test("sendIcon/stopIcon: icone SVG colorabili, glifi diversi", () => {
   assert.match(send, /fill="currentColor"/);
   assert.match(stop, /^<svg/);
   assert.match(stop, /M6 6h12v12H6/);
-  // non sono la stessa icona
+  // they are not the same icon
   assert.notEqual(send, stop);
 });

@@ -1,7 +1,7 @@
-/* pi-webview — design system allineato a Codex, con correzioni da review:
-   font più grandi, sfondo più scuro e più contrasto, contenuti allineati a
-   sinistra, pulsanti copia uniformi, loader nel blocco pensiero.
-   Token derivati da --vscode-* con fallback standalone (D7). */
+/* pi-webview — design system aligned with Codex, with review fixes:
+   larger fonts, darker background and more contrast, left-aligned content,
+   uniform copy buttons, loader in the thinking block.
+   Tokens derived from --vscode-* with standalone fallback (D7). */
 
 :root {
   --font-sans: var(
@@ -28,7 +28,7 @@
   --transition: 120ms ease;
 }
 
-/* --- fallback standalone: tema scuro --- */
+/* --- standalone fallback: dark theme --- */
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: var(--vscode-editor-background, #131518);
@@ -49,14 +49,14 @@
   --ok: var(--vscode-charts-green, #7bd88f);
   --warn: var(--vscode-charts-yellow, #f0c674);
   --err: var(--vscode-charts-red, #e06c75);
-  /* diff tool: verde/rosso FISSI (i charts del tema VS Code possono essere
-     blu/arancio) */
+  /* diff tool: FIXED green/red (the charts of the VS Code theme can be
+     blue/orange) */
   --diff-add: #7bd88f;
   --diff-rem: #e06c75;
   --diff-mod: #f0c674;
   --user-bubble: var(--vscode-input-background, #232629);
-  /* palette ANSI (16 colori) armonizzata col tema scuro: usata per gli slot
-     delle estensioni quando mandano testo colorato (es. setStatus) */
+  /* ANSI palette (16 colors) harmonized with the dark theme: used for the
+     extension slots when they send colored text (e.g. setStatus) */
   --ansi-0: #14161a;
   --ansi-1: #e06c75;
   --ansi-2: #7bd88f;
@@ -75,7 +75,7 @@
   --ansi-15: #ffffff;
 }
 
-/* --- fallback standalone: tema chiaro --- */
+/* --- standalone fallback: light theme --- */
 :root[data-theme="light"] {
   color-scheme: light;
   --bg: var(--vscode-editor-background, #f4f5f3);
@@ -96,13 +96,13 @@
   --ok: var(--vscode-charts-green, #2e8b57);
   --warn: var(--vscode-charts-yellow, #b8860b);
   --err: var(--vscode-charts-red, #c73542);
-  /* diff tool: verde/rosso FISSI (i charts del tema VS Code possono essere
-     blu/arancio) */
+  /* diff tool: FIXED green/red (the charts of the VS Code theme can be
+     blue/orange) */
   --diff-add: #2e8b57;
   --diff-rem: #c73542;
   --diff-mod: #b8860b;
   --user-bubble: var(--vscode-input-background, #ececea);
-  /* palette ANSI per il tema chiaro: scuri abbastanza da restare leggibili */
+  /* ANSI palette for the light theme: dark enough to stay readable */
   --ansi-0: #e7e9ee;
   --ansi-1: #c73542;
   --ansi-2: #2e8b57;
@@ -299,8 +299,8 @@ header {
   gap: 2px;
   width: 100%;
   padding: 2px 4px;
-  /* reset per le righe che sono <button> (es. l'azione "New session"):
-     niente bordo 3D nativo del browser */
+  /* reset for rows that are <button> (e.g. the "New session" action):
+     no native browser 3D border */
   border: none;
   background: transparent;
   color: var(--fg);
@@ -312,11 +312,11 @@ header {
   background: var(--hover);
 }
 .session-item.active {
-  /* evidenziazione CHIARA della sessione corrente: tint accent + barra laterale */
+  /* CLEAR highlight of the current session: accent tint + side bar */
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   box-shadow: inset 2px 0 0 var(--accent);
 }
-/* area principale cliccabile (nome + meta) */
+/* main clickable area (name + meta) */
 .session-item-main {
   flex: 1;
   min-width: 0;
@@ -331,7 +331,7 @@ header {
   cursor: pointer;
   text-align: left;
 }
-/* pulsanti azione per ogni sessione: rinomina (✎) e elimina (🗑) */
+/* action buttons for every session: rename (✎) and delete (🗑) */
 .session-item-action {
   flex: 0 0 auto;
   display: inline-flex;
@@ -363,7 +363,7 @@ header {
 .session-item-action.danger:hover {
   color: var(--err);
 }
-/* in modalità "Tutte": evidenzia le sessioni della cartella corrente */
+/* in "All" mode: highlight the sessions of the current folder */
 .session-item.in-workspace .session-item-label::before {
   content: "•";
   color: var(--accent);
@@ -394,8 +394,8 @@ header {
   cursor: pointer;
 }
 .session-item.new-session:hover {
-  /* è un'AZIONE, non una sessione: mai lo sfondo da “selezionata”,
-     resta solo il colore accent che si accende */
+  /* it is an ACTION, not a session: never the "selected" background,
+     only the accent color lights up */
   background: transparent;
   color: var(--accent);
 }
@@ -407,7 +407,7 @@ header {
   flex: 1;
 }
 
-/* pannello settings (gear) */
+/* settings panel (gear) */
 .settings-row {
   display: flex;
   align-items: center;
@@ -416,8 +416,8 @@ header {
   font-size: 13.5px;
   color: var(--fg);
 }
-/* sezione pi.dev nelle impostazioni: blocco 2 (/settings, placeholder) e
-   blocco 3 (flag CLI di lancio, dinamici) */
+/* pi.dev section in the settings: block 2 (/settings, placeholder) and
+   block 3 (launch CLI flags, dynamic) */
 .settings-section {
   margin-top: 14px;
   padding-top: 12px;
@@ -568,7 +568,7 @@ header {
   pointer-events: none;
 }
 
-/* --- thread (centrato, allineamento testo a sinistra) --- */
+/* --- thread (centered, left-aligned text) --- */
 #messages {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -589,7 +589,7 @@ header {
 }
 .msg.user {
   align-items: flex-end;
-  position: relative; /* ancora il badge del loader al bordo della bolla */
+  position: relative; /* anchors the loader badge to the bubble border */
 }
 .msg.assistant {
   align-items: stretch;
@@ -607,9 +607,9 @@ header {
   text-align: left;
   font-size: 13.5px;
 }
-/* bubble per messaggi iniettati da un'ALTRA sessione (role custom,
-   es. session-control send) — card collassabile come i tool: una riga con
-   ellipsis chiusa, click per espandere, markdown interpretato dentro */
+/* bubble for messages injected from ANOTHER session (custom role,
+   e.g. session-control send) — collapsible card like the tools: one row with
+   ellipsis closed, click to expand, markdown rendered inside */
 .session-card {
   width: 100%;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
@@ -673,12 +673,12 @@ header {
   color: var(--fg);
 }
 
-/* status line: piccola, attenuata, allineata a sinistra */
+/* status line: small, muted, left-aligned */
 .msg.status {
   align-items: flex-start;
 }
-/* notifiche di sistema (es. risposte dei comandi estensione): BOX, non
-   bullet muto; pre-wrap per i messaggi multilinea (ui.notify usa \n) */
+/* system notifications (e.g. extension command responses): BOX, not a
+   muted bullet; pre-wrap for multiline messages (ui.notify uses \n) */
 .status-line {
   font-size: 12.5px;
   color: var(--fg-secondary);
@@ -691,7 +691,7 @@ header {
   word-break: break-word;
 }
 
-/* --- pensiero: loader durante l'elaborazione, contenuto alla fine --- */
+/* --- thinking: loader while processing, content at the end --- */
 .thinking-card {
   width: 100%;
   border-left: 3px solid var(--border-strong);
@@ -715,7 +715,7 @@ header {
   font-size: 12.5px;
   font-weight: 600;
 }
-/* blocco compattazione: esito negativo in rosso */
+/* compaction block: negative outcome in red */
 .compact-msg .thinking-label.error {
   color: var(--err);
 }
@@ -725,9 +725,9 @@ header {
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
-/* STOP separato: a FIANCO del pulsante di invio (toolbar dell'input box).
-   Rosso, visibile solo durante l'elaborazione; NON vive nella barra di stato
-   (che si muove con gli slot delle estensioni). */
+/* separate STOP: NEXT TO the send button (input box toolbar).
+   Red, visible only while processing; does NOT live in the status bar
+   (which moves with the extension slots). */
 .stop-btn {
   width: 24px;
   height: 24px;
@@ -744,7 +744,7 @@ header {
   transition: filter var(--transition);
 }
 .stop-btn[hidden] {
-  display: none; /* l'attributo hidden vince su inline-flex */
+  display: none; /* the hidden attribute wins over inline-flex */
 }
 .stop-btn svg {
   display: block;
@@ -752,8 +752,8 @@ header {
 .stop-btn:hover {
   filter: brightness(1.12);
 }
-/* timer del pensiero: stesso mono dei timer dei tool + padding destro per
-   allinearsi col bordo destro delle card tool (summary 10px) */
+/* thinking timer: same mono as the tool timers + right padding to
+   align with the right border of the tool cards (summary 10px) */
 .thinking-head .thinking-timer {
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -783,8 +783,8 @@ header {
   }
 }
 
-/* --- loader di invio sul messaggio utente: badge che si accavalla al bordo
-       in basso a destra della bolla (rotella + timer fino alla prima risposta) --- */
+/* --- send loader on the user message: badge overlapping the bottom-right
+       border of the bubble (spinner + timer until the first response) --- */
 .sent-loader {
   position: absolute;
   right: 8px;
@@ -806,26 +806,26 @@ header {
   margin-left: 0;
   font-size: 12px;
 }
-/* primo contenuto arrivato: rotella tolta, timer resta congelato come memoria */
+/* first content arrived: spinner removed, timer stays frozen as memory */
 
-/* --- card dei tool con copia uniforme --- */
+/* --- tool cards with uniform copy --- */
 .tool-card {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg);
   overflow: hidden;
-  margin-top: 3px; /* pensiero→tool e testo→tool: gap 3px */
+  margin-top: 3px; /* thinking→tool and text→tool: 3px gap */
   text-align: left;
 }
-/* tool chiamati in sequenza: gap 3px (come pensiero→tool) */
+/* tools called in sequence: 3px gap (like thinking→tool) */
 .tool-card + .tool-card {
   margin-top: 3px;
 }
-/* messaggio pensiero/tool dopo messaggio pensiero/tool → gap 3px alla
-   creazione (classe tool-chain). NB: il .thread ha gap:14px che si SOMMA ai
-   margini (niente collasso in flex) → margine NEGATIVO: 14 − 11 = 3px.
-   Dopo un pensiero/tool, se il successivo NON è pensiero/tool → 14px (default). */
+/* thinking/tool message after thinking/tool message → 3px gap at
+   creation (tool-chain class). NOTE: the .thread has gap:14px which ADDS
+   to the margins (no collapse in flex) → NEGATIVE margin: 14 − 11 = 3px.
+   After a thinking/tool, if the next is NOT thinking/tool → 14px (default). */
 .msg.tool-chain {
   margin-top: -11px;
 }
@@ -885,8 +885,8 @@ header {
   flex-shrink: 0;
 }
 
-/* statistiche diff della card (righe +/-/~): colorate, con pipe mute tra le
-   voci e tra loro e il timer (come il footer degli slot) */
+/* diff stats of the card (lines +/-/~): colored, with muted pipes between
+   the items and between them and the timer (like the slots footer) */
 .tool-diff {
   flex: 0 0 auto;
   display: inline-flex;
@@ -898,7 +898,7 @@ header {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-/* contatore diff standard (badge verde/rosso, vedi .tool-diff sopra) */
+/* standard diff counter (green/red badge, see .tool-diff above) */
 .tool-diff > span + span::before {
   content: "";
   width: 1px;
@@ -907,8 +907,8 @@ header {
   margin-right: 6px;
 }
 .tool-diff .d-add {
-  /* verde/rosso FISSI: non --vscode-charts-green/red, che nel tema VS Code
-     corrente risultano blu/arancio */
+  /* FIXED green/red: not --vscode-charts-green/red, which in the current
+     VS Code theme turn out blue/orange */
   color: var(--diff-add, #7bd88f);
 }
 .tool-diff .d-rem {
@@ -917,7 +917,7 @@ header {
 .tool-diff .d-mod {
   color: var(--diff-mod, #f0c674);
 }
-/* pipe muta tra diff e timer */
+/* muted pipe between diff and timer */
 .tool-diff + .tool-timer {
   border-left: 1px solid var(--border);
   padding-left: 8px;
@@ -954,7 +954,7 @@ header {
   text-align: left;
 }
 
-/* pulsante copia: unico componente, stesso stile ovunque */
+/* copy button: single component, same style everywhere */
 .copy-btn {
   display: inline-flex;
   align-items: center;
@@ -1012,13 +1012,13 @@ footer {
 }
 
 .input-box {
-  position: relative; /* ancora STOP (angolo basso-dx) e dropdown comandi */
+  position: relative; /* anchors STOP (bottom-right corner) and command dropdown */
   max-width: var(--thread-max-width);
   margin-inline: auto;
   background: var(--input-bg);
   border: 1px solid var(--border-strong);
-  border-top: none; /* niente bordo superiore: lo dà la stats-badge saldata sopra */
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg); /* angoli alti aperti */
+  border-top: none; /* no top border: it comes from the stats-badge welded above */
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg); /* open top corners */
   display: flex;
   flex-direction: column;
   transition:
@@ -1177,7 +1177,7 @@ footer {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* separatori tra provider · modello (solo se il precedente esiste) */
+/* separators between provider · model (only if the previous exists) */
 .model-provider ~ .model-name::before {
   content: " · ";
 }
@@ -1185,11 +1185,11 @@ footer {
   color: var(--fg-tertiary);
 }
 
-/* chip del balance: FUORI dal pulsante modello, stile chip non interattivo.
-   Mostra “costo sessione / saldo”: il COLORE sta SOLO sul saldo
-   (verde normale --ok, giallo basso --warn, rosso quasi esaurito --err),
-   costo e slash restano col colore muto. Sotto i 600px spariscono
-   costo+slash e resta il solo saldo colorato. */
+/* balance chip: OUTSIDE the model button, non-interactive chip style.
+   Shows “session cost / balance”: the COLOR lives ONLY on the balance
+   (green normal --ok, yellow low --warn, red almost exhausted --err),
+   cost and slash stay muted. Below 600px cost+slash disappear and
+   only the colored balance remains. */
 .balance-chip {
   display: inline-flex;
   align-items: center;
@@ -1200,15 +1200,15 @@ footer {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   padding: 3px 6px;
-  color: var(--fg-tertiary); /* colore muto di default */
+  color: var(--fg-tertiary); /* muted default color */
   font-variant-numeric: tabular-nums;
 }
 .balance-chip[hidden] {
-  display: none; /* l'attributo hidden vince su inline-flex */
+  display: none; /* the hidden attribute wins over inline-flex */
 }
 .chip-cost,
 .chip-slash {
-  color: var(--fg-tertiary); /* muti: mai colorati */
+  color: var(--fg-tertiary); /* muted: never colored */
 }
 .balance-chip.tone-ok .chip-balance {
   color: var(--ok);
@@ -1220,37 +1220,37 @@ footer {
   color: var(--err);
 }
 
-/* toolbar stretta (<600): trust solo icona, thinking senza label ma col valore,
-   via il provider, e spariscono costo+slash della chip balance (resta il saldo) */
+/* narrow toolbar (<600): trust icon only, thinking without label but with value,
+   provider gone, and cost+slash of the balance chip disappear (balance remains) */
 @container (max-width: 600px) {
   #trust-label {
-    display: none; /* trust: resta solo l'icona (il menu ha il testo completo) */
+    display: none; /* trust: only the icon remains (the menu has the full text) */
   }
   .thinking-label {
-    display: none; /* thinking: sparisce la parola, resta il VALORE (es. high) */
+    display: none; /* thinking: the word disappears, the VALUE remains (e.g. high) */
   }
   .model-provider {
-    display: none; /* modello: via il provider, restano nome e costi */
+    display: none; /* model: provider gone, name and costs remain */
   }
   .model-provider ~ .model-name::before {
-    content: ""; /* niente punto orfano davanti al nome */
+    content: ""; /* no orphan dot in front of the name */
   }
   .chip-cost,
   .chip-slash {
-    display: none; /* balance: via costo singolo e slash, resta il saldo */
+    display: none; /* balance: single cost and slash gone, balance remains */
   }
 }
-/* toolbar molto stretta (<340): via anche il valore del thinking e il balance */
+/* very narrow toolbar (<340): thinking value and balance also go away */
 @container (max-width: 340px) {
   .thinking-value {
-    display: none; /* thinking: resta solo l'icona */
+    display: none; /* thinking: only the icon remains */
   }
   .balance-chip {
-    display: none; /* balance: sparisce alle risoluzioni più basse */
+    display: none; /* balance: disappears at the lowest resolutions */
   }
 }
 
-/* menu a tendina per le chip (apre verso l'alto) */
+/* dropdown menu for the chips (opens upward) */
 .pop-menu {
   text-align: left;
   position: absolute;
@@ -1293,7 +1293,7 @@ footer {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
-/* toni trust sulla riga: sfondo tenue, bordo e testo corposi */
+/* trust tones on the row: soft background, solid border and text */
 .pop-item[data-tone="ask"] {
   background: color-mix(in srgb, var(--ok) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--ok) 55%, transparent);
@@ -1338,9 +1338,9 @@ footer {
   color: var(--fg-tertiary);
   font-size: 11.5px;
 }
-/* dialoghi estensione INLINE in fondo alla chat (ask_user, ctx.ui.select/
-   confirm/input): niente modali overlay — l'utente legge la cronologia e
-   risponde dal thread. ✕ o Esc = annulla. */
+/* extension dialogs INLINE at the bottom of the chat (ask_user, ctx.ui.select/
+   confirm/input): no overlay modals — the user reads the history and
+   answers from the thread. ✕ or Esc = cancel. */
 .inline-dialog-msg {
   margin-top: 8px;
 }
@@ -1435,7 +1435,7 @@ footer {
   font-size: 12.5px;
 }
 
-/* ricerca modelli nel popover: campo fisso in cima, lista scorrevole sotto */
+/* model search in the popover: fixed field on top, scrollable list below */
 .pop-search {
   flex: 0 0 auto;
   width: 100%;
@@ -1463,8 +1463,8 @@ footer {
   overflow-y: auto;
 }
 
-/* STOP + invio: gruppo compatto con 2px di distanza; i pulsanti si
-   rimpiccioliscono riducendo il PADDING (width/height), mai il font-size */
+/* STOP + send: compact group with 2px gap; the buttons shrink by reducing
+   the PADDING (width/height), never the font-size */
 .send-group {
   display: inline-flex;
   align-items: center;
@@ -1498,8 +1498,8 @@ footer {
   pointer-events: none;
 }
 .send-btn.working {
-  /* stearing: NON è più STOP — resta Invia con un'evidenza diversa
-     (accento pieno + leggera pulsazione), lo STOP è nel blocco pensiero */
+  /* steering: it is NOT STOP anymore — stays Send with a different highlight
+     (solid accent + slight pulse), the STOP lives in the thinking block */
   background: var(--accent-solid);
   color: var(--accent-fg);
   animation: send-pulse 1.6s ease-in-out infinite;
@@ -1514,7 +1514,7 @@ footer {
   }
 }
 
-/* --- autocomplete comandi slash (piano 0003): sopra l'input box ------------ */
+/* --- slash command autocomplete (plan 0003): above the input box ---------- */
 .cmd-dropdown {
   position: absolute;
   bottom: calc(100% + 8px);
@@ -1586,12 +1586,12 @@ footer {
   font-variant-numeric: tabular-nums;
 }
 
-/* --- pannello stearing (piano 0004): messaggi in coda tra thread e composer */
+/* --- steering panel (plan 0004): queued messages between thread and composer */
 .steer-panel {
-  /* flex: 0 0 auto → non si schiaccia mai: la chat (flex:1) si restringe,
-     MAI il contenuto della chat va sotto il pannello. NESSUNA altezza
-     minima: la box si adatta al contenuto (max-height solo per lo scroll).
-     Larghezza ALLINEATA a thread e input-box (centrata, max 56rem): niente
+  /* flex: 0 0 auto → never squashed: the chat (flex:1) shrinks, the chat
+     content NEVER goes under the panel. NO minimum height: the box adapts
+     to the content (max-height only for scrolling).
+     Width ALIGNED with thread and input-box (centered, max 56rem): no
      full-width. */
   flex: 0 0 auto;
   width: min(100% - 2rem, var(--thread-max-width));
@@ -1605,8 +1605,8 @@ footer {
   overflow-y: auto;
   box-sizing: border-box;
 }
-/* blocco selezione editor: UNA riga discreta tra steer e composer; appare
-   solo quando c'è una selezione evidente, sparisce quando non c'è più */
+/* editor selection block: one discreet row between steer and composer; appears
+   only when there is an evident selection, disappears when there is none */
 .selection-panel {
   flex: 0 0 auto;
   width: min(100% - 2rem, var(--thread-max-width));
@@ -1666,8 +1666,8 @@ footer {
 .steer-row:hover {
   background: var(--hover);
 }
-/* messaggi GIÀ inviati a pi, in attesa di iniezione: muted + spinner; NON
-   dequeuabili (la coda di pi non è mutabile via RPC) */
+/* messages ALREADY sent to pi, waiting for injection: muted + spinner; NOT
+   dequeuable (the pi queue cannot be mutated via RPC) */
 .steer-row-sending {
   opacity: 0.7;
 }
@@ -1697,7 +1697,7 @@ footer {
   text-overflow: ellipsis;
 }
 
-/* --- modale di conferma --- */
+/* --- confirmation modal --- */
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1790,7 +1790,7 @@ footer {
   filter: brightness(1.08);
 }
 
-/* campo di testo nei modali (es. rinomina sessione) */
+/* text field in the modals (e.g. session rename) */
 .modal-input {
   width: 100%;
   padding: 7px 10px;
@@ -1805,7 +1805,7 @@ footer {
   border-color: var(--accent);
 }
 
-/* selettore di opzioni (estensioni pi, ctx.ui.select): lista scorrevole */
+/* option selector (pi extensions, ctx.ui.select): scrollable list */
 .modal-select {
   display: flex;
   flex-direction: column;
@@ -1835,13 +1835,13 @@ footer {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-/* allegati nel messaggio utente: PRIMA del testo, immagini in griglia + file */
+/* attachments in the user message: BEFORE the text, images in grid + files */
 .chat-image-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 8px;
   width: 100%;
-  max-width: 480px; /* le immagini non smontano la UI */
+  max-width: 480px; /* the images do not break the UI */
   margin-top: 6px;
 }
 .chat-image-grid .chat-image {
@@ -1854,7 +1854,7 @@ footer {
   display: block;
   background: var(--bg);
 }
-/* una sola immagine: cella grande, senza crop aggressivo */
+/* single image: big cell, no aggressive crop */
 .chat-image-grid.single {
   grid-template-columns: 1fr;
   max-width: 340px;
@@ -1864,7 +1864,7 @@ footer {
   max-height: 240px;
   object-fit: contain;
 }
-/* lightbox: immagine ingrandita sopra tutto */
+/* lightbox: enlarged image above everything */
 .lightbox-img {
   max-width: 92vw;
   max-height: 92vh;
@@ -1900,7 +1900,7 @@ footer {
   white-space: nowrap;
 }
 
-/* pulsante torna in fondo (fluttuante sopra la box) */
+/* back-to-bottom button (floating above the box) */
 .scroll-bottom-btn {
   position: sticky;
   float: right;
@@ -1932,13 +1932,13 @@ footer {
   display: block;
 }
 
-/* --- badge contesto/slot: barra ADIACENTE sopra la inputbox (niente gap) ---
-   gauger del contesto (barra teal) + slot riempiti dalle estensioni pi
-   (ctx.ui.setStatus). Larghezza gestita COME la inputbox: fluida, centrata,
-   max 56rem. Angoli inferiori squadrati e bordo inferiore rimosso: si salda
-   col bordo superiore della box (margin-bottom negativo per evitare doppio
-   bordo). Quando la finestra si restringe i componenti in eccesso spariscono
-   e resta un ellipsis (…). */
+/* --- context/slot badge: bar ADJACENT above the inputbox (no gap) ---
+   context gauge (teal bar) + slots filled by the pi extensions
+   (ctx.ui.setStatus). Width managed LIKE the inputbox: fluid, centered,
+   max 56rem. Squared bottom corners and removed bottom border: it welds
+   to the top border of the box (negative margin-bottom to avoid a double
+   border). When the window shrinks the extra components disappear
+   and an ellipsis (…) remains. */
 .stats-badge {
   display: flex;
   align-items: center;
@@ -1963,9 +1963,9 @@ footer {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  flex: 0 0 auto; /* il blocco contesto resta sempre intero */
+  flex: 0 0 auto; /* the context block always stays whole */
 }
-/* gauger + label contesto: cliccabili → compattazione (conferma) */
+/* gauge + context label: clickable → compaction (confirmation) */
 .stats-ctx {
   cursor: pointer;
   border-radius: 999px;
@@ -1981,7 +1981,7 @@ footer {
   flex: 0 0 auto;
   transform: rotate(-90deg);
 }
-/* compattazione in corso: il gauger ruota come un loader */
+/* compaction in progress: the gauge spins like a loader */
 .ctx-gauge.loading {
   animation: ctx-spin 1.1s linear infinite;
 }
@@ -2000,7 +2000,7 @@ footer {
 }
 .ctx-fill {
   fill: none;
-  stroke: #14b8a6; /* teal: barra del gauger richiesta */
+  stroke: #14b8a6; /* teal: requested gauge bar */
   stroke-width: 3;
   stroke-linecap: round;
   stroke-dasharray: 97.4;
@@ -2010,8 +2010,8 @@ footer {
 .ctx-label {
   font-variant-numeric: tabular-nums;
 }
-/* slot delle estensioni: se non c'è spazio si RESTRINGONO e l'ultimo visibile
-   si tronca con l'ellipsis standard (niente hiding di blocchi interi) */
+/* extension slots: when there is no space they SHRINK and the last visible
+   one is truncated with the standard ellipsis (no hiding of whole blocks) */
 .stats-slots {
   flex: 1 1 auto;
   min-width: 0;
@@ -2020,7 +2020,7 @@ footer {
   gap: 8px;
   overflow: hidden;
 }
-/* pipe “muta” dopo il blocco contesto, solo se c'è almeno uno slot estensione */
+/* "muted" pipe after the context block, only if there is at least one extension slot */
 .stats-slots:not(:empty)::before {
   content: "";
   width: 1px;
@@ -2050,7 +2050,7 @@ footer {
   padding-left: 4px;
 }
 
-/* --- overlay drag & drop --- */
+/* --- drag & drop overlay --- */
 .drop-overlay {
   position: fixed;
   inset: 0;
@@ -2087,7 +2087,7 @@ footer {
   color: var(--fg);
 }
 
-/* --- loader di avvio --- */
+/* --- boot loader --- */
 .boot-loader {
   position: fixed;
   inset: 0;
@@ -2109,7 +2109,7 @@ footer {
   border-top: 1px solid var(--border);
 }
 
-/* --- modale browse cartella (standalone) --- */
+/* --- folder browse modal (standalone) --- */
 .folder-modal {
   max-width: 460px;
   width: min(90vw, 460px);
@@ -2163,7 +2163,7 @@ footer {
   color: var(--fg-tertiary);
   font-size: 12.5px;
 }
-/* icona browse accanto al filtro cartella */
+/* browse icon next to the folder filter */
 .filter-btn.folder-browse {
   flex: 0 0 auto;
   display: inline-flex;
@@ -2174,7 +2174,7 @@ footer {
 .filter-btn.folder-browse svg {
   display: block;
 }
-/* voce ".. (cartella superiore)" in testa alla lista */
+/* ".. (parent folder)" entry at the top of the list */
 .folder-up {
   border-bottom: 1px solid var(--border);
   border-radius: 0;

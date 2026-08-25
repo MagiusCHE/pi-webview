@@ -78,6 +78,7 @@
     "compacted": "Compacted",
     "compactionError": "Compaction failed",
     "piDied": "pi terminated: reload the window to reconnect",
+    "piDiedHint": "pi terminated or failed to start. Verify it works from a terminal: `{command}` — if it errors out, pi is not set up correctly.",
     "clickToCompact": "Click to compact",
     "autoCompactAt": "auto-compact ≥ {pct}%",
     "autoCompactOff": "auto-compact: off",

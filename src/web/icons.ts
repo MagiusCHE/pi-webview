@@ -1,4 +1,4 @@
-// Icone Material monochrome in SVG, colorabili via CSS (currentColor).
+// Monochrome Material icons in SVG, colorable via CSS (currentColor).
 
 export type TrustIconKind = "shield" | "warn-outline" | "warn-filled";
 
@@ -6,7 +6,7 @@ export type TrustIconKind = "shield" | "warn-outline" | "warn-filled";
 const SHIELD =
   '<path d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3z"/>';
 
-// Material "warning": stesso triangolo, riusato per outline e filled
+// Material "warning": same triangle, reused for outline and filled
 const WARN = '<path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>';
 
 export function trustIcon(kind: TrustIconKind): string {
@@ -19,7 +19,7 @@ export function trustIcon(kind: TrustIconKind): string {
   return `<svg viewBox="0 0 24 24" fill="currentColor" width="15" height="15" aria-hidden="true">${WARN}</svg>`;
 }
 
-// Material "arrow_upward" (invio)
+// Material "arrow_upward" (send)
 const SEND = '<path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/>';
 
 // Material "stop" (quadrato pieno, interrompi)
@@ -33,7 +33,7 @@ export function stopIcon(): string {
   return `<svg viewBox="0 0 24 24" fill="currentColor" width="15" height="15" aria-hidden="true">${STOP}</svg>`;
 }
 
-// Material "attach_file" (allegato)
+// Material "attach_file" (attachment)
 const ATTACH =
   '<path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/>';
 
@@ -80,7 +80,7 @@ export function chatIcon(): string {
   return `<svg viewBox="0 0 24 24" fill="currentColor" width="13" height="13" aria-hidden="true">${CHAT}</svg>`;
 }
 
-// Material "folder" (browse cartella workspace)
+// Material "folder" (browse workspace folder)
 const FOLDER =
   '<path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>';
 
@@ -88,7 +88,7 @@ export function folderIcon(): string {
   return `<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14" aria-hidden="true">${FOLDER}</svg>`;
 }
 
-// Material "arrow_downward" (torna in fondo)
+// Material "arrow_downward" (back to bottom)
 const ARROW_DOWN =
   '<path d="M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z"/>';
 

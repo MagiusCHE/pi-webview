@@ -1,10 +1,11 @@
-// pi-webview — estensione pi (package distribuito via `pi install`).
-// All'avvio fa DUE ensure: 1) il companion VS Code (installa/aggiorna dal vsix
-// incluso se manca o è datato, idempotente) e 2) il link `piw` sul PATH.
-// `piw` a sua volta rifà l'ensure del companion VS Code all'avvio.
-// Quando pi gira dentro la webview (env PI_WEBVIEW_COMPANION=1) il check del
-// companion scatta comunque: è il canale di aggiornamento per chi usa SOLO la
-// webview (il pacchetto su disco è aggiornato, il companion installato no).
+// pi-webview — pi extension (package distributed via `pi install`).
+// At startup it does TWO ensures: 1) the VS Code companion (installs/updates
+// from the bundled vsix if missing or outdated, idempotent) and 2) the `piw`
+// link on PATH.
+// `piw` in turn re-runs the VS Code companion ensure at startup.
+// When pi runs inside the webview (env PI_WEBVIEW_COMPANION=1) the companion
+// check still runs: it is the update channel for webview-only users (the
+// package on disk is updated, the installed companion is not).
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -18,21 +19,21 @@ const execFileAsync = promisify(execFile);
 
 const COMPANION_ID = "magiusche.pi-webview-ide";
 const PKG_NAME = "@magiusche/pi-webview";
-// `pi remove` vuole il nome CON il prefisso sorgente npm: (come `pi install npm:…`)
+// `pi remove` wants the name WITH the npm: source prefix (like `pi install npm:…`)
 const PKG_REF = `npm:${PKG_NAME}`;
 const AUTO_INSTALL_ENV = "PI_WEBVIEW_AUTO_INSTALL";
 const VSIX_REL = join("companion", "pi-webview-ide.vsix");
 
-// Segnale di reload per l'IDE (contratto multi-IDE, docs/concept/0004):
-// quando il companion viene AGGIORNATO mentre l'IDE è aperto, la finestra
-// resta sulla versione vecchia caricata in memoria → scriviamo qui la versione
-// target; il companion dell'IDE (in esecuzione) la legge e chiede il reload.
+// Reload signal for the IDE (multi-IDE contract, docs/concept/0004):
+// when the companion is UPDATED while the IDE is open, the window stays on
+// the old version loaded in memory → we write the target version here;
+// the IDE companion (running) reads it and asks for a reload.
 const RELOAD_SIGNAL = join(homedir(), ".pi", "pi-webview", "companion-reload.json");
 
 type Notify = (message: string, kind: "info" | "warning" | "error") => void;
 
-// API minimale di pi usata dall'estensione (typed localmente per non
-// dipendere da @earendil-works/pi-coding-agent come devDependency).
+// Minimal pi API used by the extension (typed locally to avoid depending on
+// @earendil-works/pi-coding-agent as a devDependency).
 interface PiApi {
   on(
     event: string,
@@ -50,17 +51,17 @@ interface PiApi {
       ) => void | Promise<void>;
     },
   ): void;
-  // comandi slash disponibili (per il dedupe della registrazione — il check
-  // va fatto al session_start: durante il load getCommands è uno stub che
-  // lancia "Extension runtime not initialized")
+  // slash commands available (for the registration dedupe — the check must
+  // happen at session_start: during load getCommands is a stub that throws
+  // "Extension runtime not initialized")
   getCommands(): { name: string }[];
 }
 
 function detectIde(env: NodeJS.ProcessEnv = process.env): string | undefined {
   if (env.TERM_PROGRAM?.toLowerCase() === "windsurf") return "windsurf";
   if (env.TERM_PROGRAM?.toLowerCase() === "cursor") return "cursor";
-  // stessi marker di pi-x-ide: TERM_PROGRAM=vscode è il marker standard del
-  // terminale integrato (senza di esso l'auto-install non scattava mai)
+  // same markers as pi-x-ide: TERM_PROGRAM=vscode is the standard marker of
+  // the integrated terminal (without it the auto-install never triggered)
   if (env.TERM_PROGRAM?.toLowerCase() === "vscode") return "vscode";
   if (
     env.VSCODE_PID ||
@@ -73,9 +74,9 @@ function detectIde(env: NodeJS.ProcessEnv = process.env): string | undefined {
   return undefined;
 }
 
-// Esegue la CLI di VS Code in modo portabile: su Windows `code` è un file
-// `.cmd`, che Node non esegue con execFile → si passa da `cmd /c` con il
-// quoting dei path (che su Windows contengono spesso spazi).
+// Runs the VS Code CLI portably: on Windows `code` is a `.cmd` file, which
+// Node does not run with execFile → go through `cmd /c` with quoting of the
+// paths (which on Windows often contain spaces).
 function runCli(
   cli: string,
   args: string[],
@@ -96,8 +97,8 @@ async function listExtensions(cli: string): Promise<string> {
   return stdout;
 }
 
-// Versione installata del companion (es. `magiusche.pi-webview-ide@0.1.0`),
-// `null` se non è installato, "" se presente ma senza versione.
+// Installed companion version (e.g. `magiusche.pi-webview-ide@0.1.0`),
+// `null` if not installed, "" if present but without a version.
 async function installedCompanionVersion(cli: string): Promise<string | null> {
   const out = await listExtensions(cli);
   for (const line of out.split(/\r?\n/)) {
@@ -114,10 +115,10 @@ async function installCompanion(cli: string, vsixPath: string): Promise<void> {
   await runCli(cli, ["--install-extension", vsixPath, "--force"], 60_000);
 }
 
-// Path del bin `piw` sul PATH dell'utente (ex scripts/link-bin.mjs, rimosso):
+// Path of the `piw` bin on the user's PATH (ex scripts/link-bin.mjs, removed):
 // Unix → ~/.local/bin/piw (symlink), Windows → %APPDATA%\npm\piw.cmd.
-// Override della dir: PIW_BIN_DIR. Nessun postinstall npm: il link lo crea
-// l'estensione al primo avvio di pi (ensurePiwBin).
+// Dir override: PIW_BIN_DIR. No npm postinstall: the link is created by the
+// extension at the first pi startup (ensurePiwBin).
 function piwBinPaths(): { dir: string; link: string; target: string; isWindows: boolean } {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const target = join(moduleDir, "piw.js"); // dist/piw.js
@@ -137,25 +138,25 @@ function piwBinPaths(): { dir: string; link: string; target: string; isWindows: 
   };
 }
 
-// Crea il link `piw` sul PATH se manca. NIENTE postinstall npm (rimosso per
-// non avere install scripts): l'unica via di creazione/aggiornamento del link
-// è questo ensure all'avvio di pi. Best effort: mai rompere l'avvio di pi per
-// un link. Idempotente: non tocca file regolari utente.
+// Creates the `piw` link on PATH if missing. NO npm postinstall (removed to
+// avoid install scripts): the only creation/update path for the link is this
+// ensure at pi startup. Best effort: never break pi startup because of a link.
+// Idempotent: never touches user regular files.
 function ensurePiwBin(): void {
   try {
     const { dir, link, target, isWindows } = piwBinPaths();
     if (!dir) return;
     if (isWindows) {
-      // .cmd: crea SOLO se manca (mai sovrascrivere un eventuale file utente)
+      // .cmd: create ONLY if missing (never overwrite a possible user file)
       if (existsSync(link)) return;
       mkdirSync(dir, { recursive: true });
       const content = `@echo off\r\nnode "${target.replace(/"/g, '\\"')}" %*\r\n`;
       writeFileSync(link, content);
       return;
     }
-    // lstatSync come check di ESISTENZA (non existsSync): vede i symlink anche
-    // DANGLING, che altrimenti non verrebbero mai sostituiti (e symlinkSync
-    // fallirebbe con EEXIST sul path esistente)
+    // lstatSync as an EXISTENCE check (not existsSync): it sees even DANGLING
+    // symlinks, which would otherwise never be replaced (and symlinkSync
+    // would fail with EEXIST on the existing path)
     let st: ReturnType<typeof lstatSync> | null = null;
     try {
       st = lstatSync(link);
@@ -163,15 +164,15 @@ function ensurePiwBin(): void {
       st = null; // non esiste
     }
     if (st) {
-      if (!st.isSymbolicLink()) return; // file regolare utente: non toccare
+      if (!st.isSymbolicLink()) return; // user regular file: do not touch
       const cur = readlinkSync(link);
-      if (cur === target) return; // già il nostro link
-      rmSync(link); // link a un'altra versione/path di installazione: sostituisci
+      if (cur === target) return; // already our link
+      rmSync(link); // link to another version/install path: replace
     }
     mkdirSync(dir, { recursive: true });
     symlinkSync(target, link);
   } catch {
-    // best effort: mai rompere l'avvio per un link
+    // best effort: never break startup because of a link
   }
 }
 
@@ -180,7 +181,7 @@ function writeReloadSignal(version: string): void {
     mkdirSync(dirname(RELOAD_SIGNAL), { recursive: true });
     writeFileSync(RELOAD_SIGNAL, JSON.stringify({ version }, null, 2) + "\n");
   } catch {
-    // best effort: mai rompere l'installazione per un segnale
+    // best effort: never break installation because of a signal
   }
 }
 
@@ -192,27 +193,27 @@ function clearReloadSignal(): void {
   }
 }
 
-// Rimuove il symlink `piw` dal PATH dell'utente, SOLO se punta al bin di
-// questo pacchetto (mai file regolari utente, mai link che puntano altrove).
-// Replicato qui perché senza postinstall npm la pulizia del link spetta
-// interamente a /pi-webview uninstall.
+// Removes the `piw` symlink from the user's PATH, ONLY if it points to this
+// package's bin (never user regular files, never links pointing elsewhere).
+// Replicated here because without an npm postinstall the link cleanup is
+// entirely up to /pi-webview uninstall.
 function unlinkPiwBin(): void {
   const { dir, link, target } = piwBinPaths();
   if (!dir) return;
   try {
     if (!existsSync(link)) return;
-    if (!lstatSync(link).isSymbolicLink()) return; // file utente: non toccare
+    if (!lstatSync(link).isSymbolicLink()) return; // user file: do not touch
     const cur = readlinkSync(link);
-    if (cur !== target) return; // non è il nostro link
+    if (cur !== target) return; // not our link
     rmSync(link);
   } catch {
-    // best effort: mai rompere il comando per un link
+    // best effort: never break the command because of a link
   }
 }
 
 export default function (pi: PiApi): void {
-  // percorso del vsix companion incluso nel package: extension.js sta in dist/,
-  // il vsix a livello ROOT del package (companion/…) → risalire di un livello
+  // path of the bundled companion vsix in the package: extension.js lives in
+  // dist/, the vsix at package ROOT level (companion/…) → go up one level
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const vsixPath = join(moduleDir, "..", VSIX_REL);
 
@@ -221,22 +222,22 @@ export default function (pi: PiApi): void {
 
   let pendingNotify: string | null = null;
 
-  // ensure 1/2 — companion VS Code: installa/aggiorna se la versione installata
-  // non combacia col vsix incluso. Gira ad OGNI avvio di pi (idempotente): non
-  // è condizionato dal rilevamento IDE, così anche chi usa solo la webview o
-  // lancia pi da un terminale esterno riceve il companion aggiornato.
-  // Disattivabile con PI_WEBVIEW_AUTO_INSTALL=0.
+  // ensure 1/2 — VS Code companion: installs/updates if the installed version
+  // does not match the bundled vsix. Runs at EVERY pi startup (idempotent): not
+  // gated by IDE detection, so even webview-only users or pi launched from an
+  // external terminal get the updated companion.
+  // Disable with PI_WEBVIEW_AUTO_INSTALL=0.
   const tryAutoInstall = async (): Promise<void> => {
     if (!enabled) return;
     try {
       const installed = await installedCompanionVersion("code");
       const vsixVersion = readVsixVersion(vsixPath);
       if (installed !== null && vsixVersion !== undefined && installed === vsixVersion) {
-        clearReloadSignal(); // già aggiornato: nessun segnale pendente
-        return; // già installato e aggiornato
+        clearReloadSignal(); // already updated: no pending signal
+        return; // already installed and updated
       }
       await installCompanion("code", vsixPath);
-      // update (non installazione fresca) → segnala all'IDE aperto il reload
+      // update (not fresh install) → signal the open IDE to reload
       if (installed !== null && vsixVersion !== undefined) {
         writeReloadSignal(vsixVersion);
       }
@@ -245,19 +246,19 @@ export default function (pi: PiApi): void {
           ? "pi-webview: companion installed in VS Code. Reload the window to activate the webview."
           : `pi-webview: companion updated to ${vsixVersion}. Reload the window to activate the webview.`;
     } catch (err) {
-      // code CLI assente (ENOENT) → niente VS Code: skip silenzioso; altri
-      // errori vanno notificati
+      // code CLI missing (ENOENT) → no VS Code: silent skip; other
+      // errors must be notified
       if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
         pendingNotify = `pi-webview: companion install failed: ${err instanceof Error ? err.message : String(err)}`;
       }
     }
   };
 
-  // al caricamento: ensure companion VS Code + ensure link piw (fire and forget)
+  // at load: ensure VS Code companion + ensure piw link (fire and forget)
   void tryAutoInstall();
   ensurePiwBin();
 
-  // la notifica all'utente appena c'è un contesto UI
+  // notify the user as soon as there is a UI context
   pi.on("session_start", (_event, ctx) => {
     const ui = (ctx as { ui?: { notify: Notify } }).ui;
     if (ui && pendingNotify) {
@@ -266,10 +267,10 @@ export default function (pi: PiApi): void {
     }
   });
 
-  // compattazione fallita/annullata (pi 0.84.3+): inoltra il MOTIVO reale
-  // alla UI (webview → status line in chat; TUI → notifica) — l'evento ha
-  // reason (aborted/error), retryState, source e errorMessage, che il solo
-  // compaction_end non distingue
+  // compaction failed/cancelled (pi 0.84.3+): forward the REAL reason to
+  // the UI (webview → chat status line; TUI → notification) — the event has
+  // reason (aborted/error), retryState, source and errorMessage, which the
+  // compaction_end event alone does not distinguish
   pi.on("session_compact_failed", (event, ctx) => {
     const ui = (ctx as { ui?: { notify: Notify } }).ui;
     if (!ui?.notify) return;
@@ -294,13 +295,13 @@ export default function (pi: PiApi): void {
     );
   });
 
-  // registrazione differita: getCommands() è uno stub che LANCIAA durante il
-  // load ("Extension runtime not initialized") → il dedupe può avvenire solo
-  // dopo il bind, al primo session_start (che rpc-mode attende PRIMA di
-  // processare qualunque comando). Se lo stesso pacchetto è caricato due volte
-  // (es. installato npm + `pi -e` in dev) la seconda copia NON registra — con
-  // due registrazioni pi mangla il nome in "pi-webview:1"/"pi-webview:2" e il
-  // comando non è più invocabile.
+  // deferred registration: getCommands() is a stub that THROWS during load
+  // ("Extension runtime not initialized") → the dedupe can only happen after
+  // the bind, at the first session_start (which rpc-mode waits for BEFORE
+  // processing any command). If the same package is loaded twice (e.g.
+  // installed npm + `pi -e` in dev) the second copy does NOT register — with
+  // two registrations pi mangles the name to "pi-webview:1"/"pi-webview:2"
+  // and the command is no longer invocable.
   const registerCommand = (): void => {
     pi.registerCommand("pi-webview", {
     description: "Manage the webview IDE integration (status, install, reinstall, uninstall)",
@@ -311,8 +312,8 @@ export default function (pi: PiApi): void {
         case "status": {
           const ide = detectIde();
           const companion = process.env.PI_WEBVIEW_COMPANION === "1";
-          // presenza del link piw sul PATH (diagnostica; lstat: vede anche i
-          // symlink dangling)
+          // presence of the piw link on PATH (diagnostics; lstat: sees even
+          // dangling symlinks)
           const { dir, link } = piwBinPaths();
           let piw = "missing";
           try {
@@ -336,7 +337,7 @@ export default function (pi: PiApi): void {
           return;
         }
         case "uninstall": {
-          // 1) companion VS Code (se esiste — nessun gate sul rilevamento IDE)
+          // 1) VS Code companion (if present — no gate on IDE detection)
           try {
             const before = await installedCompanionVersion("code");
             if (before === null) {
@@ -354,10 +355,10 @@ export default function (pi: PiApi): void {
               "error",
             );
           }
-          // 2) link `piw` dal PATH (se è il nostro)
+          // 2) `piw` link from PATH (if it is ours)
           unlinkPiwBin();
           notify("pi-webview: piw binary link removed from PATH.", "info");
-          // 3) rimozione del pacchetto da pi stesso (pi remove npm:<nome>)
+          // 3) remove the package from pi itself (pi remove npm:<name>)
           try {
             await runCli("pi", ["remove", PKG_REF], 60_000);
             notify(

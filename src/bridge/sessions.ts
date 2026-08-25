@@ -1,6 +1,6 @@
-// Lettura delle sessioni di pi per la dropdown nell'header (senza LLM).
-// Le sessioni vivono in ~/.pi/agent/sessions/--<workspace>--/*.jsonl
-// (docs/session-format.md di pi). Il primo record è l'header con
+// Reading pi sessions for the header dropdown (no LLM).
+// Sessions live in ~/.pi/agent/sessions/--<workspace>--/*.jsonl
+// (docs/session-format.md of pi). The first record is the header with
 // {type:"session", id, cwd, name?}.
 
 import { homedir } from "node:os";
@@ -33,8 +33,8 @@ export function listSessions(
     return [];
   }
 
-  // con filtro workspace attivo, scandisci SOLO la cartella del progetto
-  // (il nome cartella codifica il workspace: --<path>-- con / → -)
+  // with an active workspace filter, scan ONLY the project folder
+  // (the folder name encodes the workspace: --<path>-- with / → -)
   if (workspace) {
     const target = encodeProjectFolder(workspace);
     projectDirs = projectDirs.filter(
@@ -49,14 +49,14 @@ export function listSessions(
     try {
       files = readdirSync(projPath);
     } catch {
-      continue; // non è una cartella di progetto
+      continue; // not a project folder
     }
     const decodedWorkspace = decodeProjectFolder(proj);
     for (const f of files) {
       if (!f.endsWith(".jsonl")) continue;
       const path = join(projPath, f);
       const info = cachedSessionInfo(path);
-      // filtra per workspace: header.cwd oppure nome cartella decodificato
+      // filter by workspace: header.cwd or decoded folder name
       if (workspace && info.cwd !== workspace && decodedWorkspace !== workspace) continue;
       out.push(info);
     }
@@ -70,15 +70,15 @@ export function listSessions(
   return out;
 }
 
-// Legge tutto il file: nome (session_info, ultimo), primo messaggio utente,
-// conteggio messaggi (TUTTE le entry di tipo message, come pi) e ultima
-// attività (timestamp massimo delle entry di messaggio, non l'mtime del file).
-// Il nome della sessione vive nel record `session_info` (docs/session-format.md,
-// riga 298) — la UI di pi mostra nome oppure primo messaggio, con conteggio e
-// tempo relativo (dist/modes/interactive/components/session-selector.js).
+// Reads the whole file: name (session_info, last one wins), first user
+// message, message count (ALL message-type entries, like pi) and last
+// activity (max timestamp of message entries, not the file mtime).
+// The session name lives in the `session_info` record (docs/session-format.md,
+// line 298) — the pi UI shows the name or the first message, with count and
+// relative time (dist/modes/interactive/components/session-selector.js).
 
-// Cache per file basata su mtime: le riaperture della dropdown non rileggono
-// i file enormi (info ricalcolata solo se il file è cambiato).
+// Per-file cache based on mtime: reopening the dropdown does not re-read the
+// huge files (info recomputed only when the file changed).
 const infoCache = new Map<string, { mtime: number; info: SessionInfo }>();
 
 function cachedSessionInfo(path: string): SessionInfo {
@@ -86,7 +86,7 @@ function cachedSessionInfo(path: string): SessionInfo {
   try {
     mtime = statSync(path).mtimeMs;
   } catch {
-    // file non raggiungibile
+    // file not reachable
   }
   const hit = infoCache.get(path);
   if (hit && hit.mtime === mtime) return hit.info;
@@ -95,20 +95,20 @@ function cachedSessionInfo(path: string): SessionInfo {
   return info;
 }
 
-// Info aggiornata di UNA sessione (per aggiornare nome/titolo a fine turno
-// senza rileggere tutti i file).
+// Updated info of ONE session (to update the name/title at turn end without
+// re-reading all files).
 export function getSessionInfo(path: string): SessionInfo {
   return cachedSessionInfo(path);
 }
 
-// Rinomina una sessione (anche NON corrente) appendendo una entry session_info
-// al file jsonl — stesso formato che usa pi (appendSessionInfo): l'ultimo nome
-// vince. Il nome viene sanificato come in pi (niente a capo, trim).
+// Renames a session (also non-current) by appending a session_info entry to
+// the jsonl file — the same format pi uses (appendSessionInfo): the last name
+// wins. The name is sanitized like in pi (no newlines, trim).
 export function renameSessionFile(path: string, name: string): void {
   const sanitized = name.replace(/[\r\n]+/g, " ").trim();
-  if (!sanitized) throw new Error("nome sessione vuoto");
+  if (!sanitized) throw new Error("empty session name");
   if (!path.endsWith(".jsonl") || !existsSync(path)) {
-    throw new Error("sessione non trovata");
+    throw new Error("session not found");
   }
   const entry = {
     type: "session_info",
@@ -117,13 +117,13 @@ export function renameSessionFile(path: string, name: string): void {
     name: sanitized,
   };
   appendFileSync(path, JSON.stringify(entry) + "\n");
-  infoCache.delete(path); // la cache rilegge al prossimo accesso
+  infoCache.delete(path); // the cache re-reads on next access
 }
 
-// Elimina il file di sessione e invalida la cache.
+// Deletes the session file and invalidates the cache.
 export function deleteSessionFile(path: string): void {
-  if (!path.endsWith(".jsonl")) throw new Error("percorso non valido");
-  if (!existsSync(path)) return; // già assente: idempotente
+  if (!path.endsWith(".jsonl")) throw new Error("invalid path");
+  if (!existsSync(path)) return; // already gone: idempotent
   unlinkSync(path);
   infoCache.delete(path);
 }
@@ -164,7 +164,7 @@ function readSessionInfo(path: string): {
       info.id = typeof entry.id === "string" ? entry.id : undefined;
       info.cwd = typeof entry.cwd === "string" ? entry.cwd : undefined;
     } else if (entry.type === "session_info" && typeof entry.name === "string") {
-      // ultimo nome (incluso un eventuale clear)
+      // last name wins (including a possible clear)
       info.name = entry.name;
     } else if (entry.type === "message") {
       count++;
@@ -196,13 +196,13 @@ function userText(content: unknown): string {
   return "";
 }
 
-// Fork di una sessione nella cartella corrente — replica SessionManager.forkFrom
-// di pi (docs/session-format.md, dist/core/session-manager.js): nuova sessione
-// con header aggiornato (cwd del workspace, parentSession → sorgente) e copia
-// delle entry non-header.
+// Fork of a session into the current folder — replicates pi's
+// SessionManager.forkFrom (docs/session-format.md, dist/core/session-manager.js):
+// new session with updated header (workspace cwd, parentSession → source) and
+// copy of the non-header entries.
 //
-// NB: il nome cartella usa - come separatore dei path (stessa limitazione di pi:
-// i path con trattini non fanno round-trip).
+// NOTE: the folder name uses - as path separator (same limitation as pi:
+// paths with dashes do not round-trip).
 export function forkSession(
   sourcePath: string,
   workspace: string,
@@ -219,7 +219,7 @@ export function forkSession(
     })
     .filter((e): e is { type?: string; version?: number } => e !== null);
   const header = entries.find((e) => e.type === "session");
-  if (!header) throw new Error("sessione sorgente non valida (nessun header)");
+  if (!header) throw new Error("invalid source session (no header)");
 
   const id = randomUUID();
   const timestamp = new Date().toISOString();
@@ -255,15 +255,15 @@ function encodeProjectFolder(path: string): string {
   return `--${inner}--`;
 }
 
-// --- flag CLI per-sessione (blocco 3 settings) --------------------------------
-// Salvati come ENTRY CUSTOM nel file jsonl della sessione (NON nei settings,
-// che crescerebbero per ogni sessione): formato identico a pi.appendCustomEntry
-// ({type:"custom", customType:"pi-webview-cli-flags", data:{...}}). Le entry
-// custom non hanno role → la cronologia le ignora. L'ULTIMA entry vince.
+// --- per-session CLI flags (settings block 3) --------------------------------
+// Saved as a CUSTOM ENTRY in the session jsonl file (NOT in settings, which
+// would grow for every session): same format as pi.appendCustomEntry
+// ({type:"custom", customType:"pi-webview-cli-flags", data:{...}}). Custom
+// entries have no role → history ignores them. The LAST entry wins.
 
 const CLI_FLAGS_CUSTOM_TYPE = "pi-webview-cli-flags";
 
-/** legge i flag CLI attivi della sessione (l'ultima entry custom vince) */
+/** reads the session's active CLI flags (the last custom entry wins) */
 export function readSessionCliFlags(path: string): CliFlags {
   if (!existsSync(path)) return {};
   try {
@@ -292,11 +292,11 @@ export function readSessionCliFlags(path: string): CliFlags {
   }
 }
 
-/** scrive i flag CLI attivi della sessione (append di una entry custom) */
+/** writes the session's active CLI flags (append of a custom entry) */
 export function writeSessionCliFlags(path: string, flags: CliFlags): void {
   if (!existsSync(path)) return;
   try {
-    // parentId = id dell'ultima entry (il foglio corrente), come pi fa con
+    // parentId = id of the last entry (the current leaf), like pi does with
     // appendCustomEntry (parentId: leafId)
     let parentId: string | undefined;
     const lines = readFileSync(path, "utf-8").trimEnd().split("\n");
@@ -306,7 +306,7 @@ export function writeSessionCliFlags(path: string, flags: CliFlags): void {
       try {
         parentId = (JSON.parse(t) as { id?: string }).id;
       } catch {
-        // riga non parseabile: continua a risalire
+        // unparseable line: keep walking up
       }
       break;
     }
@@ -320,6 +320,6 @@ export function writeSessionCliFlags(path: string, flags: CliFlags): void {
     };
     appendFileSync(path, JSON.stringify(entry) + "\n");
   } catch {
-    // best effort: mai rompere l'Applica per una scrittura fallita
+    // best effort: never break Apply because of a failed write
   }
 }

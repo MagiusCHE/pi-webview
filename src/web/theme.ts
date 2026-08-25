@@ -1,7 +1,7 @@
-// Gestione tema della UI (concept 0002 D7):
-// - webview VS Code → il tema lo passa l'IDE (data-vscode-theme-kind sul body,
-//   variabili CSS --vscode-*, messaggio "vscode-theme-changed")
-// - standalone → preferenza utente (light/dark/system, default system)
+// UI theme management (concept 0002 D7):
+// - VS Code webview → the theme comes from the IDE (data-vscode-theme-kind on the body,
+//   CSS variables --vscode-*, message "vscode-theme-changed")
+// - standalone → user preference (light/dark/system, default system)
 
 import type { ThemePreference } from "../ide/protocol.ts";
 
@@ -15,7 +15,7 @@ export function effectiveTheme(pref: ThemePreference): EffectiveTheme {
   return pref === "system" ? systemTheme() : pref;
 }
 
-// In webview VS Code: il body ha l'attributo data-vscode-theme-kind.
+// In the VS Code webview: the body has the data-vscode-theme-kind attribute.
 function vscodeThemeKind(): EffectiveTheme | null {
   const kind = document.body?.dataset.vscodeThemeKind;
   if (kind === "vscode-light") return "light";

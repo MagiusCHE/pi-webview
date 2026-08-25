@@ -1,22 +1,22 @@
-// piw — avvia pi-webview standalone dal pacchetto installato (piano 0005).
-// Binario npm (`"bin": { "piw": "dist/piw.js" }`): npm genera lo shim
-// (script/symlink su Linux/macOS, `piw.cmd` su Windows).
+// piw — runs pi-webview standalone from the installed package (plan 0005).
+// npm bin (`"bin": { "piw": "dist/piw.js" }`): npm generates the shim
+// (script/symlink on Linux/macOS, `piw.cmd` on Windows).
 //
-// Uso:
-//   piw                      → apre una NUOVA sessione (nuova tab, se serve)
-//   piw --session <id>       → riprende una sessione (id parziale o path;
-//                              la cwd la imposta pi dalla sessione)
-//   piw --port N             → porta fissa (default: casuale)
-//   piw --no-open            → non apre il browser: stampa il link in console
-//   piw --pi <comando>       → comando pi alternativo
-//   piw --background | -b    → avvia in background (fire-and-forget),
-//                              staccato dal terminale, e apre il browser;
-//                              con --no-open stampa solo il link
-//   piw -k | --kill          → ferma il bridge in background
+// Usage:
+//   piw                      → opens a NEW session (new tab, if needed)
+//   piw --session <id>       → resumes a session (partial id or path;
+//                              the cwd is set by pi from the session)
+//   piw --port N             → fixed port (default: random)
+//   piw --no-open            → does not open the browser: prints the link
+//   piw --pi <command>       → alternative pi command
+//   piw --background | -b    → starts in background (fire-and-forget),
+//                              detached from the terminal, and opens the browser;
+//                              with --no-open prints only the link
+//   piw -k | --kill          → stops the background bridge
 //
-// Single-instance: un SOLO bridge in ascolto per utente. Se un bridge è già
-// attivo (lock valido: pid vivo + /health col token), piw NON ne avvia un
-// secondo: apre solo una nuova tab del browser verso il bridge esistente.
+// Single-instance: ONE bridge listening per user. If a bridge is already
+// active (valid lock: live pid + /health with token), piw does NOT start a
+// second one: it only opens a new browser tab towards the existing bridge.
 
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -33,12 +33,12 @@ import {
 } from "./lock.ts";
 import { ensureVscodeCompanion } from "./companion.ts";
 
-// dist/piw.js → root del pacchetto installato
+// dist/piw.js → root of the installed package
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const bridgeJs = join(root, "dist", "bridge.cjs");
 const webDir = join(root, "dist", "web");
 
-// versione del pacchetto (per --version e per la riga di avvio)
+// package version (for --version and the launch line)
 const piwVersion: string = (() => {
   try {
     const json = JSON.parse(
@@ -50,21 +50,20 @@ const piwVersion: string = (() => {
   }
 })();
 
-// verifica del companion VS Code (fire and forget: mai bloccare l'avvio)
-// divisione: estensione pi → solo link piw; piw → solo companion VS Code
+// VS Code companion check (fire and forget: never block startup)
+// split: pi extension → only piw link; piw → only VS Code companion
 void ensureVscodeCompanion(root).then((msg) => {
   if (msg) console.log(msg);
 });
 
 for (const f of [bridgeJs, webDir]) {
   if (!existsSync(f)) {
-    console.error(`piw: manca ${f} — pacchetto installato incompleto`);
-    process.exit(1);
+    console.error(`piw: manca ${f} — pacchetto installato incompleto`);    process.exit(1);
   }
 }
 
 const argv = process.argv.slice(2).filter((a) => a !== "--");
-// ^ il separatore `--` (convenzione: piw -- -b) non è un argomento reale:
+// ^ the `--` separator (convention: piw -- -b) is not a real argument:
 const value = (name: string): string | undefined => {
   const i = argv.indexOf(name);
   return i >= 0 ? argv[i + 1] : undefined;
@@ -72,27 +71,27 @@ const value = (name: string): string | undefined => {
 const noOpen = argv.includes("--no-open");
 const background = argv.includes("--background") || argv.includes("-b");
 const kill = argv.includes("--kill") || argv.includes("-k");
-// processo già staccato (rilancio interno di --background)
+// already detached process (internal relaunch of --background)
 const detachedRun = process.env.PIW_DETACHED === "1";
 const session = value("--session");
 const portArg = value("--port");
 const piArg = value("--pi");
 const debug = argv.includes("--debug");
 
-// argomenti extra passati al bridge (es. --no-idle, --idle-timeout, --mock-ide)
+// extra arguments passed to the bridge (e.g. --no-idle, --idle-timeout, --mock-ide)
 const extra: string[] = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === "--no-open" || a === "--debug") continue;
   if (a === "--session" || a === "--port" || a === "--pi") {
-    i++; // salta anche il valore
+    i++; // skip the value too
     continue;
   }
   if (a === "--background" || a === "-b" || a === "--kill" || a === "-k") continue;
   if (a !== undefined) extra.push(a);
 }
 
-// intent per la UI: nuova sessione (default) o resume di una esistente
+// intent for the UI: new session (default) or resume of an existing one
 const intent = session
   ? `session=${encodeURIComponent(session)}`
   : "new=1";
@@ -109,23 +108,23 @@ function openBrowser(url: string): void {
 }
 
 async function main(): Promise<void> {
-  // 0a) --version | -V: stampa SOLO la versione ed esce
+  // 0a) --version | -V: prints ONLY the version and exits
   if (argv.includes("--version") || argv.includes("-V")) {
     console.log(`piw ${piwVersion}`);
     process.exit(0);
   }
 
-  // ogni lancio dice la sua versione
+  // every launch says its version
   console.log(`piw ${piwVersion}`);
 
-  // 0b) --kill: ferma il bridge in background (il pid è nel lock)
+  // 0b) --kill: stops the background bridge (the pid is in the lock)
   if (kill) {
     const l = readLock();
     if (l && pidAlive(l.pid) && (await healthCheck(l.port, l.token))) {
       try {
         process.kill(l.pid, "SIGTERM");
       } catch {
-        // processo già terminato: prosegue con la pulizia
+        // process already terminated: continue with the cleanup
       }
       console.log(`piw: bridge (pid ${l.pid}) fermato.`);
       clearLock();
@@ -138,12 +137,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  // 0) --background: si rilancia staccato dal terminale e il processo
-  //    originale esce subito (cross-platform: detached=true di Node).
-  //    Il figlio (PIW_DETACHED=1) fa il lavoro normale e resta vivo col bridge.
-  //    Il parent NON esce finché il lock non è valido: evita la race dove un
-  //    `piw` successivo immediato troverebbe il lock assente e avvierebbe
-  //    un secondo bridge.
+  // 0) --background: relaunches detached from the terminal and the original
+  //    process exits right away (cross-platform: Node's detached=true).
+  //    The child (PIW_DETACHED=1) does the normal work and stays alive with
+  //    the bridge. The parent does NOT exit until the lock is valid: avoids
+  //    the race where an immediate next `piw` would find the lock missing
+  //    and start a second bridge.
   if (background && !detachedRun) {
     const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv], {
       detached: true,
@@ -157,7 +156,7 @@ async function main(): Promise<void> {
       const l = readLock();
       if (l && pidAlive(l.pid) && (await healthCheck(l.port, l.token))) {
         const url = `http://127.0.0.1:${l.port}/?${intent}`;
-        // default: apre il browser; con --no-open stampa solo il link
+        // default: opens the browser; with --no-open prints only the link
         if (noOpen) {
           console.log(`piw: bridge attivo su ${url}`);
         } else {
@@ -174,7 +173,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // 1) bridge già attivo? → riusa (niente secondo bridge)
+  // 1) bridge already active? → reuse (no second bridge)
   const lock = readLock();
   if (lock && pidAlive(lock.pid) && (await healthCheck(lock.port, lock.token))) {
     const url = `http://127.0.0.1:${lock.port}/?${intent}`;
@@ -186,7 +185,7 @@ async function main(): Promise<void> {
     console.log("piw: lock stantio (bridge non raggiungibile) — avvio un nuovo bridge");
   }
 
-  // 2) nuovo bridge: token generato qui (il bridge lo usa e il lock lo registra)
+  // 2) new bridge: token generated here (the bridge uses it and the lock records it)
   const token = randomBytes(16).toString("hex");
   const bridgeArgs = [
     bridgeJs,
@@ -200,8 +199,8 @@ async function main(): Promise<void> {
     ...extra,
   ];
 
-  // risolve `pi` nel PATH e lo passa esplicitamente al bridge (portabile:
-  // su Windows lo shim è pi.cmd, con path assoluto e eventuali spazi)
+  // resolves `pi` in the PATH and passes it explicitly to the bridge (portable:
+  // on Windows the shim is pi.cmd, with absolute path and possible spaces)
   const pi = resolvePi();
   if (!pi.found) {
     console.error("piw: comando 'pi' non trovato nel PATH.");
@@ -217,7 +216,7 @@ async function main(): Promise<void> {
     stdio: ["ignore", "pipe", "inherit"],
   });
 
-  // 3) attende BRIDGE_READY per conoscere la porta reale e registrare il lock
+  // 3) waits for BRIDGE_READY to know the real port and register the lock
   const port = await new Promise<number>((resolve, reject) => {
     const timer = setTimeout(() => {
       child.kill();
@@ -244,7 +243,7 @@ async function main(): Promise<void> {
   console.log(`piw: bridge attivo su ${url}`);
   if (!noOpen && !detachedRun) openBrowser(url);
 
-  // 4) il launcher resta vivo con il bridge; su uscita pulisce il lock
+  // 4) the launcher stays alive with the bridge; on exit it cleans the lock
   child.on("exit", (code) => {
     clearLock();
     process.exit(code ?? 0);

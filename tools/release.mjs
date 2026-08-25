@@ -1,19 +1,19 @@
 #!/usr/bin/env node
-// Release prep/publish per il pacchetto pi @magiusche/pi-webview.
+// Release prep/publish for the pi package @magiusche/pi-webview.
 //
-// Uso:
-//   pnpm release -- --version 0.1.1                 → SOLO prepara (nessuna pubblicazione)
-//   pnpm release -- --version 0.1.1 --tag next      → prepara (il tag serve alla pubblicazione)
-//   pnpm release -- --publish                       → pubblica la versione corrente
-//   pnpm release -- --version 0.1.1 --publish       → bump + rebuild + pubblica
+// Usage:
+//   pnpm release -- --version 0.1.1                 → ONLY prepare (no publish)
+//   pnpm release -- --version 0.1.1 --tag next      → prepare (the tag is used by the publish)
+//   pnpm release -- --publish                       → publish the current version
+//   pnpm release -- --version 0.1.1 --publish       → bump + rebuild + publish
 //   pnpm release -- --version 0.1.1 --publish --tag beta
 //
-// - `--version <semver>`: aggiorna "version" in package.json (root, VS Code)
-//   e in packages/pi-webview/package.json (pacchetto pi).
-// - `--tag <dist-tag>`: dist-tag npm per la pubblicazione (latest è il default).
-// - `--publish`: esegue `npm publish --access public` e, a pubblicazione
-//   riuscita, crea in automatico il tag git `v<version>` + la GitHub release
-//   (idempotente: se tag/release esistono già per quella versione, skip).
+// - `--version <semver>`: updates "version" in package.json (root, VS Code)
+//   and in packages/pi-webview/package.json (pi package).
+// - `--tag <dist-tag>`: npm dist-tag for the publish (latest is the default).
+// - `--publish`: runs `npm publish --access public` and, after a successful
+//   publish, automatically creates the git tag `v<version>` + the GitHub
+//   release (idempotent: skips if tag/release already exist for that version).
 
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -26,7 +26,7 @@ const pkgRoot = join(root, "package.json");
 const pkgPi = join(root, "packages", "pi-webview", "package.json");
 const piDir = join(root, "packages", "pi-webview");
 
-// --- argomenti ---
+// --- arguments ---
 const argv = process.argv.slice(2);
 const has = (name) => argv.includes(name);
 const value = (name) => {
@@ -40,20 +40,20 @@ const publish = has("--publish");
 
 const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 if (version !== undefined && !SEMVER.test(version)) {
-  console.error(`✗ versione non valida: "${version}" (atteso semver, es. 0.1.1)`);
+  console.error(`✗ invalid version: "${version}" (expected semver, e.g. 0.1.1)`);
   process.exit(1);
 }
 if (tag !== undefined && !publish) {
-  console.warn("⚠ --tag ignorato: senza --publish non si pubblica.");
+  console.warn("⚠ --tag ignored: without --publish nothing is published.");
 }
 if (!version && !publish) {
   console.error(
-    "✗ uso: pnpm release -- --version <semver> [--tag <dist-tag>] [--publish]",
+    "✗ usage: pnpm release -- --version <semver> [--tag <dist-tag>] [--publish]",
   );
   process.exit(1);
 }
 
-// --- 1) bump versione (se richiesto) ---
+// --- 1) version bump (if requested) ---
 if (version) {
   for (const file of [pkgRoot, pkgPi]) {
     const json = JSON.parse(readFileSync(file, "utf-8"));
@@ -64,21 +64,21 @@ if (version) {
   }
 } else {
   const cur = JSON.parse(readFileSync(pkgPi, "utf-8")).version;
-  console.log(`→ nessun bump richiesto, versione corrente: ${cur}`);
+  console.log(`→ no bump requested, current version: ${cur}`);
 }
 
-// --- 2) rebuild (vsix companion + bundle pi) ---
+// --- 2) rebuild (companion vsix + pi bundle) ---
 console.log("\n→ build companion (vsix)…");
 execSync("node tools/build-ide-vsix.mjs", { cwd: root, stdio: "inherit" });
 console.log("→ build pacchetto pi (bundle + copia vsix)…");
 execSync("node tools/build-addon.mjs", { cwd: root, stdio: "inherit" });
 
-// --- 3) verifica tarball ---
+// --- 3) tarball check ---
 const piJson = JSON.parse(readFileSync(pkgPi, "utf-8"));
 console.log(`\n→ verifica tarball ${piJson.name}@${piJson.version}…`);
 execSync("npm pack --dry-run", { cwd: piDir, stdio: "inherit" });
 
-// --- 4) pubblicazione (solo con --publish esplicito) ---
+// --- 4) publish (only with explicit --publish) ---
 if (publish) {
   console.log(
     `\n→ npm publish ${piJson.name}@${piJson.version}${tag ? ` --tag ${tag}` : ""}…`,
@@ -88,13 +88,13 @@ if (publish) {
     stdio: "inherit",
   });
   console.log(`\n✓ pubblicato: ${piJson.name}@${piJson.version}`);
-  console.log("→ gli utenti aggiornano con: pi update npm:@magiusche/pi-webview");
+  console.log("→ users update with: pi update npm:@magiusche/pi-webview");
 
-  // --- 5) tag git + release GitHub (solo dopo publish riuscito, idempotenti) ---
+  // --- 5) git tag + GitHub release (only after a successful publish, idempotent) ---
   const releaseName = `v${piJson.version}`;
 
-  // usa `direnv exec .` per git push / gh (account GitHub corretto per il
-  // repo) quando la dir del progetto o un parent ha un .envrc
+  // uses `direnv exec .` for git push / gh (correct GitHub account for the
+  // repo) when the project dir or a parent has a .envrc
   const hasDirenv = (() => {
     try {
       execSync("which direnv", { stdio: "ignore" });
@@ -115,7 +115,7 @@ if (publish) {
       stdio: "inherit",
     });
 
-  // tag git (idempotente)
+  // git tag (idempotent)
   let tagExists = false;
   try {
     execSync(`git rev-parse --verify refs/tags/${releaseName}`, {
@@ -127,7 +127,7 @@ if (publish) {
     tagExists = false;
   }
   if (tagExists) {
-    console.log(`→ tag git ${releaseName} già esistente: skip.`);
+    console.log(`→ git tag ${releaseName} already exists: skip.`);
   } else {
     try {
       const dirty = execSync("git status --porcelain", {
@@ -136,28 +136,28 @@ if (publish) {
       }).trim();
       if (dirty) {
         console.warn(
-          `⚠ working tree sporco: il tag ${releaseName} verrà creato sul commit corrente (le modifiche non committate NON saranno incluse).`,
+          `⚠ dirty working tree: the tag ${releaseName} will be created on the current commit (uncommitted changes will NOT be included).`,
         );
       }
     } catch {
-      // non in un repo git: si procede comunque
+      // not in a git repo: proceed anyway
     }
     execSync(
       `git tag -a ${releaseName} -m "@magiusche/pi-webview ${piJson.version}"`,
       { cwd: root, stdio: "inherit" },
     );
-    console.log(`✓ tag git creato: ${releaseName}`);
+    console.log(`✓ git tag created: ${releaseName}`);
   }
 
-  // push del tag
+  // push the tag
   try {
     run(`git push origin ${releaseName}`);
-    console.log(`✓ tag pushato: ${releaseName}`);
+    console.log(`✓ tag pushed: ${releaseName}`);
   } catch (err) {
-    console.warn(`⚠ push del tag fallito: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`⚠ tag push failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // release GitHub (idempotente)
+  // GitHub release (idempotent)
   let ghExists = false;
   try {
     execSync(`gh release view ${releaseName}`, { cwd: root, stdio: "ignore" });
@@ -166,14 +166,14 @@ if (publish) {
     ghExists = false;
   }
   if (ghExists) {
-    console.log(`→ release GitHub ${releaseName} già esistente: skip.`);
+    console.log(`→ GitHub release ${releaseName} already exists: skip.`);
   } else {
     const notesFile = join(tmpdir(), `pi-webview-notes-${piJson.version}.md`);
     writeFileSync(
       notesFile,
       `@magiusche/pi-webview ${piJson.version}\n\nInstall: \`pi install npm:@magiusche/pi-webview\`\nUpdate: \`pi update --extensions\`\n\nhttps://www.npmjs.com/package/@magiusche/pi-webview\n`,
     );
-    // tarball da allegare (opzionale: se il pack fallisce si allega il solo link)
+    // tarball to attach (optional: if the pack fails, only the link is attached)
     let tgzPath = null;
     try {
       const out = execSync("npm pack", { cwd: piDir, encoding: "utf-8" });
@@ -187,10 +187,10 @@ if (publish) {
       run(
         `gh release create ${releaseName}${tgzArg} --title "@magiusche/pi-webview ${piJson.version}" --notes-file "${notesFile}"`,
       );
-      console.log(`✓ release GitHub creata: ${releaseName}`);
+      console.log(`✓ GitHub release created: ${releaseName}`);
     } catch (err) {
       console.warn(
-        `⚠ creazione release GitHub fallita: ${err instanceof Error ? err.message : String(err)}`,
+        `⚠ GitHub release creation failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
       rmSync(notesFile, { force: true });
@@ -198,6 +198,6 @@ if (publish) {
     }
   }
 } else {
-  console.log("\n✓ pacchetto pronto. Nulla è stato pubblicato.");
-  console.log("→ per pubblicare: pnpm release -- --publish [--tag <dist-tag>]");
+  console.log("\n✓ package ready. Nothing was published.");
+  console.log("→ to publish: pnpm release -- --publish [--tag <dist-tag>]");
 }

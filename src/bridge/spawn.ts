@@ -1,5 +1,5 @@
-// Risoluzione del binario `pi` cross-platform (concept 0002 D6):
-// su Windows lo shim npm è `pi.cmd`, altrove `pi`.
+// Resolution of the `pi` binary cross-platform (concept 0002 D6):
+// on Windows the npm shim is `pi.cmd`, elsewhere `pi`.
 
 import { accessSync, constants } from "node:fs";
 import { join } from "node:path";
@@ -42,8 +42,8 @@ export function resolvePi(platform: NodeJS.Platform = process.platform): PiResol
   return { command: bin, found: path !== null, path };
 }
 
-// pi su Windows richiede una bash shell (Git Bash / Cygwin / MSYS2 / WSL):
-// docs/windows.md di pi. Restituisce un avviso se manca.
+// pi on Windows requires a bash shell (Git Bash / Cygwin / MSYS2 / WSL):
+// docs/windows.md of pi. Returns a warning if missing.
 export function checkBashOnWindows(
   platform: NodeJS.Platform = process.platform,
 ): string | null {

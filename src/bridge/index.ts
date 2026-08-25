@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Bridge standalone (piano 0001 + 0005): espone `pi --mode rpc` su WebSocket
-// locale (127.0.0.1 + token) con sessioni multiple. Ogni connessione WS è un
-// canale dedicato con il SUO processo pi: l'intento (nuova sessione o resume)
-// viene dichiarato dal client nella query del WS (?new=1 / ?session=<path>).
-// Inoltro bidirezionale trasparente dei frame JSONL per canale — niente
-// broadcast tra client.
+// Standalone bridge (plans 0001 + 0005): exposes `pi --mode rpc` over a local
+// WebSocket (127.0.0.1 + token) with multiple sessions. Each WS connection is
+// a dedicated channel with its OWN pi process: the intent (new session or
+// resume) is declared by the client in the WS query (?new=1 / ?session=<path>).
+// Transparent bidirectional forwarding of JSONL frames per channel — no
+// broadcast between clients.
 
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -30,8 +30,8 @@ import { saveAttachment, pathExists } from "./attachments.ts";
 import { fetchProviderBalance } from "./balance.ts";
 import { clearLock } from "./lock.ts";
 
-// versione del pacchetto pi-webview (il "piw"): risale da dist/ (bridge.cjs)
-// al package.json più vicino (in dev: src/bridge → root del repo)
+// pi-webview package version (the "piw"): climbs from dist/ (bridge.cjs)
+// to the nearest package.json (in dev: src/bridge → repo root)
 function packageVersion(): string | null {
   let dir = __dirname;
   for (let i = 0; i < 4; i++) {
@@ -41,7 +41,7 @@ function packageVersion(): string | null {
       ) as { version?: unknown };
       if (typeof json.version === "string") return json.version;
     } catch {
-      // continua a risalire
+      // keep climbing up
     }
     dir = dirname(dir);
   }
@@ -101,7 +101,7 @@ function parseArgs(argv: string[]): Options {
         opts.idleTimeoutMs = Number(argv[++i]) * 1000;
         break;
       default:
-        console.error(`[bridge] argomento sconosciuto: ${arg}`);
+        console.error(`[bridge] unknown argument: ${arg}`);
         process.exit(2);
     }
   }
@@ -139,7 +139,7 @@ function serveStatic(root: string, req: IncomingMessage, res: ServerResponse): v
   createReadStream(filePath).pipe(res);
 }
 
-// intent dichiarato dal client nella query del WebSocket
+// intent declared by the client in the WebSocket query
 interface Intent {
   kind: "default" | "new" | "session";
   sessionPath?: string;
@@ -168,19 +168,19 @@ function main(): void {
   const bashWarning = checkBashOnWindows();
   if (bashWarning) console.warn(`[bridge] ATTENZIONE: ${bashWarning}`);
 
-  // comando da spawnare: usa il path risolto (su Windows pi.cmd ha bisogno
-  // del path completo), a meno che l'utente non ne passi uno esplicito
+  // command to spawn: use the resolved path (on Windows pi.cmd needs the
+  // full path), unless the user passes an explicit one
   const piCommand = opts.piCommand === "pi" && pi.path ? pi.path : opts.piCommand;
 
   const token = opts.token ?? randomBytes(16).toString("hex");
   const mockIde = opts.mockIde ? createMockIde((m) => console.error(m)) : null;
   const configStore = new ConfigStore();
 
-  // --- server HTTP (health, config, serve statico opzionale) ---------------
+  // --- HTTP server (health, config, optional static serve) -----------------
   const http = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (url.pathname === "/health") {
-      // usato da `piw` per validare il lock (single-instance)
+      // used by `piw` to validate the lock (single-instance)
       if (url.searchParams.get("token") === token) {
         res.writeHead(200).end("ok");
       } else {
@@ -200,7 +200,7 @@ function main(): void {
     res.writeHead(404).end("bridge attivo, ma --serve non specificato");
   });
 
-  // --- WebSocket con autenticazione via token ------------------------------
+  // --- WebSocket with token authentication ---------------------------------
   const wss = new WebSocketServer({ noServer: true });
   const channels = new Set<Channel>();
 
@@ -216,7 +216,7 @@ function main(): void {
     });
   });
 
-  // --- canale: una connessione WS + il suo processo pi ----------------------
+  // --- channel: one WS connection + its pi process --------------------------
   interface Channel {
     ws: WebSocket;
     workspaceDir: string;
@@ -253,9 +253,9 @@ function main(): void {
 
     let pi = makePi(workspaceDir, intent.kind === "session" ? intent.sessionPath : undefined);
     pi.start();
-    log(`canale aperto (intent=${intent.kind})`);
+    log(`channel open (intent=${intent.kind})`);
 
-    // cambio workspace: riavvia pi con la nuova cwd
+    // workspace change: restart pi with the new cwd
     const switchWorkspace = (newCwd: string): Promise<void> =>
       new Promise((resolve) => {
         workspaceDir = newCwd;
@@ -272,7 +272,7 @@ function main(): void {
       }
       if (req.type === "setConfig") {
         configStore.patch(req.patch);
-        log(`config aggiornata: ${JSON.stringify(req.patch)}`);
+        log(`config updated: ${JSON.stringify(req.patch)}`);
         respond(req.id ?? "", { ok: true, data: configStore.get() });
         return;
       }
@@ -307,7 +307,7 @@ function main(): void {
         } catch (err) {
           respond(req.id ?? "", {
             ok: false,
-            error: `lettura cartella fallita: ${err instanceof Error ? err.message : String(err)}`,
+            error: `folder listing failed: ${err instanceof Error ? err.message : String(err)}`,
           });
         }
         return;
@@ -322,7 +322,7 @@ function main(): void {
         } catch (err) {
           respond(req.id ?? "", {
             ok: false,
-            error: `fork nella nuova cartella fallito: ${err instanceof Error ? err.message : String(err)}`,
+            error: `fork into the new folder failed: ${err instanceof Error ? err.message : String(err)}`,
           });
           return;
         }
@@ -333,7 +333,7 @@ function main(): void {
           .catch((err: unknown) =>
             respond(req.id ?? "", {
               ok: false,
-              error: `cambio workspace fallito: ${err instanceof Error ? err.message : String(err)}`,
+              error: `workspace switch failed: ${err instanceof Error ? err.message : String(err)}`,
             }),
           );
         return;
@@ -363,7 +363,7 @@ function main(): void {
         } catch (err) {
           respond(req.id ?? "", {
             ok: false,
-            error: `salvataggio allegato fallito: ${err instanceof Error ? err.message : String(err)}`,
+            error: `attachment save failed: ${err instanceof Error ? err.message : String(err)}`,
           });
         }
         return;
@@ -378,7 +378,7 @@ function main(): void {
         } catch (err) {
           respond(req.id ?? "", {
             ok: false,
-            error: `info sessione non disponibile: ${err instanceof Error ? err.message : String(err)}`,
+            error: `session info unavailable: ${err instanceof Error ? err.message : String(err)}`,
           });
         }
         return;
@@ -390,7 +390,7 @@ function main(): void {
         } catch (err) {
           respond(req.id ?? "", {
             ok: false,
-            error: `rinomina non riuscita: ${err instanceof Error ? err.message : String(err)}`,
+            error: `rename failed: ${err instanceof Error ? err.message : String(err)}`,
           });
         }
         return;
@@ -402,7 +402,7 @@ function main(): void {
         } catch (err) {
           respond(req.id ?? "", {
             ok: false,
-            error: `eliminazione non riuscita: ${err instanceof Error ? err.message : String(err)}`,
+            error: `deletion failed: ${err instanceof Error ? err.message : String(err)}`,
           });
         }
         return;
@@ -423,7 +423,7 @@ function main(): void {
         } catch (err) {
           respond(req.id ?? "", {
             ok: false,
-            error: `fork fallito: ${err instanceof Error ? err.message : String(err)}`,
+            error: `fork failed: ${err instanceof Error ? err.message : String(err)}`,
           });
         }
         return;
@@ -437,7 +437,7 @@ function main(): void {
       } else {
         respond(req.id ?? "", {
           ok: false,
-          error: "nessun IDE (usa --mock-ide per simulare)",
+          error: "no IDE (use --mock-ide to simulate)",
         });
       }
     };
@@ -447,7 +447,7 @@ function main(): void {
       try {
         frame = JSON.parse(data.toString()) as Frame;
       } catch {
-        log("frame non JSON da client, ignorato");
+        log("non-JSON frame from client, ignored");
         return;
       }
       if (frame.channel === "rpc") {
@@ -458,7 +458,7 @@ function main(): void {
         handleIde(frame.payload as IdeRequest);
         return;
       }
-      log("canale sconosciuto, ignorato");
+      log("unknown channel, ignored");
     });
 
     const dispose = (): void => {
@@ -466,31 +466,31 @@ function main(): void {
       channels.delete(channel);
     };
     ws.on("close", () => {
-      log("canale chiuso (tab chiusa)");
+      log("channel closed (tab closed)");
       dispose();
     });
     ws.on("error", dispose);
 
     const channel: Channel = { ws, workspaceDir, pi, dispose };
     channels.add(channel);
-    log(`client connesso (canali totali: ${channels.size})`);
+    log(`client connected (total channels: ${channels.size})`);
     return channel;
   };
 
   // --- idle shutdown ----------------------------------------------------------
-  // Spegnimento automatico dopo `idleTimeoutMs` senza NESSUN client connesso:
-  // la connessione WebSocket aperta è già il segnale di attività (non serve
-  // keep-alive esplicito); il countdown parte quando l'ultima tab si chiude.
+  // Automatic shutdown after `idleTimeoutMs` with NO connected client:
+  // an open WebSocket connection is already the activity signal (no explicit
+  // keep-alive needed); the countdown starts when the last tab closes.
   let activeConnections = 0;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
-  // coda stearing persistita (standalone: in memoria per la durata del bridge)
+  // persistent steering queue (standalone: in memory for the bridge lifetime)
   const steerQueueStore: { items: { text: string }[] } = { items: [] };
 
   const startIdleTimer = () => {
     if (opts.idleTimeoutMs <= 0 || activeConnections > 0) return;
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-      console.log(`[bridge] nessun client per ${opts.idleTimeoutMs / 1000}s — spegnimento`);
+      console.log(`[bridge] no client for ${opts.idleTimeoutMs / 1000}s — shutting down`);
       shutdown(0);
     }, opts.idleTimeoutMs);
   };

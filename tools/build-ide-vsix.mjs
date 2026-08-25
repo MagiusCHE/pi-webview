@@ -1,6 +1,6 @@
-// Build del companion VS Code (vsix) per il package pi-webview:
-// 1) compila UI (vite) + adapter (esbuild) → dist/extension/extension.cjs
-// 2) assembla la cartella estensione in dist/companion/ (manifest, media, README)
+// Build of the VS Code companion (vsix) for the pi-webview package:
+// 1) builds UI (vite) + adapter (esbuild) → dist/extension/extension.cjs
+// 2) assembles the extension folder in dist/companion/ (manifest, media, README)
 // 3) `vsce package` → dist/pi-webview-ide.vsix
 
 import { build } from "esbuild";
@@ -20,7 +20,7 @@ await build({
   logLevel: "info",
 });
 
-// 2) assembla dist/companion/ (pulita a ogni build: niente file stantii)
+// 2) assemble dist/companion/ (cleaned at every build: no stale files)
 const root = JSON.parse(readFileSync("package.json", "utf-8"));
 const manifest = {
   name: "pi-webview-ide",
@@ -34,8 +34,8 @@ const manifest = {
   repository: root.repository,
   engines: { vscode: root.engines.vscode },
   main: "dist/extension/extension.cjs",
-  // onStartupFinished: il ripristino dei pannelli (restore) deve girare a
-  // OGNI avvio, anche se la view pi non è visibile (pannello laterale chiuso)
+  // onStartupFinished: the panel restore must run at
+  // EVERY startup, even if the pi view is not visible (closed side panel)
   activationEvents: ["onStartupFinished", "onView:piWebview"],
   contributes: root.contributes,
 };
@@ -49,7 +49,7 @@ cpSync("README.md", "dist/companion/README.md");
 cpSync("LICENSE", "dist/companion/LICENSE");
 
 // 3) vsce package
-// 3) vsce package (eseguito dalla cartella estensione, out assoluto)
+// 3) vsce package (run from the extension folder, absolute out)
 const out = new URL("../dist/pi-webview-ide.vsix", import.meta.url).pathname;
 execSync(`pnpm exec vsce package --out "${out}"`, {
   cwd: "dist/companion",

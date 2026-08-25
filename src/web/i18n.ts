@@ -1,6 +1,6 @@
-// Internazionalizzazione — stesso pattern di radv-2/client:
-// JSON per lingua, lingua di sistema dal browser, preferenza salvata,
-// fallback su italiano. Safe da importare in Node (per i test).
+// Internationalization — same pattern as radv-2/client:
+// JSON per language, system language from the browser, saved preference,
+// fallback on Italian. Safe to import in Node (for tests).
 
 import it from "./locale/it.json" with { type: "json" };
 import en from "./locale/en.json" with { type: "json" };
@@ -40,8 +40,8 @@ export function t(key: string): string {
   return LOCALES[currentLocale].ui[key] ?? LOCALES.it.ui[key] ?? key;
 }
 
-// sostituzione placeholder {name} nelle stringhe localizzate
-// (es. tpl(t("tpsSummary"), { tokens: "43", time: "0.7" }))
+// placeholder {name} replacement in localized strings
+// (e.g. tpl(t("tpsSummary"), { tokens: "43", time: "0.7" }))
 export function tpl(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m);
 }
@@ -51,6 +51,6 @@ export function setLocale(id: LocaleId): void {
   try {
     localStorage.setItem(STORAGE_KEY, id);
   } catch {
-    // ignorato
+    // ignored
   }
 }

@@ -1,14 +1,14 @@
-// IDE bridge protocol — contratti condivisi UI ↔ host (concept 0002 D3).
-// Il wire format è identico sia via WebSocket (standalone, bridge) sia via
-// postMessage (webview VS Code): cambia solo il trasporto.
+// IDE bridge protocol — shared contracts UI ↔ host (concept 0002 D3).
+// The wire format is identical both via WebSocket (standalone, bridge) and via
+// postMessage (VS Code webview): only the transport changes.
 
-// Contenitore di ogni messaggio scambiato tra UI e host.
+// Container of every message exchanged between UI and host.
 export type Frame =
   | { channel: "rpc"; payload: RpcCommand | RpcEvent }
   | { channel: "ide"; payload: IdeRequest | IdeResponse | IdeEvent };
 
 // ---------------------------------------------------------------------------
-// pi RPC: comandi (UI → host → stdin di pi)
+// pi RPC: commands (UI → host → pi stdin)
 // ---------------------------------------------------------------------------
 
 export type RpcCommand = { type: string; id?: string } & Record<string, unknown>;
@@ -81,7 +81,7 @@ export const rpc = {
 };
 
 // ---------------------------------------------------------------------------
-// pi RPC: eventi (stdout di pi → host → UI)
+// pi RPC: events (pi stdout → host → UI)
 // ---------------------------------------------------------------------------
 
 export type RpcEvent = { type: string } & Record<string, unknown>;
@@ -92,7 +92,7 @@ export interface AssistantDelta {
   delta?: string;
   content?: string;
   toolCall?: { id: string; name: string; arguments: Record<string, unknown> };
-  /** messaggio parziale del proxy: contiene il nome del tool già in
+  /** partial proxy message: contains the tool name already in
    * toolcall_start (partial.content[contentIndex].name) */
   partial?: {
     content?: Array<{ type?: string; id?: string; name?: string }>;
@@ -100,7 +100,7 @@ export interface AssistantDelta {
 }
 
 // ---------------------------------------------------------------------------
-// IDE: richieste della UI verso l'host (attach selection, dialoghi, ...)
+// IDE: requests from the UI to the host (attach selection, dialogs, ...)
 // ---------------------------------------------------------------------------
 
 export type IdeRequest =
@@ -152,7 +152,7 @@ export type IdeRequest =
   | { type: "storeSteerQueue"; items: SteerQueueItem[]; id?: string }
   | { type: "getSteerQueue"; id?: string };
 
-/** messaggio accodato (stearing): solo testo persistito (le immagini no) */
+/** queued message (steering): only persisted text (no images) */
 export interface SteerQueueItem {
   text: string;
 }
@@ -186,23 +186,23 @@ export interface IdeResponse {
   error?: string;
 }
 
-// --- Config utente condivisa (D7) -------------------------------------------
-// In webview VS Code il tema arriva dall'IDE (data-vscode-theme-kind / CSS
-// vars --vscode-*); standalone si usa la preferenza salvata in config.json.
+// --- Shared user config (D7) ------------------------------------------------
+// In the VS Code webview the theme comes from the IDE (data-vscode-theme-kind / CSS
+// vars --vscode-*); standalone uses the preference saved in config.json.
 
 export type ThemePreference = "light" | "dark" | "system";
 
-// --- flag CLI di lancio di pi (blocco 3 delle impostazioni) ------------------
-// Disponibili dinamicamente: sono i flag registrati da pi e dalle sue
-// estensioni (es. --session-control del pacchetto pi-agent-extensions): se
-// l'estensione non è installata, il flag non esiste e non appare.
+// --- pi launch CLI flags (settings block 3) ---------------------------------
+// Available dynamically: they are the flags registered by pi and its
+// extensions (e.g. --session-control of the pi-agent-extensions package): if
+// the extension is not installed, the flag does not exist and does not appear.
 
 export type CliFlagValue = boolean | string;
 
-/** valori attivi (flag → valore), persistiti per workspace */
+/** active values (flag → value), persisted per workspace */
 export type CliFlags = Record<string, CliFlagValue>;
 
-/** descrizione di un flag registrato (da `pi --help` → Extension CLI Flags) */
+/** description of a registered flag (from `pi --help` → Extension CLI Flags) */
 export interface CliFlagInfo {
   name: string;
   type: "boolean" | "string";
@@ -221,7 +221,7 @@ export interface TrustResult {
 export interface UserConfig {
   theme: ThemePreference;
   locale?: LocaleId;
-  /** numero massimo di messaggi mostrati in cronologia (resume e runtime) */
+  /** max number of messages shown in history (resume and runtime) */
   historyLimit?: number;
 }
 

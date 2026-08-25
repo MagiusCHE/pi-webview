@@ -1,5 +1,5 @@
-// Trasporto astratto per la UI: WebSocket (standalone/browser) o postMessage
-// (webview VS Code). La UI non sa mai con quale host sta parlando (D2/D3).
+// Abstract transport for the UI: WebSocket (standalone/browser) or postMessage
+// (VS Code webview). The UI never knows which host it is talking to (D2/D3).
 
 import type { Frame } from "./protocol.ts";
 
@@ -15,7 +15,7 @@ export interface Transport {
   close(): void;
 }
 
-// --- WebSocket (browser nativo) ---------------------------------------------
+// --- WebSocket (native browser) ---------------------------------------------
 
 export function createWsTransport(url: string): Transport {
   const ws = new WebSocket(url);
@@ -82,7 +82,7 @@ export function createVsCodeTransport(): Transport | null {
       cb({ state: "open", detail: "webview (postMessage)" });
     },
     close() {
-      // niente da chiudere: il ciclo di vita è dell'extension host
+      // nothing to close: the lifecycle belongs to the extension host
     },
   };
 }

@@ -1,6 +1,6 @@
-// UI web (piano 0001): stream dei messaggi di pi, input, abort, attach,
-// tema (D7) e locale (i18n). Header: dropdown sessioni + settings (gear).
-// Non dipende da VS Code: parla il bridge protocol.
+// Web UI (plan 0001): pi message stream, input, abort, attach,
+// theme (D7) and locale (i18n). Header: session dropdown + settings (gear).
+// Does not depend on VS Code: it speaks the bridge protocol.
 
 import type {
   Frame,
@@ -111,9 +111,9 @@ const els = {
   thinkingInfo: document.getElementById("thinking-info") as HTMLSpanElement,
 };
 
-// --- bootstrap del trasporto ------------------------------------------------
-// Priorità: webview VS Code (postMessage) → query ?bridge= → env Vite →
-// /bridge-config.json servito dal bridge (stessa origine, solo --serve).
+// --- transport bootstrap ---------------------------------------------------
+// Priority: VS Code webview (postMessage) → ?bridge= query → Vite env →
+// /bridge-config.json served by the bridge (same origin, only --serve).
 
 async function resolveBridgeUrl(): Promise<string | null> {
   const fromQuery = new URLSearchParams(location.search).get("bridge");
@@ -129,10 +129,10 @@ async function resolveBridgeUrl(): Promise<string | null> {
       if (cfg.wsUrl) url = cfg.wsUrl;
     }
   } catch {
-    // nessun bridge sulla stessa origine
+    // no bridge on the same origin
   }
-  // intent del canale (piano 0005): new=1 (nuova sessione) o
-  // session=<path> (resume) propagati dalla query della pagina al WebSocket
+  // channel intent (plan 0005): new=1 (new session) or
+  // session=<path> (resume) propagated from the page query to the WebSocket
   if (url && !runtime.isVsCode) {
     const p = new URLSearchParams(location.search);
     if (p.get("new") === "1") {
@@ -160,7 +160,7 @@ function updateStatus(): void {
         : t("disconnected");
 }
 
-// loader di avvio: copre l'interfaccia finché connessione e dati iniziali
+// boot loader: covers the UI until connection and initial data are ready
 function hideBootLoader(): void {
   els.bootLoader.hidden = true;
 }
@@ -184,7 +184,7 @@ function setupTransport(tr: Transport): void {
       if (!demoMode) {
         void (async () => {
           await refreshSessions();
-          hideBootLoader(); // dati iniziali caricati (o retry esauriti)
+          hideBootLoader(); // initial data loaded (or retries exhausted)
         })();
       }
     } else if (s.state === "closed") {
@@ -194,7 +194,7 @@ function setupTransport(tr: Transport): void {
   tr.onFrame(handleFrame);
 }
 
-// --- correlazione richieste/risposte (rpc e ide) ----------------------------
+// --- request/response correlation (rpc and ide) ----------------------------
 
 const pendingRpc = new Map<string, (res: RpcEvent) => void>();
 const pendingIde = new Map<string, (res: IdeResponse) => void>();
@@ -258,7 +258,7 @@ function handleFrame(frame: Frame): void {
   }
 }
 
-// --- tema e locale -----------------------------------------------------------
+// --- theme and locale ------------------------------------------------------
 
 const THEME_KEY: Record<ThemePreference, string> = {
   system: "themeSystem",
@@ -268,13 +268,13 @@ const THEME_KEY: Record<ThemePreference, string> = {
 
 let themePref: ThemePreference = "system";
 
-// limite dei messaggi mostrati in cronologia (resume e runtime): viene dal
-// config (historyLimit), default 30 — l'utente lo cambia nelle impostazioni
+// limit of messages shown in history (resume and runtime): comes from the
+// config (historyLimit), default 30 — the user changes it in the settings
 const DEFAULT_HISTORY_LIMIT = 30;
 let historyLimit = DEFAULT_HISTORY_LIMIT;
 let configId = 0;
 
-// parametri dev ?theme= / ?lang= (per verificare senza config)
+// dev params ?theme= / ?lang= (to check without config)
 const forcedThemeParam = new URLSearchParams(location.search).get("theme");
 const forcedTheme =
   forcedThemeParam === "light" ||
@@ -323,7 +323,7 @@ function applyUiStrings(): void {
   updateStatus();
   updateThemeButtons();
   populateSessionMenu();
-  // tema: dentro la webview di VS Code lo gestisce l'IDE — niente scelta
+  // theme: inside the VS Code webview the IDE manages it — no choice
   if (runtime.isVsCode) {
     const row = els.themeRow.closest(".settings-row") as HTMLElement | null;
     if (row) row.hidden = true;
@@ -364,10 +364,10 @@ function handleIdeResponse(res: IdeResponse): void {
   }
 }
 
-// --- settings (gear) → dialog modale ------------------------------------------
+// --- settings (gear) → modal dialog -----------------------------------------
 
-// riga versione: la sorgente dipende dal runtime — in webview VS Code è
-// l'addon, standalone è il pacchetto piw (entrambi rispondono a getVersion)
+// version row: the source depends on the runtime — in the VS Code webview it
+// is the addon, standalone it is the piw package (both answer getVersion)
 function refreshVersionInfo(): void {
   els.settingsVersionLabel.textContent =
     runtime.mode === "vscode" ? t("settingsVersionAddon") : t("settingsVersionPiw");
@@ -377,14 +377,14 @@ function refreshVersionInfo(): void {
   });
 }
 
-// --- blocco 3: flag CLI di pi (dinamici dai flag registrati) ----------------
+// --- block 3: pi CLI flags (dynamic from the registered flags) -------------
 
 let savedCliValues: CliFlags = {};
 let cliDirty = false;
 
-// valori correnti nel form (flag → valore): solo quelli REALMENTE impostati
-// (checkbox spuntate, stringhe non vuote) — il confronto col salvato non deve
-// sporcarsi con i default (checkbox false / input string vuoti)
+// current values in the form (flag → value): only the REALLY set ones
+// (checked checkboxes, non-empty strings) — the comparison with the saved
+// ones must not get dirty with defaults (false checkboxes / empty inputs)
 function currentCliValues(): CliFlags {
   const values: CliFlags = {};
   for (const input of els.cliFlags.querySelectorAll<HTMLInputElement>("input[data-flag]")) {
@@ -405,8 +405,8 @@ function setCliDirty(): void {
   if (cliDirty) els.cliApplyHint.textContent = t("applyCliHint");
 }
 
-// righe dinamiche: SOLO i flag esistenti (se l'estensione non c'è, il flag
-// non appare); boolean → checkbox, string → input disabilitato (presto)
+// dynamic rows: ONLY the existing flags (if the extension is missing, the
+// flag does not appear); boolean → checkbox, string → disabled input (soon)
 function renderCliFlags(available: CliFlagInfo[], values: CliFlags): void {
   els.cliFlags.textContent = "";
   if (available.length === 0) {
@@ -456,9 +456,9 @@ function refreshCliFlags(): void {
   });
 }
 
-// Applica: con elaborazione in corso → conferma + dequeue+stop (come lo STOP),
-// poi setCliFlags → il companion riavvia pi in modo trasparente (connection_closed
-// reason restart + pi_restarted → re-init senza reload)
+// Apply: with an in-flight run → confirm + dequeue+stop (like STOP),
+// then setCliFlags → the companion restarts pi transparently (connection_closed
+// reason restart + pi_restarted → re-init without reload)
 els.cliApply.addEventListener("click", () => {
   void (async () => {
     const doApply = async (): Promise<void> => {
@@ -498,7 +498,7 @@ els.settingsModal.addEventListener("click", (e) => {
   if (e.target === els.settingsModal) closeSettings();
 });
 
-// --- dropdown sessioni ---------------------------------------------------------
+// --- session dropdown -------------------------------------------------------
 
 els.sessionBtn.addEventListener("click", (e) => {
   e.stopPropagation();
@@ -517,10 +517,10 @@ els.sessionItems.addEventListener("click", (e) => {
   const action = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-action]");
   const item = (e.target as HTMLElement).closest<HTMLElement>(".session-item");
   if (!item) return;
-  // azione "nuova sessione" (riga in alto, senza path)
+  // "new session" action (top row, no path)
   if (item.dataset.action === "new") {
-    // se la corrente È già una nuova sessione la riga è evidenziata come
-    // attiva: cliccarla chiude il menu (come la sessione corrente)
+    // if the current session IS ALREADY a new session the row is highlighted
+    // as active: clicking it closes the menu (like the current session)
     if (!!currentSessionPath && isNewSession(currentSession())) {
       els.sessionMenu.hidden = true;
       return;
@@ -529,7 +529,7 @@ els.sessionItems.addEventListener("click", (e) => {
     return;
   }
   if (!item.dataset.path) return;
-  // azioni rinomina/elimina: stopPropagation, nessun cambio sessione
+  // rename/delete actions: stopPropagation, no session change
   if (action?.dataset.action === "rename") {
     void renameSessionFlow(item.dataset.path);
     return;
@@ -538,7 +538,7 @@ els.sessionItems.addEventListener("click", (e) => {
     void deleteSessionFlow(item.dataset.path);
     return;
   }
-  // click sull'area principale: sessione corrente → chiudi e basta
+  // click on the main area: current session → close only
   if ((e.target as HTMLElement).closest(".session-item-main")) {
     if (item.dataset.path === currentSessionPath) {
       els.sessionMenu.hidden = true;
@@ -548,9 +548,9 @@ els.sessionItems.addEventListener("click", (e) => {
   }
 });
 
-// --- rinomina / elimina sessione (dropdown) --------------------------------
+// --- rename / delete session (dropdown) ------------------------------------
 
-// dialog con campo di testo precompilato: Enter applica, Escape annulla
+// dialog with prefilled text field: Enter applies, Escape cancels
 function showPrompt(initialValue: string, title: string): Promise<string | null> {
   return new Promise((resolve) => {
     const backdrop = document.createElement("div");
@@ -610,16 +610,16 @@ function showPrompt(initialValue: string, title: string): Promise<string | null>
 async function renameSessionFlow(path: string): Promise<void> {
   const s = sessions.find((x) => x.path === path);
   if (!s) return;
-  // valore iniziale: nome assegnato oppure label attuale (primo messaggio)
+  // initial value: assigned name or current label (first message)
   const initial =
     s.name && !hasCjk(s.name) ? s.name : sessionLabel(s);
   const next = await showPrompt(initial, t("renameSession"));
-  if (next === null) return; // annullato
+  if (next === null) return; // cancelled
   const newName = next.trim();
-  if (!newName || newName === initial) return; // vuoto o invariato
+  if (!newName || newName === initial) return; // empty or unchanged
   const current = path === currentSessionPath;
   if (current) {
-    // sessione corrente: il nome vive nella memoria di pi (RPC)
+    // current session: the name lives in pi's memory (RPC)
     const res = await rpcRequest({ type: "set_session_name", name: newName });
     if (!res.success) {
       addStatusLine(t("renameFailed"));
@@ -636,7 +636,7 @@ async function renameSessionFlow(path: string): Promise<void> {
   const cur = idx >= 0 ? sessions[idx] : undefined;
   if (cur) sessions[idx] = { ...cur, name: newName };
   populateSessionMenu();
-  if (current) void refreshSessionTitle(); // aggiorna box e titolo
+  if (current) void refreshSessionTitle(); // updates box and title
 }
 
 async function deleteSessionFlow(path: string): Promise<void> {
@@ -649,20 +649,20 @@ async function deleteSessionFlow(path: string): Promise<void> {
     addStatusLine(t("deleteFailed"));
     return;
   }
-  // sessione corrente eliminata → si parte con una nuova sessione
+  // current session deleted → start with a new session
   if (path === currentSessionPath) {
     els.thread.textContent = "";
     try {
       await rpcRequest({ type: "new_session" });
     } catch {
-      // new_session fallito: refreshSessions riallinea con lo stato di pi
+      // new_session failed: refreshSessions realigns with the pi state
     }
   }
-  els.sessionMenu.hidden = false; // resta aperta: mostra la lista aggiornata
+  els.sessionMenu.hidden = false; // stays open: shows the updated list
   await refreshSessions();
 }
 
-// nuova sessione: chiude la dropdown e ricarica con la sessione fresca
+// new session: closes the dropdown and reloads with the fresh session
 async function startNewSession(): Promise<void> {
   if (switchingSession) return;
   switchingSession = true;
@@ -673,18 +673,18 @@ async function startNewSession(): Promise<void> {
       els.thread.textContent = "";
       els.sessionMenu.hidden = true;
       await refreshSessions();
-      // pi può assegnare il nome in ritardo: aggiorna box e titolo quando arriva
+      // pi may assign the name late: update box and title when it arrives
       pollSessionTitle();
     }
   } catch {
-    // new_session fallito: resta la sessione corrente
+    // new_session failed: the current session stays
   }
   switchingSession = false;
   els.sessionBtn.disabled = false;
   populateSessionMenu();
 }
 
-// scelta sessione: nella stessa cartella → switch; altrove → fork (come pi)
+// session pick: same folder → switch; elsewhere → fork (like pi)
 async function pickSession(path: string): Promise<void> {
   if (switchingSession) return;
   const s = sessions.find((x) => x.path === path);
@@ -693,8 +693,8 @@ async function pickSession(path: string): Promise<void> {
     switchSession(path);
     return;
   }
-  // sessione di un'altra cartella: chiedi conferma fork (modale custom, non
-  // window.confirm: nelle webview di VS Code non funziona)
+  // session of another folder: ask fork confirmation (custom modal, not
+  // window.confirm: it does not work in VS Code webviews)
   const ok = await showConfirm(t("forkConfirm"));
   if (ok) {
     const res = await ideRequest({ type: "forkSession", sourcePath: path });
@@ -748,7 +748,7 @@ els.lang.addEventListener("change", () => {
   }
 });
 
-// limite storico: salvato nel config e riapplicato subito (tronca in cima)
+// history limit: saved in the config and re-applied right away (truncates from the top)
 els.historyInput.addEventListener("change", () => {
   const n = Math.max(
     5,
@@ -764,12 +764,12 @@ els.historyInput.addEventListener("change", () => {
       id: `cfg-${++configId}`,
     },
   });
-  void loadHistory(); // riapplica il troncamento alla cronologia corrente
+  void loadHistory(); // re-applies the truncation to the current history
 });
 
 watchThemeChanges(() => applyTheme(themePref));
 
-// --- sessioni (dropdown) ------------------------------------------------------
+// --- sessions (dropdown) -----------------------------------------------------
 
 let sessions: SessionInfo[] = [];
 let currentSessionPath: string | null = null;
@@ -778,8 +778,8 @@ let workspaceLabel = "";
 let workspacePath: string | null = null;
 let filterMode: "folder" | "all" = "folder";
 
-// I nomi auto-generati (pi-spark) possono uscire in CJK anche con prompt
-// italiani: in quel caso preferiamo il primo messaggio.
+// Auto-generated names (pi-spark) can come out in CJK even with Italian
+// prompts: in that case we prefer the first message.
 function hasCjk(text: string): boolean {
   return /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(text);
 }
@@ -799,7 +799,7 @@ function sessionLabel(s: SessionInfo): string {
   return base || (s.path.split(/[\\/]/).pop() ?? s.path);
 }
 
-// tempo relativo come nel selettore /resume di pi ("now", "22m", "2h", "3g")
+// relative time like in the pi /resume selector ("now", "22m", "2h", "3d")
 function relativeTime(ms?: number): string {
   if (!ms) return "";
   const sec = Math.floor((Date.now() - ms) / 1000);
@@ -813,7 +813,7 @@ function currentSession(): SessionInfo | undefined {
   return sessions.find((s) => s.path === currentSessionPath);
 }
 
-// sessione nuova = nessun messaggio ancora salvato
+// new session = no message saved yet
 function isNewSession(s?: SessionInfo): boolean {
   return !s || !s.messageCount || s.messageCount === 0;
 }
@@ -822,7 +822,7 @@ function populateSessionMenu(): void {
   els.sessionFilters.textContent = "";
   els.sessionItems.textContent = "";
 
-  // filtro sulla stessa riga: ./cartella | Tutte (segmented control)
+  // filter on the same row: ./folder | All (segmented control)
   const folderBtn = document.createElement("button");
   folderBtn.type = "button";
   folderBtn.className = "filter-btn";
@@ -835,8 +835,8 @@ function populateSessionMenu(): void {
   allBtn.dataset.role = "all";
   allBtn.textContent = t("all");
   allBtn.classList.toggle("active", filterMode === "all");
-  // solo standalone: icona cartella per cambiare workspace (nelle webview IDE
-  // il workspace lo decide l'host)
+  // standalone only: folder icon to change workspace (in IDE webviews
+  // the workspace is decided by the host)
   if (!runtime.isVsCode) {
     const browseBtn = document.createElement("button");
     browseBtn.type = "button";
@@ -852,8 +852,8 @@ function populateSessionMenu(): void {
     els.sessionFilters.append(folderBtn, allBtn);
   }
 
-  // riga-azione "nuova sessione": c'è SEMPRE. Quando la sessione corrente È
-  // già una nuova sessione viene evidenziata come attiva (come le altre).
+  // "new session" action row: ALWAYS present. When the current session IS
+  // already a new session it is highlighted as active (like the others).
   const currentIsNew = !!currentSessionPath && isNewSession(currentSession());
   const newBtn = document.createElement("button");
   newBtn.type = "button";
@@ -875,27 +875,27 @@ function populateSessionMenu(): void {
     empty.textContent = t("noSessions");
     els.sessionItems.appendChild(empty);
   } else {
-    // la sessione corrente può non essere in lista (appena creata, non salvata);
-    // se è NUOVA è già rappresentata dalla riga-azione evidenziata qui sopra
+    // the current session may not be in the list (just created, not saved);
+    // if it is NEW it is already represented by the highlighted action row above
     const list = [...sessions];
     if (currentSessionPath && !currentIsNew && !list.some((s) => s.path === currentSessionPath)) {
       list.unshift({ path: currentSessionPath, name: t("newSession") });
     }
     for (const s of list) {
-      // la nuova sessione corrente vive nella riga-azione: niente duplicato
+      // the current new session lives in the action row: no duplicate
       if (currentIsNew && s.path === currentSessionPath) continue;
-      // contenitore: area principale cliccabile (nome+meta) + azioni rinomina/
-      // elimina. Niente <button> annidati: l'item è un div flex.
+      // container: main clickable area (name+meta) + rename/delete actions.
+      // No nested <button>: the item is a flex div.
       const item = document.createElement("div");
       item.className = "session-item";
       item.dataset.path = s.path;
       item.classList.toggle("active", s.path === currentSessionPath);
-      // la sessione corrente nuova viene mostrata in evidenza (come l'azione)
+      // the current new session is shown highlighted (like the action)
       item.classList.toggle(
         "new-session",
         s.path === currentSessionPath && isNewSession(s),
       );
-      // in modalità "Tutte", evidenzia le sessioni della cartella corrente
+      // in "All" mode, highlight the sessions of the current folder
       item.classList.toggle(
         "in-workspace",
         filterMode === "all" && !!workspacePath && s.cwd === workspacePath,
@@ -905,7 +905,7 @@ function populateSessionMenu(): void {
       main.className = "session-item-main";
       const label = document.createElement("span");
       label.className = "session-item-label";
-      // nuova sessione (0 messaggi) → titolo esplicito nella dropdown
+      // new session (0 messages) → explicit title in the dropdown
       label.textContent =
         s.path === currentSessionPath && isNewSession(s)
           ? t("newSession")
@@ -916,7 +916,7 @@ function populateSessionMenu(): void {
       const rel = relativeTime(s.lastActivity ?? s.mtime);
       meta.textContent = [count > 0 ? `(${count})` : "", rel].filter(Boolean).join(" ");
       main.append(label, meta);
-      // azioni per OGNI sessione: rinomina + elimina (con conferma)
+      // actions for EVERY session: rename + delete (with confirmation)
       const rename = document.createElement("button");
       rename.type = "button";
       rename.className = "session-item-action";
@@ -944,26 +944,26 @@ function populateSessionMenu(): void {
   updateDocumentTitle();
 }
 
-// etichetta corrente riusata da box e titolo browser
+// current label reused by box and browser title
 function currentSessionLabel(): string {
   const cur = currentSession();
   if (cur) return isNewSession(cur) ? t("newSession") : sessionLabel(cur);
   return currentSessionPath ? t("newSession") : t("noSessions");
 }
 
-// il titolo del browser mostra il nome della sessione, solo fuori dall'IDE
+// the browser title shows the session name, only outside the IDE
 function updateDocumentTitle(): void {
-  if (runtime.isVsCode) return; // nell'IDE il titolo lo gestisce l'host
+  if (runtime.isVsCode) return; // in the IDE the title is managed by the host
   const label = currentSessionLabel();
   document.title =
     label && label !== t("noSessions") ? `${label} — pi-webview` : "pi-webview";
 }
 
-// rilegge i dati della sessione corrente (nome assegnato da pi, primo
-// messaggio, conteggio) e aggiorna box + titolo browser
+// re-reads the current session data (name assigned by pi, first message,
+// count) and updates box + browser title
 async function refreshSessionTitle(): Promise<void> {
   if (!currentSessionPath) return;
-  // 1) nome assegnato da pi (es. auto-title) via get_state
+  // 1) name assigned by pi (e.g. auto-title) via get_state
   let named = false;
   try {
     const state = await rpcRequest(rpc.getState());
@@ -976,9 +976,9 @@ async function refreshSessionTitle(): Promise<void> {
       }
     }
   } catch {
-    // get_state fallito: si usa la lettura del file
+    // get_state failed: fall back to the file read
   }
-  // 2) dati freschi dal file (primo messaggio, conteggio, nome in session_info)
+  // 2) fresh data from the file (first message, count, name in session_info)
   const res = await ideRequest({ type: "getSessionInfo", path: currentSessionPath });
   if (res?.ok) {
     const info = res.data as SessionInfo;
@@ -989,7 +989,7 @@ async function refreshSessionTitle(): Promise<void> {
   if (named || res?.ok) populateSessionMenu();
 }
 
-// dopo una nuova sessione pi può assegnare il nome in ritardo: sondaggio breve
+// after a new session pi may assign the name late: short polling
 function pollSessionTitle(attempts = 10, interval = 4000): void {
   void refreshSessionTitle();
   let n = 0;
@@ -1001,8 +1001,8 @@ function pollSessionTitle(attempts = 10, interval = 4000): void {
 }
 
 async function refreshSessions(): Promise<void> {
-  // get_state può fallire all'avvio (pi non è ancora pronto nella webview):
-  // riprova finché il processo risponde (timeout breve per tentativo)
+  // get_state can fail at startup (pi not ready yet in the webview):
+  // retry until the process answers (short per-attempt timeout)
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
       const state = await rpcRequest(rpc.getState(), `rpc-st-${attempt}`, 3000);
@@ -1017,7 +1017,7 @@ async function refreshSessions(): Promise<void> {
           | undefined;
         if (data?.sessionFile) {
           currentSessionPath = data.sessionFile;
-          persistSessionPath(); // riprendi la stessa sessione ai reload di VS Code
+          persistSessionPath(); // resume the same session on VS Code reloads
         }
         if (data?.model) {
           const m = data.model as {
@@ -1042,16 +1042,16 @@ async function refreshSessions(): Promise<void> {
         ) {
           steeringMode = data.steeringMode;
         }
-        break; // pi pronto
+        break; // pi ready
       }
     } catch {
-      // pi non ancora su: riprova tra poco
+      // pi not up yet: retry shortly
     }
     await new Promise((r) => setTimeout(r, 1500));
   }
   const trust = await ideRequest({ type: "getTrust" });
   if (trust?.ok) renderTrust(trust.data as { status?: string } | null);
-  // workspace prima (istantaneo, niente lettura di tutti i file di sessione)
+  // workspace first (instant, no reading of all session files)
   if (!workspacePath) {
     const wr = await ideRequest({ type: "getWorkspace" });
     if (wr?.ok) {
@@ -1075,11 +1075,11 @@ async function refreshSessions(): Promise<void> {
   }
   populateSessionMenu();
   await loadHistory();
-  // stearing: coda persistita ripristinata; se pi è idle, consegna subito
+  // steering: persisted queue restored; if pi is idle, deliver right away
   await loadSteerQueue();
   updateSteerPlaceholder();
   deliverSteering();
-  void fetchSlashCommands(); // comandi estensione per la palette (piano 0003)
+  void fetchSlashCommands(); // extension commands for the palette (plan 0003)
 }
 
 async function loadHistory(): Promise<void> {
@@ -1087,21 +1087,21 @@ async function loadHistory(): Promise<void> {
     const res = await rpcRequest(rpc.getMessages());
     const messages = (res.data as { messages?: unknown[] } | undefined)?.messages;
     if (messages) {
-      // solo gli ULTIMI historyLimit passaggi: la cronologia lunga viene
-      // troncata in cima (mai tutta la sessione)
+      // only the LAST historyLimit turns: the long history is
+      // truncated from the top (never the whole session)
       renderHistory(messages.slice(-historyLimit));
       seedMessageHistory(messages.slice(-historyLimit));
     }
   } catch {
-    // nessuna cronologia disponibile
+    // no history available
   }
-  void fetchSessionStats(); // gauger contesto dopo ogni cambio sessione
-  void fetchBalance(); // saldo reale del provider (dopo che currentModel è noto)
-  void fetchCompactionSettings(); // soglia auto-compaction di pi per il tooltip
+  void fetchSessionStats(); // context gauge after every session change
+  void fetchBalance(); // real provider balance (after currentModel is known)
+  void fetchCompactionSettings(); // pi auto-compaction threshold for the tooltip
 }
 
-// soglie auto-compaction di pi (config ~/.pi/config.json): per il tooltip
-// del blocco contesto — “(auto-compact ≥ X%)”
+// pi auto-compaction thresholds (config ~/.pi/config.json): for the tooltip
+// of the context block — "(auto-compact ≥ X%)"
 async function fetchCompactionSettings(): Promise<void> {
   const res = await ideRequest({ type: "getCompactionSettings" });
   const s = res?.ok
@@ -1116,7 +1116,7 @@ async function fetchCompactionSettings(): Promise<void> {
   }
 }
 
-// --- cambio workspace (standalone: browse cartella + scelta destino) -----------
+// --- workspace change (standalone: folder browse + destination choice) -----
 
 async function listDirs(path: string): Promise<string[]> {
   const res = await ideRequest({ type: "listDir", path });
@@ -1147,7 +1147,7 @@ function escapeHtml(text: string): string {
   });
 }
 
-// modale di navigazione cartelle (bridge listDir): risolve con il path scelto
+// folder navigation modal (bridge listDir): resolves with the chosen path
 function openFolderBrowser(start: string): Promise<string | null> {
   return new Promise((resolve) => {
     let current = start;
@@ -1197,7 +1197,7 @@ function openFolderBrowser(start: string): Promise<string | null> {
     async function load(): Promise<void> {
       pathEl.textContent = current;
       dirsEl.textContent = "";
-      // ".. (cartella superiore)" come primo elemento della lista
+      // ".. (parent folder)" as the first element of the list
       if (parentDir(current) !== current) {
         const up = document.createElement("button");
         up.type = "button";
@@ -1247,8 +1247,8 @@ function openFolderBrowser(start: string): Promise<string | null> {
   });
 }
 
-// dialog a 3 scelte: fork della sessione nella nuova cartella, nuova sessione,
-// oppure annulla
+// 3-choice dialog: fork the session into the new folder, new session,
+// or cancel
 function askWorkspaceAction(folder: string): Promise<"fork" | "new" | null> {
   return new Promise((resolve) => {
     const backdrop = document.createElement("div");
@@ -1298,7 +1298,7 @@ async function changeWorkspace(): Promise<void> {
   if (!workspacePath) return;
   const target = await openFolderBrowser(workspacePath);
   if (!target) return;
-  if (target === workspacePath) return; // stessa cartella: nessun cambio
+  if (target === workspacePath) return; // same folder: no change
   const choice = await askWorkspaceAction(target);
   if (!choice) return;
   const res = await ideRequest({
@@ -1319,9 +1319,9 @@ async function changeWorkspace(): Promise<void> {
   void refreshSessions();
 }
 
-// salva la sessione corrente nel companion (globalState di VS Code): ai
-// reload della finestra pi viene riavviato con --session <path> e riprende
-// la conversazione aperta (solo in modalità webview VS Code)
+// saves the current session in the companion (VS Code globalState): on
+// window reloads pi is restarted with --session <path> and resumes the open
+// conversation (only in VS Code webview mode)
 function persistSessionPath(): void {
   if (!runtime.isVsCode || !currentSessionPath) return;
   void ideRequest({ type: "storeSession", path: currentSessionPath });
@@ -1336,12 +1336,12 @@ function switchSession(path: string): void {
       const res = await rpcRequest({ type: "switch_session", sessionPath: path });
       if (res.success) {
         currentSessionPath = path;
-        persistSessionPath(); // riprendi questa sessione ai reload di VS Code
+        persistSessionPath(); // resume this session on VS Code reloads
         els.thread.textContent = "";
         await loadHistory();
       }
     } catch {
-      // switch fallito: resta la sessione corrente
+      // switch failed: the current session stays
     }
     switchingSession = false;
     els.sessionBtn.disabled = false;
@@ -1350,7 +1350,7 @@ function switchSession(path: string): void {
   })();
 }
 
-// --- render dei messaggi -----------------------------------------------------
+// --- message rendering -----------------------------------------------------
 
 const stream = emptyStream();
 let currentMsg: HTMLElement | null = null;
@@ -1364,22 +1364,22 @@ let thinkingSpinnerEl: HTMLElement | null = null;
 let thinkingTimerEl: HTMLElement | null = null;
 let thinkingStartedAt = 0;
 let thinkingTimer: ReturnType<typeof setInterval> | null = null;
-// il pulsante STOP vive nella BARRA DI STATO (a destra del contesto):
-// rosso, visibile solo a turno attivo, cliccabile indipendentemente
+// the STOP button lives in the STATUS BAR (right of the context):
+// red, visible only with an active turn, clickable independently
 function updateThinkingStopBtn(visible: boolean): void {
   els.statsStop.hidden = !visible;
 }
 
-// STOP: come Escape di pi.dev — prima riporta i messaggi in stearing
-// nell'editor (dequeue), POI ferma il turno corrente
+// STOP: like pi.dev's Escape — first brings the messages back into steering
+// in the editor (dequeue), THEN stops the current turn
 els.statsStop.innerHTML = stopIcon();
 els.statsStop.title = t("stopWorking");
 
-// STOP (pulsante ▢ o tasto Esc): come Escape di pi.dev — prima riporta i
-// messaggi in stearing nell'editor (dequeue), POI ferma il turno corrente
+// STOP (▢ button or Esc key): like pi.dev's Escape — first brings the
+// steering messages back into the editor (dequeue), THEN stops the current turn
 function stopWorking(): void {
   if (!transport || !working) return;
-  dequeueSteering(); // i messaggi accodati tornano nella textarea (se ce ne sono)
+  dequeueSteering(); // the queued messages return to the textarea (if any)
   transport.send({ channel: "rpc", payload: rpc.abort() });
   working = false;
   hideSentLoader();
@@ -1391,12 +1391,12 @@ function stopWorking(): void {
 
 els.statsStop.addEventListener("click", stopWorking);
 
-// Esc durante l'elaborazione = STOP (come pi.dev). I modali (conferma/
-// prompt) chiudono già su Esc in fase di capture con stopPropagation: qui
-// non arriva nulla mentre un modale è aperto.
+// Esc during processing = STOP (like pi.dev). The modals (confirm/
+// prompt) already close on Esc in the capture phase with stopPropagation:
+// nothing arrives here while a modal is open.
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if (els.settingsModal && !els.settingsModal.hidden) return; // impostazioni aperte
+  if (els.settingsModal && !els.settingsModal.hidden) return; // settings open
   if (working) {
     e.preventDefault();
     stopWorking();
@@ -1412,7 +1412,7 @@ function addMsg(kind: "user" | "assistant" | "status"): HTMLElement {
   const wrapper = document.createElement("div");
   wrapper.className = `msg ${kind}`;
   els.thread.appendChild(wrapper);
-  // runtime: la cronologia non supera historyLimit — tronca in cima
+  // runtime: the history never exceeds historyLimit — truncate from the top
   while (els.thread.children.length > historyLimit) {
     els.thread.firstElementChild?.remove();
   }
@@ -1420,28 +1420,28 @@ function addMsg(kind: "user" | "assistant" | "status"): HTMLElement {
   return wrapper;
 }
 
-// margine per considerarsi "in fondo" (e quindi seguire l'autoscroll).
-// PICCOLO di proposito: basta scrollare su un po' con la rotella per inibire
-// l'autoscroll. La crescita del contenuto NON dipende da questo margine (la
-// gestisce stickToBottom, vedi sotto).
+// margin to be considered "at the bottom" (and therefore follow the autoscroll).
+// DELIBERATELY SMALL: just scrolling up a bit with the wheel inhibits the
+// autoscroll. The content growth does NOT depend on this margin (it is
+// handled by stickToBottom, see below).
 const SCROLL_RESUME_MARGIN = 24;
 
-// l'utente sta seguendo la chat? Aggiornato SOLO dall'evento scroll (mai dai
-// nostri riallineamenti, che quando si torna in fondo lo riportano a true).
-// Separa l'INTENTO dell'utente dalla crescita del contenuto: la resa
-// asincrona sposta il fondo ma non cambia lo stato → lo streaming continua a
-// seguire finché l'utente non scrolla davvero.
+// is the user following the chat? Updated ONLY by the scroll event (never by
+// our realignments, which bring it back to true when back at the bottom).
+// Separates the user's INTENT from the content growth: the async rendering
+// moves the bottom but does not change the state → the streaming keeps
+// following until the user really scrolls.
 let stickToBottom = true;
 
-// auto-scroll intelligente: segue solo se l'utente è già in fondo
+// smart auto-scroll: follows only if the user is already at the bottom
 function scrollToBottom(force = false): void {
   if (!force && !stickToBottom) return;
   const el = els.messages;
   el.scrollTop = el.scrollHeight;
-  // la resa è ASINCRONA (markdown re-render a rAF, immagini, code block): il
-  // contenuto cresce DOPO l'assegnazione → riallinea ai frame successivi
-  // finché l'utente continua a seguire (stickToBottom resta true anche se il
-  // fondo si è spostato: cambia solo se l'utente scrolla)
+  // the rendering is ASYNC (markdown re-render at rAF, images, code blocks):
+  // the content grows AFTER the assignment → realign on the following frames
+  // while the user keeps following (stickToBottom stays true even if the
+  // bottom moved: it changes only if the user scrolls)
   requestAnimationFrame(() => {
     if (force || stickToBottom) el.scrollTop = el.scrollHeight;
     requestAnimationFrame(() => {
@@ -1452,7 +1452,7 @@ function scrollToBottom(force = false): void {
 
 function openAssistantBubble(): void {
   currentMsg = addMsg("assistant");
-  // il pensiero va SEMPRE prima del testo in streaming (e nel risultato finale)
+  // the thinking goes ALWAYS before the streaming text (and in the final result)
   thinkingSlot = document.createElement("div");
   thinkingSlot.className = "thinking-slot";
   currentMsg.appendChild(thinkingSlot);
@@ -1477,7 +1477,7 @@ function openAssistantBubble(): void {
   toolsText = "";
 }
 
-// --- streaming markdown -------------------------------------------------------
+// --- markdown streaming -----------------------------------------------------
 
 function scheduleMarkdownRender(): void {
   if (renderPending) return;
@@ -1490,7 +1490,7 @@ function scheduleMarkdownRender(): void {
   });
 }
 
-// --- pensiero con loader (niente <details>: barra + label + rotella + timer) --
+// --- thinking with loader (no <details>: bar + label + spinner + timer) -----
 
 function makeThinkingHead(withSpinner = true): {
   head: HTMLElement;
@@ -1549,22 +1549,22 @@ function ensureThinkingLoader(): HTMLElement {
     thinkingTimerEl = timer ?? null;
     thinkingContentEl = document.createElement("div");
     thinkingContentEl.className = "thinking-content";
-    thinkingContentEl.hidden = true; // collassato per default (streaming comunque live)
-    // cattura locale: ogni blocco toggla il PROPRIO contenuto
+    thinkingContentEl.hidden = true; // collapsed by default (streaming still live)
+    // local capture: each block toggles its OWN content
     const contentEl = thinkingContentEl;
     head.addEventListener("click", () => {
       contentEl.hidden = !contentEl.hidden;
     });
     thinkingEl.append(head, thinkingContentEl);
     thinkingSlot.appendChild(thinkingEl);
-    applyToolChain(); // primo blocco pensiero: valuta il gap 3px con il precedente
+    applyToolChain(); // first thinking block: evaluate the 3px gap with the previous one
     startThinkingTimer();
     scrollToBottom();
   }
   return thinkingEl as HTMLElement;
 }
 
-// a fine pensiero: via la rotella, il contenuto resta espandibile
+// at thinking end: spinner removed, the content stays expandable
 function finishThinking(): void {
   if (!thinkingEl) return;
   stopThinkingTimer();
@@ -1581,11 +1581,12 @@ function finishThinking(): void {
   }
 }
 
-// --- blocco "Extensions" (attesa pre-stream > 3s) -----------------------------
-// Dopo un invio, se le estensioni (es. hook pesanti come vision-handoff al
-// resume) tengono occupato pi per più di 3s senza che arrivi il primo output,
-// mostriamo un blocco con loader + timer come il Thinking, così l'utente capisce
-// che qualcosa sta lavorando. Sparisce al primo output reale (o a fine turno).
+// --- "Extensions" block (pre-stream wait > 3s) -------------------------------
+// After a send, if the extensions (e.g. heavy hooks like vision-handoff at
+// resume) keep pi busy for more than 3s without the first output arriving,
+// we show a block with loader + timer like the Thinking one, so the user
+// understands something is working. It disappears at the first real output
+// (or at turn end).
 
 const EXTENSIONS_DELAY_MS = 3000;
 let extensionsWrapper: HTMLElement | null = null;
@@ -1638,7 +1639,7 @@ function hideExtensionsBlock(): void {
   }
 }
 
-// armato a ogni invio: se entro 3s non arriva il primo output, mostra il blocco
+// armed at every send: if the first output does not arrive within 3s, shows the block
 function armExtensionsBlock(): void {
   hideExtensionsBlock();
   extensionsTimeout = setTimeout(() => {
@@ -1647,11 +1648,11 @@ function armExtensionsBlock(): void {
   }, EXTENSIONS_DELAY_MS);
 }
 
-// --- loader di invio sul messaggio utente -------------------------------------
-// Appena l'utente invia, il suo messaggio mostra una rotella + timer che conta
-// i secondi dall'invio alla prima risposta del modello (pensiero, testo o tool).
-// Indipendente dal blocco "Estensioni" (che segnala il lavoro pre-stream):
-// questo dà subito feedback che il messaggio è stato consegnato e si attende.
+// --- send loader on the user message -----------------------------------------
+// As soon as the user sends, his message shows a spinner + timer counting
+// the seconds from the send to the first model response (thinking, text or tool).
+// Independent from the "Extensions" block (which signals pre-stream work):
+// this gives immediate feedback that the message was delivered and is awaited.
 
 let sentLoaderEl: HTMLElement | null = null;
 let sentLoaderSpinnerEl: HTMLElement | null = null;
@@ -1680,16 +1681,16 @@ function showSentLoader(wrapper: HTMLElement): void {
   }, 500);
 }
 
-// al primo contenuto reale del modello: via la rotella, il timer resta
-// congelato sul messaggio come memoria di quanto ci ha messo a rispondere
+// at the first real model content: spinner removed, the timer stays
+// frozen on the message as a memory of how long it took to answer
 function settleSentLoader(): void {
   if (sentLoaderClock) {
     clearInterval(sentLoaderClock);
     sentLoaderClock = null;
   }
   if (!sentLoaderEl) return;
-  // già congelato: i delta successivi (es. ogni thinking_delta) NON devono
-  // riscrivere il timer — il valore resta quello della prima risposta
+  // already frozen: the later deltas (e.g. every thinking_delta) must NOT
+  // rewrite the timer — the value stays that of the first response
   if (sentLoaderEl.classList.contains("settled")) return;
   const secs = Math.max(1, Math.round((performance.now() - sentLoaderStartedAt) / 1000));
   if (sentLoaderTimerEl) sentLoaderTimerEl.textContent = `${secs}s`;
@@ -1698,7 +1699,7 @@ function settleSentLoader(): void {
   sentLoaderSpinnerEl = null;
 }
 
-// rimosso completo (solo su abort): via rotella e timer
+// fully removed (only on abort): spinner and timer gone
 function hideSentLoader(): void {
   if (sentLoaderClock) {
     clearInterval(sentLoaderClock);
@@ -1712,20 +1713,20 @@ function hideSentLoader(): void {
   }
 }
 
-// --- slot del footer riempiti dalle ESTENSIONI pi (ctx.ui.setStatus) --------
-// pi-webview è un renderer passivo: ogni estensione chiama setStatus(key, text)
-// (già inoltrato come extension_ui_request in modalità RPC) e la webview
-// mostra uno slot per chiave; setStatus(key, undefined) pulisce lo slot.
-// Es. pi-tokens-per-second → ⚡ 43 tokens in 0.7s (59.1 t/s).
+// --- footer slots filled by the pi EXTENSIONS (ctx.ui.setStatus) -----------
+// pi-webview is a passive renderer: every extension calls setStatus(key, text)
+// (already forwarded as extension_ui_request in RPC mode) and the webview
+// shows one slot per key; setStatus(key, undefined) clears the slot.
+// E.g. pi-tokens-per-second → ⚡ 43 tokens in 0.7s (59.1 t/s).
 
 const statusSlots = new Map<string, string>();
 
-// --- ANSI SGR → HTML con colori mappati sul tema ------------------------------
-// Le estensioni formattano per il terminale: invece di buttare via i codici,
-// li parsiamo (SGR: fg 16/256 colori, bold) e li rendiamo con i token del
-// tema (--ansi-N), leggibili sia in dark sia in light.
+// --- ANSI SGR → HTML with colors mapped on the theme ------------------------
+// The extensions format for the terminal: instead of throwing away the codes,
+// we parse them (SGR: 16/256-color fg, bold) and render them with the theme
+// tokens (--ansi-N), readable both in dark and light.
 
-// RGB standard xterm per ridurre i 256 colori al più vicino dei 16
+// standard xterm RGB to reduce the 256 colors to the closest of the 16
 const XTERM_RGB: Array<[number, number, number]> = [
   [0, 0, 0],
   [128, 0, 0],
@@ -1747,7 +1748,7 @@ const XTERM_RGB: Array<[number, number, number]> = [
 
 function ansi256To16(n: number): number {
   if (n < 16) return n;
-  if (n >= 232) return n >= 244 ? 15 : 8; // scala di grigi
+  if (n >= 232) return n >= 244 ? 15 : 8; // gray scale
   const i = n - 16;
   const cube = [0, 95, 135, 175, 215, 255];
   const r = cube[Math.floor(i / 36) % 6]!;
@@ -1780,9 +1781,9 @@ function ansiEscapeHtml(s: string): string {
   );
 }
 
-// testo con sequenze ANSI → HTML sicuro (escape prima, poi wrap colorato)
+// text with ANSI sequences → safe HTML (escape first, then colored wrap)
 function renderAnsiToHtml(text: string): string {
-  // via le sequenze OSC (es. titoli di terminale); restano i CSI SGR
+  // remove the OSC sequences (e.g. terminal titles); the CSI SGR remain
   const s = text.replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "");
   const tokens = s.split(/(\u001b\[[0-9;]*m)/);
   let out = "";
@@ -1822,16 +1823,16 @@ function renderAnsiToHtml(text: string): string {
   return out;
 }
 
-// solo testo pulito (per tooltip): toglie OSC e CSI
+// plain text only (for tooltips): removes OSC and CSI
 function stripAnsi(text: string): string {
   return text
     .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
     .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "");
 }
 
-// richieste UI delle estensioni pi (ctx.ui.*): in VS Code le gestisce il
-// companion con UI nativa (select/confirm/input), qui (standalone/piw) la
-// webview risponde con i propri modali. Mai lasciare l'estensione in attesa.
+// UI requests of the pi extensions (ctx.ui.*): in VS Code the companion
+// handles them with native UI (select/confirm/input), here (standalone/piw)
+// the webview answers with its own modals. Never leave the extension waiting.
 function handleExtensionUiRequest(evt: RpcEvent): void {
   const id = evt.id as string | undefined;
   const method = evt.method as string | undefined;
@@ -1853,17 +1854,18 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       return;
     }
     case "select": {
-      // il comando ha risposto (dialogo): ferma il timer del loader inviato
+      // the command answered (dialog): stop the sent loader timer
       settleSentLoader();
       hideExtensionsBlock();
       const title = (evt.title as string | undefined) ?? "";
       const options = (evt.options as string[] | undefined) ?? [];
-      // ask_user: la prima domanda divide la card in N card (header = domanda
-      // ellipsis, timer in fondo) — gli args JSON sono già nel body della card
+      // ask_user: the first question splits the card into N cards (header =
+      // ellipsis question, timer at the end) — the JSON args are already in
+      // the card body
       if (askUserQuestionCounter === 0) prepareAskUserCards();
       askUserQuestionCounter++;
-      // INLINE in fondo alla chat (niente modale overlay): l'utente legge la
-      // cronologia e risponde dal thread
+      // INLINE at the bottom of the chat (no overlay modal): the user reads
+      // the history and answers from the thread
       void inlineSelect(title, options).then((v) =>
         respond(v === undefined ? { cancelled: true } : { value: v }),
       );
@@ -1887,7 +1889,7 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       return;
     }
     case "editor": {
-      // testo precompilato (es. modifica): stesso blocco di input
+      // prefilled text (e.g. edit): same input block
       settleSentLoader();
       hideExtensionsBlock();
       const title = (evt.title as string | undefined) ?? "";
@@ -1898,8 +1900,8 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       return;
     }
     case "notify": {
-      // risposta del comando estensione: ferma il timer del loader inviato
-      // (i comandi non emettono agent_start/delta) e mostra la notifica in chat
+      // extension command response: stop the sent loader timer
+      // (commands do not emit agent_start/delta) and show the notification in chat
       settleSentLoader();
       hideExtensionsBlock();
       const msg = (evt.message as string | undefined) ?? (evt.title as string) ?? "";
@@ -1907,20 +1909,20 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       return;
     }
     default:
-      // metodi fire-and-forget (setWidget/setTitle/…): nessuna risposta
+      // fire-and-forget methods (setWidget/setTitle/…): no response
       return;
   }
 }
 
-// modale di selezione (estensione pi, ctx.ui.select): lista opzioni con
-// tastiera ↑/↓ + Invio, Esc/click fuori = annulla
-// --- dialoghi estensione INLINE in fondo alla chat ---------------------------
-// L'utente deve poter LEGGERE chat e cronologia mentre risponde: il dialogo
-// (select/confirm/input da extension_ui_request) è un blocco in coda al
-// thread, non un modale overlay. Una richiesta alla volta (le estensioni
-// chiedono sequenzialmente); Esc o ✕ = annulla.
-// Alla risposta il blocco COLLASSA in una card tool (come edit/write): una
-// sola riga in ellipsis con la risposta e il timer secondi in fondo.
+// selection modal (pi extension, ctx.ui.select): option list with
+// keyboard ↑/↓ + Enter, Esc/outside click = cancel
+// --- extension dialogs INLINE at the bottom of the chat ---------------------
+// The user must be able to READ the chat and history while answering: the
+// dialog (select/confirm/input from extension_ui_request) is a block at the
+// end of the thread, not an overlay modal. One request at a time (the
+// extensions ask sequentially); Esc or ✕ = cancel.
+// At the answer the block COLLAPSES into a tool card (like edit/write): a
+// single ellipsis row with the answer and the seconds timer at the end.
 let inlineDialog: { el: HTMLElement; cancel: () => void } | null = null;
 
 function closeInlineDialog(): void {
@@ -1930,9 +1932,9 @@ function closeInlineDialog(): void {
   d.cancel();
 }
 
-// card base del dialogo inline (titolo + timer live + ✕ + corpo), in fondo al
-// thread. dismiss() = annulla (niente card); collapse() = risposta: la card
-// diventa la riga tool compatta (nome + risposta ellipsis + timer congelato).
+// base card of the inline dialog (title + live timer + ✕ + body), at the end
+// of the thread. dismiss() = cancel (no card); collapse() = answer: the card
+// becomes the compact tool row (name + ellipsis answer + frozen timer).
 function inlineDialogCard(
   title: string,
   body: HTMLElement,
@@ -1960,9 +1962,9 @@ function inlineDialogCard(
   head.append(titleEl, x);
   card.append(head, body);
   wrapper.appendChild(card);
-  // FORZA l'autoscroll: è una domanda in attesa di risposta — va vista anche
-  // se l'utente stava leggendo la cronologia più sopra (addMsg usa
-  // stickToBottom e non strapperebbe la vista)
+  // FORCES the autoscroll: it is a question awaiting an answer — it must be
+  // seen even if the user was reading the history above (addMsg uses
+  // stickToBottom and would not tear the view away)
   scrollToBottom(true);
   const cleanup = () => {
     document.removeEventListener("keydown", esc, true);
@@ -1971,14 +1973,14 @@ function inlineDialogCard(
     cleanup();
     wrapper.remove();
   };
-  // risposta: NON creare una seconda card — aggiorna la card tool reale
-  // (quella di toolcall_start, che pi finalizza con il risultato) e rimuovi
-  // il blocco dialogo. Un solo box, con la risposta nella riga ellipsis e il
-  // timer in fondo (la card reale lo fa già girare fino a tool_call_end).
+  // answer: do NOT create a second card — update the real tool card
+  // (the toolcall_start one, finalized by pi with the result) and remove
+  // the dialog block. One single box, with the answer in the ellipsis row
+  // and the timer at the end (the real card already runs it until tool_call_end).
   const collapse = (answer: string) => {
     cleanup();
-    // ask_user: aggiorna la card della domanda corrente e chiudi (una card
-    // per domanda, riga → risposta)
+    // ask_user: update the card of the current question and close (one card
+    // per question, row → answer)
     if (collapseAskUserAnswer(answer)) {
       wrapper.remove();
       return;
@@ -1994,7 +1996,7 @@ function inlineDialogCard(
     }
     if (target) {
       const args = target.querySelector<HTMLElement>(".tool-args");
-      // multi-domanda nella stessa call: accoda alla riga (separatore ·)
+      // multi-question in the same call: append to the row (separator ·)
       const wasAnswered = target.dataset.answered === "true";
       target.dataset.answered = "true";
       if (args) {
@@ -2007,7 +2009,7 @@ function inlineDialogCard(
       wrapper.remove();
       return;
     }
-    // fallback (dialogo senza card tool): crea la riga compatta nel wrapper
+    // fallback (dialog without a tool card): create the compact row in the wrapper
     const d = document.createElement("details");
     d.className = "tool-card";
     const s = document.createElement("summary");
@@ -2019,7 +2021,7 @@ function inlineDialogCard(
     args2.textContent = answer || "—";
     args2.title = answer;
     s.append(name, args2);
-    // corpo espandibile: domanda + risposta (come gli args degli altri tool)
+    // expandable body: question + answer (like the args of the other tools)
     const cb = document.createElement("div");
     cb.className = "code-block";
     const ch = document.createElement("div");
@@ -2044,7 +2046,7 @@ function inlineDialogCard(
   return { el: wrapper, dismiss, collapse };
 }
 
-// selezione con opzioni (ctx.ui.select / ask_user)
+// selection with options (ctx.ui.select / ask_user)
 function inlineSelect(title: string, options: string[]): Promise<string | undefined> {
   return new Promise((resolve) => {
     closeInlineDialog();
@@ -2078,7 +2080,7 @@ function inlineSelect(title: string, options: string[]): Promise<string | undefi
   });
 }
 
-// conferma (ctx.ui.confirm)
+// confirmation (ctx.ui.confirm)
 function inlineConfirm(message: string): Promise<boolean> {
   return new Promise((resolve) => {
     closeInlineDialog();
@@ -2104,7 +2106,7 @@ function inlineConfirm(message: string): Promise<boolean> {
   });
 }
 
-// input di testo (ctx.ui.input / editor / "Other" di ask_user)
+// text input (ctx.ui.input / editor / "Other" of ask_user)
 function inlinePrompt(prefill: string, title: string): Promise<string | null> {
   return new Promise((resolve) => {
     closeInlineDialog();
@@ -2132,7 +2134,7 @@ function inlinePrompt(prefill: string, title: string): Promise<string | null> {
     body.append(input, send);
     const dialog = inlineDialogCard(title, body, () => finish(null));
     inlineDialog = { el: dialog.el, cancel: () => finish(null) };
-    // Invio = invia, Shift+Invio = nuova riga
+    // Enter = send, Shift+Enter = new line
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -2148,7 +2150,7 @@ function renderStatusSlots(): void {
   for (const [key, text] of statusSlots) {
     const slot = document.createElement("span");
     slot.className = "stats-slot";
-    // ANSI del terminale → colori mappati sul tema (textContent no: serve HTML)
+    // terminal ANSI → colors mapped on the theme (textContent no: HTML is needed)
     slot.innerHTML = renderAnsiToHtml(text);
     slot.title = stripAnsi(text);
     els.statsSlots.appendChild(slot);
@@ -2156,9 +2158,9 @@ function renderStatusSlots(): void {
   updateStatsTitle();
 }
 
-// titolo completo (tooltip) del badge: solo % di contesto + suggerimento click
-// + soglia auto-compaction di pi tra parentesi (niente conteggi token: il
-// contesto è già leggibile nella label del gauger)
+// full badge (tooltip) title: only % of context + click suggestion
+// + pi auto-compaction threshold in parentheses (no token counts: the
+// context is already readable in the gauge label)
 let compactionSettings: { enabled: boolean; reserveTokens: number } | null = null;
 
 function updateStatsTitle(): void {
@@ -2187,12 +2189,12 @@ function updateStatsTitle(): void {
   els.statsBadge.title = parts.join(" · ");
 }
 
-// --- responsive: niente hiding a blocchi, solo ellipsis CSS standard ----------
-// Il blocco contesto resta intero (flex: 0 0 auto); gli slot delle estensioni
-// si restringono (flex: 1 1 auto + min-width: 0) e l'ultimo visibile mostra
-// l'ellipsis nativo. Nessun JS necessario.
+// --- responsive: no block hiding, only standard CSS ellipsis ----------------
+// The context block stays whole (flex: 0 0 auto); the extension slots
+// shrink (flex: 1 1 auto + min-width: 0) and the last visible one shows the
+// native ellipsis. No JS needed.
 
-// --- gauger circolare del contesto (sempre visibile, barra teal) --------------
+// --- circular context gauge (always visible, teal bar) ----------------------
 
 const GAUGE_CIRCUMFERENCE = 2 * Math.PI * 15.5;
 let contextStats: {
@@ -2208,8 +2210,8 @@ function fmtK(n: number): string {
 }
 
 function renderContextGauge(): void {
-  // dopo la compact pi non conosce i token finché non arriva una risposta:
-  // percent null → anello a 0, label con la sola finestra (…/200K)
+  // after the compact pi does not know the tokens until a response arrives:
+  // percent null → ring at 0, label with only the window (…/200K)
   const pct =
     contextStats?.percent != null
       ? Math.min(100, Math.max(0, contextStats.percent))
@@ -2225,8 +2227,8 @@ function renderContextGauge(): void {
   updateStatsTitle();
 }
 
-// saldo reale del provider (deepseek/openrouter): via companion/bridge
-// (legge la key da auth.json, la webview riceve solo { currency, balance })
+// real provider balance (deepseek/openrouter): via companion/bridge
+// (reads the key from auth.json, the webview only gets { currency, balance })
 async function fetchBalance(): Promise<void> {
   if (!currentModel?.provider) return;
   const res = await ideRequest({
@@ -2239,13 +2241,13 @@ async function fetchBalance(): Promise<void> {
     creditText = `${creditCurrency}${b.balance.toFixed(2)}`;
     creditBalance = b.balance;
   } else {
-    creditText = ""; // provider senza endpoint di balance: niente saldo
+    creditText = ""; // provider without a balance endpoint: no balance
     creditBalance = 0;
   }
   renderModelInfo();
 }
 
-// stats di sessione (token/contexto): poll dopo ogni turno e ai boot
+// session stats (tokens/context): poll after every turn and at boot
 async function fetchSessionStats(): Promise<void> {
   try {
     const res = await rpcRequest(rpc.getSessionStats());
@@ -2259,12 +2261,12 @@ async function fetchSessionStats(): Promise<void> {
           };
         }
       | undefined;
-    // costo totale della sessione (calcolato dal core di pi da usage reali)
+    // total session cost (computed by the pi core from real usage)
     if (typeof data?.cost === "number") sessionCost = data.cost;
     const cu = data?.contextUsage;
-    // dopo la compact pi torna { tokens: null, contextWindow, percent: null }:
-    // la finestra è comunque nota → mostriamo …/finestra finché non c'è una
-    // risposta successiva alla compattazione
+    // after the compact pi returns { tokens: null, contextWindow, percent: null }:
+    // the window is still known → we show …/window until there is a
+    // response after the compaction
     if (cu && typeof cu.contextWindow === "number") {
       contextStats = {
         tokens: typeof cu.tokens === "number" ? cu.tokens : null,
@@ -2275,26 +2277,26 @@ async function fetchSessionStats(): Promise<void> {
       contextStats = null;
     }
     renderContextGauge();
-    renderBalanceChip(); // il costo sessione si aggiorna a ogni turno
+    renderBalanceChip(); // the session cost updates at every turn
   } catch {
-    // pi non ancora pronto: il gauger resta su “–”
+    // pi not ready yet: the gauge stays on “–”
   }
 }
 
-// --- card dei tool con copia --------------------------------------------------
+// --- tool cards with copy ----------------------------------------------------
 
 function ensureToolCard(name?: string): HTMLElement {
   if (!toolsEl && currentMsg) {
-    // nome vero se già noto (toolcall_start), altrimenti placeholder neutro
+    // real name if already known (toolcall_start), otherwise a neutral placeholder
     toolsEl = buildToolCard({ id: "", name: name || t("tool"), args: "" });
     toolsPre = toolsEl.querySelector<HTMLPreElement>("pre");
     currentMsg.appendChild(toolsEl);
-    applyToolChainIfToolFirst(); // primo blocco tool: valuta il gap 3px
+    applyToolChainIfToolFirst(); // first tool block: evaluate the 3px gap
   }
   return toolsEl as HTMLElement;
 }
 
-// --- copia (componente unico, stesso stile ovunque) ---------------------------
+// --- copy (single component, same style everywhere) ---------------------------
 
 function makeCopyButton(text: string): HTMLButtonElement {
   const btn = document.createElement("button");
@@ -2314,7 +2316,7 @@ function makeCopyButton(text: string): HTMLButtonElement {
         btn.title = t("copy");
       }, 1500);
     } catch {
-      // clipboard non disponibile (es. webview senza permessi)
+      // clipboard unavailable (e.g. webview without permissions)
     }
   });
   return btn;
@@ -2326,7 +2328,7 @@ function addCopyButton(container: HTMLElement, text: string): HTMLButtonElement 
   return btn;
 }
 
-// trasforma i <pre> di marked nel pattern unico code-block (header + copia)
+// transforms the marked <pre> into the unique code-block pattern (header + copy)
 function enhanceCodeBlocks(container: HTMLElement): void {
   for (const pre of Array.from(container.querySelectorAll("pre"))) {
     if (pre.parentElement?.classList.contains("code-block")) continue;
@@ -2347,9 +2349,9 @@ function enhanceCodeBlocks(container: HTMLElement): void {
   }
 }
 
-// --- finalizzazione messaggio -------------------------------------------------
+// --- message finalization ---------------------------------------------------
 
-// header card tool: nome in pill (accent pieno), argomenti attenuati accanto
+// tool card header: name in pill (solid accent), muted arguments next to it
 function renderToolHeader(el: HTMLElement, summary: ToolSummary): void {
   el.textContent = summary.name;
   el.parentElement?.querySelector(".tool-args")?.remove();
@@ -2363,7 +2365,7 @@ function renderToolHeader(el: HTMLElement, summary: ToolSummary): void {
 
 function finalizeMessage(msg: FinalizedMessage): void {
   if (currentText) {
-    // pensiero prima del testo: lo slot è già prima di .md nel DOM
+    // thinking before the text: the slot is already before .md in the DOM
     if (thinkingEl && !thinkingContentRendered) finishThinking();
     if (msg.thinking.trim() && !thinkingContentRendered) {
       const card = document.createElement("div");
@@ -2372,7 +2374,7 @@ function finalizeMessage(msg: FinalizedMessage): void {
       const body = document.createElement("div");
       body.className = "thinking-content";
       body.textContent = msg.thinking.trim();
-      body.hidden = true; // collassato per default
+      body.hidden = true; // collapsed by default
       head.addEventListener("click", () => {
         body.hidden = !body.hidden;
       });
@@ -2384,7 +2386,7 @@ function finalizeMessage(msg: FinalizedMessage): void {
     markdownAccum = msg.text;
     currentText.innerHTML = renderMarkdown(msg.text);
     enhanceCodeBlocks(currentText);
-    // tool call: riusa la card di streaming per il primo (evita duplicati)
+    // tool call: reuse the streaming card for the first one (avoids duplicates)
     const toolCalls = msg.toolCalls;
     if (toolCalls.length > 0) {
       const first = toolCalls[0];
@@ -2408,8 +2410,8 @@ function finalizeMessage(msg: FinalizedMessage): void {
       for (const tc of toolCalls.slice(1)) createToolCard(tc);
     }
   }
-  // wrapper assistant senza contenuto (es. stream vuoto): rimuovilo, altrimenti
-  // crea gap fantasma tra i blocchi tool nella cronologia
+  // assistant wrapper without content (e.g. empty stream): remove it,
+  // otherwise it creates ghost gaps between the tool blocks in the history
   if (currentMsg) {
     const hasContent =
       !!currentMsg.querySelector(".thinking-card") ||
@@ -2434,8 +2436,9 @@ function buildToolCard(tc: ToolCallInfo): HTMLElement {
   const s = document.createElement("summary");
   const name = document.createElement("span");
   name.className = "tool-name";
-  // il nome va attaccato PRIMA di renderToolHeader: el.after() su un nodo
-  // staccato crea e scarta lo span args in silenzio (niente comando nel summary)
+  // the name must be attached BEFORE renderToolHeader: el.after() on a
+  // detached node creates and discards the args span silently (no command
+  // in the summary)
   s.appendChild(name);
   renderToolHeader(name, toolSummary(tc.name, tc.args, workspacePath ?? undefined));
   const timer = document.createElement("span");
@@ -2466,9 +2469,9 @@ function buildThinkingCard(content: string, durationMs = 0): HTMLElement {
   label.className = "thinking-label";
   label.textContent = t("thought");
   head.appendChild(label);
-  // durata stimata: timestamp assistant − timestamp messaggio precedente
-  // (nel loop di tool quel gap è il tempo di ragionamento LLM, dominato dal
-  // pensiero) — stesso formato dei timer live (min 1s, arrotondato)
+  // estimated duration: assistant timestamp − previous message timestamp
+  // (in the tool loop that gap is the LLM reasoning time, dominated by the
+  // thinking) — same format as the live timers (min 1s, rounded)
   if (durationMs > 0) {
     const timer = document.createElement("span");
     timer.className = "thinking-timer";
@@ -2486,7 +2489,7 @@ function buildThinkingCard(content: string, durationMs = 0): HTMLElement {
   return card;
 }
 
-// card compatto per il risultato di un tool (output troncato)
+// compact card for a tool result (truncated output)
 function buildResultCard(toolName: string, output: string): HTMLElement {
   const d = document.createElement("details");
   d.className = "tool-card";
@@ -2516,13 +2519,13 @@ function buildResultCard(toolName: string, output: string): HTMLElement {
   return d;
 }
 
-// --- output live dei tool -----------------------------------------------------
-// la card creata durante lo streaming mostra anche il RISULTATO del tool
-// (tool_execution_start/update/end), come nella cronologia.
+// --- live tool output --------------------------------------------------------
+// the card created during streaming also shows the tool RESULT
+// (tool_execution_start/update/end), like in the history.
 
 const toolCardsById = new Map<string, HTMLElement>();
 
-// --- timer di esecuzione dei tool ---------------------------------------------
+// --- tool execution timers ---------------------------------------------------
 
 const toolTimers = new Map<
   HTMLElement,
@@ -2534,8 +2537,8 @@ const toolTimers = new Map<
 >();
 
 function fmtToolTime(ms: number): string {
-  // sotto il secondo mostra i millisecondi veri (3ms, 142ms): lo 0.0s
-  // dell'arrotondamento nascondeva operazioni reali ma velocissime
+  // below one second shows the real milliseconds (3ms, 142ms): the 0.0s
+  // rounding was hiding real but extremely fast operations
   if (ms < 1000) return `${Math.max(1, Math.round(ms))}ms`;
   const s = ms / 1000;
   return s >= 10 ? `${Math.round(s)}s` : `${s.toFixed(1)}s`;
@@ -2571,22 +2574,22 @@ function clearToolTimers(): void {
   toolTimers.clear();
 }
 const toolOutputPre = new Map<string, HTMLPreElement>();
-// timestamp di partenza dei tool nella cronologia (assistant → toolResult)
+// start timestamps of the tools in the history (assistant → toolResult)
 const toolStartTimes = new Map<string, number>();
 
-// --- ask_user: UNA CARD PER DOMANDA -------------------------------------------
-// pi chiama ask_user UNA volta con N domande nel payload; la webview divide la
-// card in N card (header = domanda ellipsis + timer), aggiornate alla risposta
-// (header → risposta, risultato nel corpo). Stato persistito anche al resume.
+// --- ask_user: ONE CARD PER QUESTION -----------------------------------------
+// pi calls ask_user ONCE with N questions in the payload; the webview splits
+// the card into N cards (header = ellipsis question + timer), updated at the
+// answer (header → answer, result in the body). State also persisted at resume.
 interface AskUserInfo {
   cards: HTMLElement[];
   questions: string[];
 }
 const askUserInfoByTool = new Map<string, AskUserInfo>();
-let askUserQuestionCounter = 0; // domanda corrente (1-based) del tool in corso
+let askUserQuestionCounter = 0; // current question (1-based) of the tool in progress
 let currentAskUserToolId = "";
 
-// parsing degli args di ask_user: JSON { questions: [...] } (o singolo oggetto)
+// parsing of the ask_user args: JSON { questions: [...] } (or a single object)
 function parseAskUserQuestions(
   argsJson: string,
 ): Array<{ question: string; options?: unknown[] }> | null {
@@ -2612,7 +2615,7 @@ function parseAskUserQuestions(
   }
 }
 
-// header della card ask_user: nome + testo (domanda o risposta) ellipsis + timer
+// ask_user card header: name + text (question or answer) ellipsis + timer
 function setAskUserHeader(card: HTMLElement, text: string): void {
   const name = card.querySelector(".tool-name")!;
   name.textContent = "ask_user";
@@ -2624,7 +2627,7 @@ function setAskUserHeader(card: HTMLElement, text: string): void {
   name.after(args);
 }
 
-// divide la card singola in N card (una per domanda), header = domanda
+// splits the single card into N cards (one per question), header = question
 function splitAskUserCard(
   firstCard: HTMLElement,
   toolId: string,
@@ -2637,8 +2640,8 @@ function splitAskUserCard(
   if (label) label.textContent = "ask_user";
   const firstPre = firstCard.querySelector<HTMLPreElement>(".code-block pre");
   if (firstPre) firstPre.textContent = questions[0]?.question ?? "";
-  // niente timer per le domande: non servono (rimuovi anche dalla prima card,
-  // che lo aveva da buildToolCard)
+  // no timer for the questions: not needed (also remove from the first card,
+  // which had it from buildToolCard)
   firstCard.querySelector(".tool-timer")?.remove();
   let prev = firstCard;
   for (let i = 1; i < questions.length; i++) {
@@ -2661,7 +2664,7 @@ function splitAskUserCard(
   return cards;
 }
 
-// applica fn a tutte le card del tool (ask_user: N card; altri: 1)
+// applies fn to all the cards of the tool (ask_user: N cards; others: 1)
 function forEachToolCard(toolId: string, fn: (c: HTMLElement) => void): void {
   const info = askUserInfoByTool.get(toolId);
   if (info && info.cards.length > 0) info.cards.forEach(fn);
@@ -2671,9 +2674,9 @@ function forEachToolCard(toolId: string, fn: (c: HTMLElement) => void): void {
   }
 }
 
-// il risultato di ask_user ("Q1: …\nA1: …\n\nQ2: …\nA2: …") viene distribuito
-// per domanda: ogni card riceve il suo segmento nel corpo e la risposta nella
-// riga (stato finale, identico anche al resume)
+// the ask_user result ("Q1: …\nA1: …\n\nQ2: …\nA2: …") is distributed
+// per question: every card gets its segment in the body and the answer in
+// the row (final state, identical also at resume)
 function distributeAskUserResult(toolId: string, resultText: string): boolean {
   const info = askUserInfoByTool.get(toolId);
   if (!info || info.cards.length === 0) return false;
@@ -2701,9 +2704,9 @@ function distributeAskUserResult(toolId: string, resultText: string): boolean {
   return true;
 }
 
-// alla risposta del dialogo: aggiorna la card della domanda corrente (header →
-// risposta, risultato subito nel corpo — la distribuzione di
-// tool_execution_end lo sovrascrive con lo stesso contenuto, idempotente)
+// at the dialog answer: update the card of the current question (header →
+// answer, result right away in the body — the tool_execution_end
+// distribution overwrites it with the same content, idempotent)
 function collapseAskUserAnswer(answer: string): boolean {
   if (!currentAskUserToolId) return false;
   const info = askUserInfoByTool.get(currentAskUserToolId);
@@ -2723,8 +2726,8 @@ function collapseAskUserAnswer(answer: string): boolean {
   return true;
 }
 
-// primo dialogo di un ask_user: gli args (JSON questions) sono già nel body
-// della card → divide in N card e registra lo stato per le risposte
+// first dialog of an ask_user: the args (JSON questions) are already in the
+// body of the card → splits into N cards and registers the state for the answers
 function prepareAskUserCards(): void {
   let card: HTMLElement | null = null;
   for (const c of Array.from(
@@ -2744,7 +2747,7 @@ function prepareAskUserCards(): void {
   splitAskUserCard(card, toolId, questions);
 }
 
-// timestamp del messaggio (numero epoch ms o string ISO), 0 se assente/non valido
+// message timestamp (epoch ms number or ISO string), 0 if missing/invalid
 function parseTs(msg: unknown): number {
   const raw = (msg as { timestamp?: unknown }).timestamp;
   if (typeof raw === "number") return raw;
@@ -2782,10 +2785,10 @@ function ensureToolOutput(card: HTMLElement, id: string): HTMLPreElement {
   return pre;
 }
 
-// --- statistiche di diff (righe aggiunte/rimosse/modificate) -------------------
-// Parsa un diff unificato (details.diff di edit/write/edit-diff): una riga “-”
-// seguita da righe “+” è una MODIFICA in place (contata una volta), altrimenti
-// conteggi puri di aggiunte/rimozioni.
+// --- diff stats (added/removed/modified lines) -------------------------------
+// Parses a unified diff (details.diff of edit/write/edit-diff): a “-” line
+// followed by “+” lines is an in-place MODIFICATION (counted once), otherwise
+// pure addition/removal counts.
 
 interface DiffStats {
   added: number;
@@ -2801,7 +2804,7 @@ function diffStats(diff: string): DiffStats {
   let pendingAdded = 0;
   const flush = (): void => {
     if (pendingRemoved > 0 && pendingAdded > 0) {
-      // gruppo di righe rimpiazzate in place: contato come modifica
+      // group of lines replaced in place: counted as a modification
       modified += Math.max(pendingRemoved, pendingAdded);
     } else {
       added += pendingAdded;
@@ -2813,17 +2816,17 @@ function diffStats(diff: string): DiffStats {
   for (const line of diff.split(/\r?\n/)) {
     if (line.startsWith("+")) pendingAdded++;
     else if (line.startsWith("-")) pendingRemoved++;
-    else flush(); // contesto o header: chiude il gruppo corrente
+    else flush(); // context or header: closes the current group
   }
   flush();
   return { added, removed, modified };
 }
 
-// badge nel summary della card, PRIMA del timer, separato da pipe mute
+// badge in the card summary, BEFORE the timer, separated by muted pipes
 function renderToolDiff(card: HTMLElement, diff: string): void {
   const s = diffStats(diff);
   if (s.added === 0 && s.removed === 0 && s.modified === 0) return;
-  // rimuovi un eventuale badge precedente (es. il +N del write) prima del nuovo
+  // remove a possible previous badge (e.g. the +N of write) before the new one
   card.querySelector(".tool-diff")?.remove();
   const el = document.createElement("span");
   el.className = "tool-diff";
@@ -2833,27 +2836,27 @@ function renderToolDiff(card: HTMLElement, diff: string): void {
     ["d-mod", "~", String(s.modified)],
   ];
   for (const [cls, sign, count] of parts) {
-    // MAI zeri: insert puro → +100, delete puro → −200, sostituzione → +N −M
+    // NEVER zeros: pure insert → +100, pure delete → −200, replacement → +N −M
     if (count === "0") continue;
     const p = document.createElement("span");
     p.className = cls;
     p.textContent = `${sign}${count}`;
     el.appendChild(p);
   }
-  // prima del timer (che sta nel summary)
+  // before the timer (which lives in the summary)
   card.querySelector(".tool-timer")?.before(el);
 }
 
-// righe del contenuto di write: il valore "content" negli args (\n escaped).
-// ATTENZIONE: il modello emette "content": "..." (spazio dopo i due punti)
-// e il contenuto può contenere \" (quote escaped) — regex whitespace-tollerante
+// lines of the write content: the "content" value in the args (\n escaped).
+// ATTENTION: the model emits "content": "..." (space after the colon)
+// and the content can contain \" (escaped quotes) — whitespace-tolerant regex
 function writeLinesFromArgs(argsJson: string): number {
   const m = argsJson.match(/"content"\s*:\s*"((?:[^"\\\\]|\\\\.)*)"/);
   const content = m?.[1] ?? "";
   return content ? (content.match(/\\n/g) ?? []).length + 1 : 0;
 }
 
-// badge +N delle righe scritte (write non ha diff da pi: lo calcoliamo noi)
+// +N badge of the written lines (write has no diff from pi: we compute it)
 function renderWriteLines(card: HTMLElement, lines: number): void {
   if (lines <= 0) return;
   card.querySelector(".tool-diff")?.remove();
@@ -2866,14 +2869,14 @@ function renderWriteLines(card: HTMLElement, lines: number): void {
   card.querySelector(".tool-timer")?.before(el);
 }
 
-// applica fn a tutte le card del tool (ask_user: N card; altri: 1)
+// stray duplicate comment (removed)
 function handleToolExecution(evt: RpcEvent): void {
   const id = evt.toolCallId as string | undefined;
   if (!id) return;
   const card = toolCardsById.get(id);
   if (!card) return;
   if (evt.type === "tool_execution_start") {
-    // timer su TUTTE le card (ask_user ne ha una per domanda)
+    // timer on ALL the cards (ask_user has one per question)
     forEachToolCard(id, (c) => startToolTimer(c));
     const pre = ensureToolOutput(card, id);
     pre.textContent = "";
@@ -2889,12 +2892,12 @@ function handleToolExecution(evt: RpcEvent): void {
     forEachToolCard(id, (c) => stopToolTimer(c));
     const res = evt.result as
       { content?: unknown; details?: { diff?: string } } | undefined;
-    // righe aggiunte/rimosse/modificate dal diff (edit/write/edit-diff)
+    // added/removed/modified lines from the diff (edit/write/edit-diff)
     const diff = res?.details?.diff;
     if (diff) renderToolDiff(card, diff);
     const text = extractTextContent(res?.content);
     if (text) {
-      // ask_user: distribuisci il risultato per domanda (una card ciascuna)
+      // ask_user: distribute the result per question (one card each)
       if (distributeAskUserResult(id, text)) {
         scrollToBottom();
         return;
@@ -2908,10 +2911,10 @@ function handleToolExecution(evt: RpcEvent): void {
 
 function renderRpcEvent(evt: RpcEvent): void {
   trackWorking(evt);
-  // stearing: consegna al punto di pi.dev (dopo i tool call del turno) e
-  // riconciliazione con la coda nativa di pi
+  // steering: deliver at pi.dev's point (after the turn's tool calls) and
+  // reconciliation with the native pi queue
   if (evt.type === "turn_end") {
-    if (working) deliverSteering(); // in streaming: prompt(streamingBehavior:"steer")
+    if (working) deliverSteering(); // streaming: prompt(streamingBehavior:"steer")
     return;
   }
   if (evt.type === "message_start") {
@@ -2920,52 +2923,58 @@ function renderRpcEvent(evt: RpcEvent): void {
     }).message;
     const role = msg?.role;
     if (role === "user") {
-      // stearing iniettato (o messaggio inviato normalmente: già reso)
+      // steering injected (or normally sent message: already rendered)
       handleUserMessageStart(evt);
       return;
     }
     if (msg && role === "custom" && msg.display !== false) {
-      // messaggio iniettato da un'ALTRA sessione (es. session-control
-      // `send`): bubble in arrivo — la chat deve mostrarlo
+      // message injected from ANOTHER session (e.g. session-control
+      // `send`): incoming bubble — the chat must show it
       renderCustomMessageBubble(msg);
       return;
     }
   }
-  // compattazione: mostra il blocco anche se avviata da pi (auto-compaction)
+  // compaction: show the block even if started by pi (auto-compaction)
   if (evt.type === "compaction_start") {
     showCompactionBlock();
   } else if (evt.type === "compaction_end") {
-    // esito REALE da pi: errorMessage presente → fallita (il client non può
-    // fidarsi della sola response: arriva dopo l'evento)
+    // REAL outcome from pi: errorMessage present → failed (the client cannot
+    // trust the response alone: it arrives after the event)
     const errMsg = evt.errorMessage as string | undefined;
     finishCompaction(!!errMsg, errMsg);
-    // stearing: dopo la compattazione riparte la consegna della coda
+    // steering: after the compaction the queue delivery restarts
     deliverSteering();
   } else if (evt.type === "connection_closed") {
     if (evt.reason === "restart") {
-      // riavvio VOLUTO (Applica CLI flags): pi sta ripartendo con la nuova
-      // riga di comando → niente errore; il re-init arriva con pi_restarted
+      // INTENTIONAL restart (Apply CLI flags): pi is restarting with the new
+      // command line → no error; the re-init arrives with pi_restarted
       piRestarting = true;
       updateSendButton();
       return;
     }
-    // pi è morto (processo terminato): sblocca tutto e avvisa
+    // pi is dead (process terminated) or failed to start: unlock everything
+    // and warn. If the host passed the used command line, invite to verify pi
+    // from a terminal (the real pi error is only visible by launching it by hand).
+    // hideBootLoader: without it the loader stays until refreshSessions gives
+    // up (get_state retries ≈ up to 27s) — the error must appear right away.
+    hideBootLoader();
     if (compacting) finishCompaction(true, (evt.errorMessage as string) ?? undefined);
     hideSentLoader();
     hideExtensionsBlock();
     working = false;
     updateSendButton();
-    addStatusLine(t("piDied"));
+    const cmd = evt.command as string | undefined;
+    addStatusLine(cmd ? tpl(t("piDiedHint"), { command: cmd }) : t("piDied"));
   } else if (evt.type === "panel_mode") {
-    // webview in un PANNELLO editor (non sidebar): la selezione allegata è
-    // inaffidabile (il focus sul pannello azzera il contesto dell'editor
-    // attivo) → inibisci il blocco selezione
+    // webview in an EDITOR PANEL (not sidebar): the attached selection is
+    // unreliable (panel focus clears the active-editor context) → disable
+    // the selection block
     panelMode = evt.enabled === true;
     if (panelMode) els.selectionPanel.hidden = true;
   } else if (evt.type === "pi_restarted") {
-    // riavvio completato: ri-inizializza SENZA reload (trasparente): stato
-    // sessione + config; la sessione corrente è ripresa dal companion con
-    // --session, currentSessionPath è ancora in memoria
+    // restart completed: re-initialize WITHOUT reload (transparent): session
+    // state + config; the current session is resumed by the companion with
+    // --session, currentSessionPath is still in memory
     piRestarting = false;
     updateSendButton();
     // reset UI Applica: i valori applicati sono ora quelli salvati
@@ -2973,11 +2982,11 @@ function renderRpcEvent(evt: RpcEvent): void {
     els.cliApplyRow.hidden = true;
     els.cliApplyHint.textContent = "";
     savedCliValues = currentCliValues();
-    if (compacting) finishCompaction(true, "riavvio");
+    if (compacting) finishCompaction(true, "restart");
     requestConfig();
     if (!demoMode) void refreshSessions();
   }
-  // richieste UI delle estensioni pi (ctx.ui.*) → modali webview (standalone)
+  // UI requests of the pi extensions (ctx.ui.*) → webview modals (standalone)
   if (evt.type === "extension_ui_request") {
     handleExtensionUiRequest(evt);
     return;
@@ -2988,15 +2997,15 @@ function renderRpcEvent(evt: RpcEvent): void {
     evt.type === "tool_execution_end"
   ) {
     handleToolExecution(evt);
-    if (evt.type === "tool_execution_start") settleSentLoader(); // primo output reale
-    if (evt.type === "tool_execution_start") hideExtensionsBlock(); // primo output reale
+    if (evt.type === "tool_execution_start") settleSentLoader(); // first real output
+    if (evt.type === "tool_execution_start") hideExtensionsBlock(); // first real output
     return;
   }
   const action: UiAction = handleRpcEvent(stream, evt);
   switch (action.kind) {
     case "stream_start":
-      // NOTA: message_start arriva appena aperto lo stream del provider, NON
-      // al primo token: qui il loader di invio deve restare (lo tolgono i delta)
+      // NOTE: message_start arrives as soon as the provider stream opens, NOT
+      // at the first token: here the send loader must stay (the deltas remove it)
       hideExtensionsBlock();
       openAssistantBubble();
       break;
@@ -3019,37 +3028,37 @@ function renderRpcEvent(evt: RpcEvent): void {
       finishThinking();
       break;
     case "tool_call_start":
-      // il nome arriva con toolcall_start (partial.content[index].name):
-      // la card nasce GIÀ col nome vero, senza placeholder "tool"
+      // the name arrives with toolcall_start (partial.content[index].name):
+      // the card is born ALREADY with the real name, no "tool" placeholder
       settleSentLoader();
       hideExtensionsBlock();
       {
         const tc = action.toolCall;
         if (tc.name) {
-          // nuovo tool ask_user: reset contatore — le card si dividono al
-          // primo select (gli args arrivano con i delta, non qui)
+          // new ask_user tool: reset the counter — the cards split at the
+          // first select (the args arrive with the deltas, not here)
           if (tc.name === "ask_user") {
             askUserQuestionCounter = 0;
             currentAskUserToolId = "";
           }
           const card = ensureToolCard(tc.name);
-          // il timer parte APPENA nasce la card (generazione args inclusa),
-          // non a tool_execution_start: mentre i contatori diff scorrono il
-          // timer gira già. startToolTimer è idempotente (il secondo avvio a
-          // execution_start è un no-op) e stopToolTimer a execution_end lo
-          // congela.
+          // the timer starts AS SOON AS the card is born (args generation
+          // included), not at tool_execution_start: while the diff counters
+          // scroll the timer already runs. startToolTimer is idempotent (the
+          // second start at execution_start is a no-op) and stopToolTimer at
+          // execution_end freezes it.
           startToolTimer(card);
-          // nuovo tool: azzera gli args del tool precedente (multi-tool)
+          // new tool: reset the args of the previous tool (multi-tool)
           toolsText = "";
           if (toolsPre) toolsPre.textContent = "";
           renderToolHeader(
             card.querySelector(".tool-name")!,
             toolSummary(tc.name, "", workspacePath ?? undefined),
           );
-          // write/edit: span args VUOTO già da ora — senza, durante lo
-          // streaming il badge diff (flex:0) resta attaccato al nome a
-          // sinistra; l'args (flex:1, anche vuoto) lo spinge a destra prima
-          // del timer, come a fine esecuzione
+          // write/edit: EMPTY args span already now — without it, during
+          // streaming the diff badge (flex:0) stays attached to the name on
+          // the left; the args (flex:1, even empty) push it right before the
+          // timer, like at execution end
           if (tc.name === "write" || tc.name === "edit") {
             if (!card.querySelector(".tool-args")) {
               const argsEl = document.createElement("span");
@@ -3069,9 +3078,9 @@ function renderRpcEvent(evt: RpcEvent): void {
       ensureToolCard();
       toolsText += action.delta;
       if (toolsPre) toolsPre.textContent = toolsText;
-      // write: contatore LIVE delle righe — qui i delta SCORRONO davvero (il
-      // contenuto è lungo) e il numero sale in tempo reale. Gli edit NO (args
-      // in raffica): per loro resta solo il diff esatto a fine esecuzione.
+      // write: LIVE line counter — here the deltas REALLY scroll (the
+      // content is long) and the number rises in real time. The edits NO
+      // (args in bursts): for them only the exact diff at execution end stays.
       if (toolsEl) {
         const tName = toolsEl.querySelector(".tool-name")?.textContent;
         if (tName === "write") {
@@ -3100,8 +3109,8 @@ function renderRpcEvent(evt: RpcEvent): void {
       hideExtensionsBlock();
       if (toolsEl) {
         const tcName = action.toolCall.name;
-        // ask_user: la riga mostra la domanda/risposta (card divise o risposta
-        // dal dialogo inline) — NON sovrascriverla con gli args al tool_call_end
+        // ask_user: the row shows the question/answer (split cards or answer
+        // from the inline dialog) — do NOT overwrite it with the args at tool_call_end
         if (toolsEl.dataset.answered !== "true" && toolsEl.dataset.askUser !== "true") {
           renderToolHeader(
             toolsEl.querySelector(".tool-name")!,
@@ -3112,11 +3121,11 @@ function renderRpcEvent(evt: RpcEvent): void {
         if (label) label.textContent = tcName;
         if (action.toolCall.id)
           toolCardsById.set(action.toolCall.id, toolsEl as HTMLElement);
-        // write: pi NON restituisce il diff (solo "wrote X bytes") — il +N
-        // delle righe scritte lo calcola la webview dal contenuto negli args.
-        // Fallback su toolsText (JSON grezzo dai delta): a volte il tool_call
-        // arriva con args wrappati come stringa (JSON.stringify di una stringa)
-        // e il regex sul contenuto non matcha.
+        // write: pi does NOT return the diff (only "wrote X bytes") — the +N
+        // of the written lines is computed by the webview from the content in
+        // the args. Fallback on toolsText (raw JSON from the deltas): sometimes
+        // the tool_call arrives with args wrapped as a string (stringify of a
+        // string) and the regex on the content does not match.
         if (tcName === "write") {
           const argsJson =
             typeof action.toolCall.args === "string"
@@ -3143,15 +3152,15 @@ function addStatusLine(text: string): void {
   line.className = "status-line";
   line.textContent = text;
   wrapper.appendChild(line);
-  // NB: addMsg scolla PRIMA che il box esista (wrapper vuoto): il contenuto
-  // multilinea lo fa crescere dopo → re-scroll qui, altrimenti il box resta
-  // tagliato sotto il fondo visibile ("quasi in fondo ma non del tutto")
+  // NOTE: addMsg detaches BEFORE the box exists (empty wrapper): the
+  // multiline content makes it grow after → re-scroll here, otherwise the
+  // box stays cut under the visible bottom ("almost at the bottom but not quite")
   scrollToBottom();
 }
 
-// card per messaggi INIETTATI da un'altra sessione (role custom, es.
-// session-control): collassabile come i tool (<details>) — UNA riga con
-// ellipsis chiusa, click per espandere, markdown interpretato dentro
+// card for messages INJECTED from another session (custom role, e.g.
+// session-control): collapsible like the tools (<details>) — ONE row with
+// ellipsis closed, click to expand, markdown rendered inside
 function buildSessionCard(customType: string, text: string): HTMLElement {
   const d = document.createElement("details");
   d.className = "session-card";
@@ -3161,7 +3170,7 @@ function buildSessionCard(customType: string, text: string): HTMLElement {
   tag.textContent = customType;
   const preview = document.createElement("span");
   preview.className = "session-preview";
-  preview.textContent = text; // CSS: nowrap + ellipsis → una riga
+  preview.textContent = text; // CSS: nowrap + ellipsis → one row
   preview.title = text;
   s.append(tag, preview);
   const body = document.createElement("div");
@@ -3187,18 +3196,18 @@ function renderCustomMessageBubble(msg: {
 
 function renderIdeEvent(evt: IdeEvent): void {
   if (evt.type === "selection_changed" || evt.type === "selection_cleared") {
-    // pannello editor: blocco selezione INIBITO (il focus sul pannello
-    // azzera il contesto dell'editor attivo → mostrarlo sarebbe confuso)
+    // editor panel: selection block DISABLED (panel focus clears the
+    // active-editor context → showing it would be confusing)
     if (panelMode) return;
     if (evt.type === "selection_changed") {
-      // blocco dedicato (una riga, come lo stearing): appare con la selezione
+      // dedicated block (one row, like the steering): appears with the selection
       const n = evt.ranges?.length ?? 0;
       const base = evt.filePath?.split(/[\\/]/).pop() ?? evt.filePath ?? "?";
       els.selectionPanel.textContent = `${t("selection")}: ${base} (${n})`;
       els.selectionPanel.title = `${t("selection")}: ${evt.filePath ?? "?"} — ${n} ${t("ranges")}`;
       const wasHidden = els.selectionPanel.hidden;
       els.selectionPanel.hidden = false;
-      if (wasHidden) scrollToBottom(true); // il blocco copre l'ultimo messaggio
+      if (wasHidden) scrollToBottom(true); // the block covers the last message
     } else {
       els.selectionPanel.hidden = true;
     }
@@ -3209,7 +3218,7 @@ function renderIdeEvent(evt: IdeEvent): void {
   }
 }
 
-// --- cronologia (dopo switch sessione / al primo caricamento) ----------------
+// --- history (after session switch / at first load) ------------------------
 
 type HistoryBlock = {
   type: string;
@@ -3237,7 +3246,7 @@ function contentToText(content: unknown): string {
   return "";
 }
 
-// cronologia fedele: testo, pensiero e CARD dei tool usati (come la vista live)
+// faithful history: text, thinking and CARDS of the used tools (like the live view)
 function renderHistory(messages: unknown[]): void {
   els.thread.textContent = "";
   toolCardsById.clear();
@@ -3247,8 +3256,8 @@ function renderHistory(messages: unknown[]): void {
   askUserInfoByTool.clear();
   askUserQuestionCounter = 0;
   currentAskUserToolId = "";
-  // timestamp dell'ultimo messaggio processato (per stimare la durata del
-  // pensiero: gap dal messaggio precedente al messaggio assistant corrente)
+  // timestamp of the last processed message (to estimate the thinking
+  // duration: gap from the previous message to the current assistant message)
   let lastTs = 0;
   for (const m of messages) {
     const msg = m as {
@@ -3267,9 +3276,9 @@ function renderHistory(messages: unknown[]): void {
       bubble.textContent = contentToText(msg.content);
       wrapper.appendChild(bubble);
     } else if (msg.role === "custom" && (msg as { display?: unknown }).display !== false) {
-      // messaggio iniettato da un'altra sessione (session-control send):
-      // card collassabile come i tool, anche in cronologia (altrimenti
-      // sparirebbe al reload)
+      // message injected from another session (session-control send):
+      // collapsible card like the tools, also in history (otherwise it
+      // would disappear on reload)
       const raw = contentToText(msg.content);
       const text = raw.replace(/<sender_info>[\s\S]*?<\/sender_info>/g, "").trim();
       if (!text) continue;
@@ -3283,8 +3292,8 @@ function renderHistory(messages: unknown[]): void {
     } else if (msg.role === "assistant") {
       const blocks = Array.isArray(msg.content) ? (msg.content as HistoryBlock[]) : [];
       const assistantTs = parseTs(msg);
-      // durata stimata del pensiero: gap dal messaggio precedente (ultimo
-      // messaggio processato — user o toolResult) al timestamp di questo
+      // estimated thinking duration: gap from the previous message (last
+      // processed — user or toolResult) to the timestamp of this one
       const thinkDur =
         assistantTs > 0 && lastTs > 0 && assistantTs >= lastTs ? assistantTs - lastTs : 0;
       const textParts: string[] = [];
@@ -3295,7 +3304,7 @@ function renderHistory(messages: unknown[]): void {
         else if (b.type === "thinking" && typeof b.thinking === "string")
           thinkingCards.push(buildThinkingCard(b.thinking, thinkDur));
         else if (b.type === "toolCall" && typeof b.name === "string") {
-          // stessa costruzione del runtime; args può essere stringa JSON o oggetto
+          // same construction as the runtime; args can be a JSON string or an object
           const raw = b.arguments;
           const argsJson = typeof raw === "string" ? raw : JSON.stringify(raw ?? {});
           const card = buildToolCard({
@@ -3303,11 +3312,11 @@ function renderHistory(messages: unknown[]): void {
             name: b.name,
             args: argsJson,
           });
-          // registra la card per id: il toolResult successivo ci appende il
-          // risultato (stessa visualizzazione del runtime)
+          // registers the card by id: the next toolResult appends its
+          // result (same display as the runtime)
           if (b.id) toolCardsById.set(b.id, card);
           if (b.id && assistantTs > 0) toolStartTimes.set(b.id, assistantTs);
-          // ask_user con N domande → N card (header = domanda, poi risposta)
+          // ask_user with N questions → N cards (header = question, then answer)
           if (b.name === "ask_user" && b.id) {
             const questions = parseAskUserQuestions(argsJson);
             if (questions && questions.length > 0) {
@@ -3316,7 +3325,7 @@ function renderHistory(messages: unknown[]): void {
               continue;
             }
           }
-          // write: +N righe (pi non salva il diff → lo calcola dagli args)
+          // write: +N lines (pi does not save the diff → computed from the args)
           if (b.name === "write") {
             renderWriteLines(card, writeLinesFromArgs(argsJson));
           }
@@ -3326,9 +3335,9 @@ function renderHistory(messages: unknown[]): void {
       const text = textParts.join("\n").trim();
       if (!text && thinkingCards.length === 0 && toolCards.length === 0) continue;
       const wrapper = addMsg("assistant");
-      // aggregazione 3px valutata alla creazione: il messaggio inizia con
-      // pensiero/tool (pensiero presente, o solo tool senza testo) e il
-      // precedente finisce con pensiero/tool
+      // 3px aggregation evaluated at creation: the message starts with
+      // thinking/tool (thinking present, or only tools without text) and the
+      // previous one ends with thinking/tool
       const startsThinkTool =
         thinkingCards.length > 0 || (text === "" && toolCards.length > 0);
       const prevMsg = wrapper.previousElementSibling;
@@ -3340,7 +3349,7 @@ function renderHistory(messages: unknown[]): void {
         wrapper.classList.add("tool-chain");
         wrapper.style.marginTop = "-11px";
       }
-      // ordine come in live: pensiero → testo → card dei tool
+      // order like in live: thinking → text → tool cards
       for (const c of thinkingCards) wrapper.appendChild(c);
       if (text) {
         const md = document.createElement("div");
@@ -3360,8 +3369,8 @@ function renderHistory(messages: unknown[]): void {
       if (card && tcId) {
         const start = toolStartTimes.get(tcId);
         const ts = parseTs(msg);
-        // ask_user: distribuisci il risultato per domanda (header → risposta,
-        // segmento nel corpo) e timer su TUTTE le card — stato finale al resume
+        // ask_user: distribute the result per question (header → answer,
+        // segment in the body) and timer on ALL the cards — final state at resume
         if (distributeAskUserResult(tcId, output)) {
           if (start !== undefined && ts > 0 && ts >= start) {
             forEachToolCard(tcId, (c) => {
@@ -3391,15 +3400,15 @@ function renderHistory(messages: unknown[]): void {
         wrapper.appendChild(buildResultCard(msg.toolName ?? "bash", output));
       }
     }
-    if (ts > 0) lastTs = ts; // base per la durata del pensiero successivo
+    if (ts > 0) lastTs = ts; // base for the next thinking duration
   }
   const main = els.messages;
   main.scrollTop = main.scrollHeight;
 }
 
-// --- pulsante "torna in fondo" ------------------------------------------------
+// --- "back to bottom" button ------------------------------------------------
 
-// oltre questo margine dal fondo compare il pulsante per tornare giù
+// beyond this margin from the bottom the button to go back down appears
 const SCROLL_BTN_MARGIN = 220;
 
 els.scrollBottom.innerHTML = scrollDownIcon();
@@ -3419,8 +3428,8 @@ els.messages.addEventListener(
   },
   { passive: true },
 );
-// immagini caricate in ritardo (markdown) crescono il contenuto dopo lo
-// scroll: se l'utente sta seguendo, riallinea al load
+// images loaded late (markdown) grow the content after the scroll:
+// if the user is following, realign on load
 els.thread.addEventListener(
   "load",
   (e) => {
@@ -3431,18 +3440,18 @@ els.thread.addEventListener(
   true,
 );
 
-// finestra più stretta → ellipsis CSS nativo sul badge (nessun JS)
+// narrower window → native CSS ellipsis on the badge (no JS)
 
-// click su gauger/label del contesto: se una compattazione È in corso chiede
-// se fermarla, altrimenti la conferma normale. NB: fermare la compact non è
-// possibile via RPC oggi (abortCompaction è solo in-process nel TUI) — alla
-// conferma si mostra l'esito onesto con riferimento alla gap pi-core.
+// click on gauge/context label: if a compaction IS running asks whether to
+// stop it, otherwise the normal confirmation. NOTE: stopping the compact is
+// not possible via RPC today (abortCompaction is only in-process in the TUI)
+// → at the confirmation the honest outcome is shown with the pi-core gap reference.
 els.statsCtx.addEventListener("click", () => {
   if (compacting) {
     void showConfirm(t("compactStopAsk")).then((ok) => {
       if (ok) {
-        // niente RPC per abortire la compact: blocco informativo (pattern
-        // comandi non implementati) finché il core non espone abort_compaction
+        // no RPC to abort the compact: informative block (pattern of
+        // unimplemented commands) until the core exposes abort_compaction
         const link = PI_CORE_ISSUE_URL ? `\n${PI_CORE_ISSUE_URL}` : "";
         addStatusLine(`${t("compactStopUnavailable")}${link}`);
       }
@@ -3455,11 +3464,11 @@ els.statsCtx.addEventListener("click", () => {
   });
 });
 
-// --- compattazione sessione ---------------------------------------------------
-// Alla conferma: gauger in loading (rotazione), composer bloccata (working,
-// come durante l'attesa di una risposta) e in chat un blocco di stato con
-// spinner + secondi che scorrono. A fine compattazione il blocco resta con
-// “Compattato” e i secondi passati (stesso pattern del sent-loader).
+// --- session compaction ------------------------------------------------------
+// At the confirmation: gauge in loading (spin), composer locked (working,
+// like while waiting for a response) and in chat a status block with
+// spinner + running seconds. At the end the block stays with "Compacted"
+// and the elapsed seconds (same pattern as the sent-loader).
 
 let compacting = false;
 let compactWrapper: HTMLElement | null = null;
@@ -3470,7 +3479,7 @@ let compactClock: ReturnType<typeof setInterval> | null = null;
 function showCompactionBlock(): void {
   if (compacting) return;
   compacting = true;
-  working = true; // guardia composer: niente invii durante la compattazione
+  working = true; // composer guard: no sends during the compaction
   updateSendButton();
   updateSteerPlaceholder();
   updateThinkingStopBtn(false);
@@ -3512,32 +3521,32 @@ function finishCompaction(error: boolean, errMsg?: string): void {
   if (compactWrapper) {
     const label = compactWrapper.querySelector(".thinking-label");
     const spinner = compactWrapper.querySelector(".spinner");
-    if (spinner) spinner.remove(); // resta solo testo + secondi passati
+    if (spinner) spinner.remove(); // only text + elapsed seconds remain
     if (label) {
       label.textContent = error ? t("compactionError") : t("compacted");
       label.classList.toggle("error", error);
-      if (errMsg) (label as HTMLElement).title = errMsg; // dettaglio tecnico al passaggio del mouse
+      if (errMsg) (label as HTMLElement).title = errMsg; // technical detail on hover
     }
   }
   compactWrapper = null;
   compactTimerEl = null;
-  // SEMPRE ripristino: la compact abortisce il turno in corso, quindi lo stato
-  // lavorativo del client potrebbe essere rimasto sporco (niente agent_settled)
+  // ALWAYS restore: the compact aborts the current turn, so the client's
+  // working state could have stayed dirty (no agent_settled)
   working = false;
   updateSendButton();
   updateSteerPlaceholder();
   updateThinkingStopBtn(false);
   els.statsCtx.classList.remove("loading");
-  void fetchSessionStats(); // il gauger si aggiorna (azzerato dopo compact)
+  void fetchSessionStats(); // the gauge updates (reset after compact)
 }
 
-// dal click sul gauger/label: mostra il blocco e invia la RPC compact
-// NOTA: nessun timeout (la compact può impiegare decine di secondi);
-// l'esito arriva dall'evento compaction_end (esito reale) o dalla response
+// from the gauge/label click: shows the block and sends the compact RPC
+// NOTE: no timeout (the compact can take tens of seconds); the outcome
+// arrives from the compaction_end event (real outcome) or from the response
 function startCompactionFromUi(): void {
   if (compacting) return;
-  // se c'è un turno in corso, pi lo interromperà (compact fa abort): prima si
-  // riportano gli stearing nell'editor (dequeue), poi si compatta
+  // if there is an in-flight turn, pi will interrupt it (compact aborts): first
+  // bring the steering back into the editor (dequeue), then compact
   if (working) dequeueSteering();
   showCompactionBlock();
   rpcRequest(rpc.compact(), undefined, 0).then(
@@ -3550,43 +3559,43 @@ function startCompactionFromUi(): void {
   );
 }
 
-// --- azioni utente -----------------------------------------------------------
+// --- user actions -----------------------------------------------------------
 
-// --- pulsante invio/stop e info box (modello, credito, trust) -----------------
+// --- send/stop button and info boxes (model, credit, trust) -----------------
 
 let working = false;
-// riavvio VOLUTO di pi in corso (Applica CLI flags): la send resta disabilitata
+// INTENTIONAL pi restart in progress (Apply CLI flags): the send stays disabled
 let piRestarting = false;
-// webview in un pannello editor (non sidebar): il blocco selezione è inibito
+// webview in an editor panel (not sidebar): the selection block is disabled
 let panelMode = false;
 let modelInfoText = "";
-let creditText = ""; // pi non espone il credito rimanente: resta vuoto finché disponibile
-let creditBalance = 0; // saldo numerico (per la soglia di colore della chip)
-let creditCurrency = "$"; // simbolo valuta del provider (per il costo sessione)
-let sessionCost = 0; // costo totale sessione da get_session_stats (core di pi)
+let creditText = ""; // pi does not expose the remaining credit: stays empty until available
+let creditBalance = 0; // numeric balance (for the chip color threshold)
+let creditCurrency = "$"; // provider currency symbol (for the session cost)
+let sessionCost = 0; // total session cost from get_session_stats (pi core)
 
-// --- stearing (piano 0004) ---------------------------------------------------
-// Coda OMBRA nella webview (modificabile via dequeue, persistita solo il
-// testo) + consegna via coda nativa di pi (semantica pi.dev): durante lo
-// streaming si invia prompt(streamingBehavior:"steer") al punto di consegna
-// (turn_end), da idle un prompt normale (agent_settled).
+// --- steering (plan 0004) ---------------------------------------------------
+// SHADOW queue in the webview (editable via dequeue, only the text is
+// persisted) + delivery via the native pi queue (pi.dev semantics): during
+// streaming a prompt(streamingBehavior:"steer") is sent at the delivery
+// point (turn_end), from idle a normal prompt (agent_settled).
 interface QueuedMessage {
   id: string;
   text: string;
   images?: Array<{ type: "image"; data: string; mimeType: string }>;
 }
-let steerShadow: QueuedMessage[] = []; // da consegnare (dequeue lo riporta nell'editor)
-let steerPending: QueuedMessage[] = []; // inviato a pi, in attesa di iniezione
+let steerShadow: QueuedMessage[] = []; // to deliver (dequeue brings it back to the editor)
+let steerPending: QueuedMessage[] = []; // sent to pi, waiting for injection
 let steerSeq = 0;
 let steeringMode: "one-at-a-time" | "all" = "one-at-a-time";
 let thinkingLevel = "";
 let currentModel: { provider?: string; name?: string; id?: string } | null = null;
 
 function updateSendButton(): void {
-  // il pulsante è SEMPRE Invia (mai più STOP): durante l'elaborazione assume
-  // un'evidenza diversa (classe .working) e Invio accoda (stearing); lo STOP
-  // sta nel blocco pensiero (piano 0004). Durante il riavvio di pi (Applica
-  // CLI flags) è disabilitato.
+  // the button is ALWAYS Send (never STOP anymore): while processing it takes
+  // a different highlight (.working class) and Enter queues (steering); the
+  // STOP lives in the thinking block (plan 0004). During the pi restart
+  // (Apply CLI flags) it is disabled.
   els.send.innerHTML = sendIcon();
   els.send.title = working ? t("steerSendHint") : t("send");
   els.send.classList.toggle("working", working);
@@ -3594,10 +3603,10 @@ function updateSendButton(): void {
 }
 
 function renderModelInfo(): void {
-  // ordine: provider PRIMA del modello. A larghezze strette (container
-  // query) spariscono provider e poi il nome; i separatori " · " sono CSS
-  // (.model-name::before) così non restano punti orfani.
-  // Il balance NON è più qui: vive nella chip separata #balance-chip.
+  // order: provider BEFORE the model. At narrow widths (container
+  // query) the provider and then the name disappear; the " · " separators
+  // are CSS (.model-name::before) so no orphan dots remain.
+  // The balance is NOT here anymore: it lives in the separate #balance-chip.
   const provider = currentModel?.provider ?? "";
   const name = currentModel?.name ?? currentModel?.id ?? "";
   els.modelInfo.textContent = "";
@@ -3617,13 +3626,13 @@ function renderModelInfo(): void {
   renderBalanceChip();
 }
 
-// soglie del balance (come la convenzione di pi.dev): verde quando normale,
-// giallo quando basso, rosso quando quasi esaurito. Colori del tema (--ok/
-// --warn/--err), mai hard-coded.
+// balance thresholds (like the pi.dev convention): green when normal,
+// yellow when low, red when almost exhausted. Theme colors (--ok/
+// --warn/--err), never hard-coded.
 function balanceTone(balance: number): "ok" | "warn" | "low" {
-  if (balance >= 5) return "ok"; // normale → verde
-  if (balance >= 1) return "warn"; // basso → giallo
-  return "low"; // quasi esaurito → rosso
+  if (balance >= 5) return "ok"; // normal → green
+  if (balance >= 1) return "warn"; // low → yellow
+  return "low"; // almost exhausted → red
 }
 
 function renderBalanceChip(): void {
@@ -3636,8 +3645,8 @@ function renderBalanceChip(): void {
     return;
   }
   chip.hidden = false;
-  // costo sessione / saldo: il COLORE sta SOLO sul balance, costo e slash
-  // restano col colore muto (e spariscono insieme sotto i 600px)
+  // session cost / balance: the COLOR lives ONLY on the balance, cost and
+  // slash stay muted (and disappear together under 600px)
   if (sessionCost > 0) {
     const cost = document.createElement("span");
     cost.className = "chip-cost";
@@ -3655,22 +3664,22 @@ function renderBalanceChip(): void {
   chip.className = `balance-chip tone-${balanceTone(creditBalance)}`;
 }
 
-// saldo numerico separato dal testo formattato (per la soglia di colore)
+// numeric balance separated from the formatted text (for the color threshold)
 
-// colore dell'icona thinking in base al livello: scala lineare di tinta
-// verde (off) → giallo (medio) → rosso (massimo), con le tonalità intermedie
+// thinking icon color by level: linear hue scale
+// green (off) → yellow (medium) → red (max), with the intermediate tones
 function thinkingColor(level: string): string {
   const order = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
   const idx = order.indexOf(level);
   if (idx < 0) return "";
   const t = idx / (order.length - 1); // 0..1
-  const hue = Math.round(140 - t * 140); // 140 = verde, 70 = giallo, 0 = rosso
+  const hue = Math.round(140 - t * 140); // 140 = green, 70 = yellow, 0 = red
   return `hsl(${hue} 65% 58%)`;
 }
 
 function renderThinkingInfo(): void {
-  // icona pensiero (chat) sempre visibile, colorata per livello; label
-  // nascosta <600, valore nascosto <340 (container query)
+  // thinking icon (chat) always visible, colored by level; label
+  // hidden <600, value hidden <340 (container query)
   els.thinkingInfo.textContent = "";
   const icon = document.createElement("span");
   icon.className = "thinking-icon";
@@ -3685,14 +3694,14 @@ function renderThinkingInfo(): void {
     const value = document.createElement("span");
     value.className = "thinking-value";
     value.textContent = translateThinkingLevel(thinkingLevel);
-    // il valore ha lo stesso colore dell'icona (come il trust)
+    // the value has the same color as the icon (like the trust)
     if (color) value.style.color = color;
     els.thinkingInfo.append(label, value);
     els.thinkingInfo.title = `${t("thinkingLevel")}: ${translateThinkingLevel(thinkingLevel)}`;
   }
 }
 
-// traduzione dei livelli di thinking di pi (stringhe del modello)
+// translation of the pi thinking levels (model strings)
 function translateThinkingLevel(level: string): string {
   const key =
     level === "off"
@@ -3717,7 +3726,7 @@ function renderTrust(res: { status?: string } | null): void {
   const status = res?.status ?? "ask";
   const key =
     status === "trusted" ? "trusted" : status === "untrusted" ? "untrusted" : "trustAsk";
-  // icone Material: scudo (chiedi) · triangolo alert vuoto (limitato) · pieno (full)
+  // Material icons: shield (ask) · empty alert triangle (limited) · filled (full)
   const kind: TrustIconKind =
     status === "trusted"
       ? "warn-filled"
@@ -3730,7 +3739,7 @@ function renderTrust(res: { status?: string } | null): void {
   els.trust.dataset.status = status;
 }
 
-// --- popover per le chip della toolbar (modello, pensiero, trust) -------------
+// --- popover for the toolbar chips (model, thinking, trust) -----------------
 
 function closePopover(): void {
   document.querySelector(".pop-menu")?.remove();
@@ -3757,7 +3766,7 @@ function popItem(
   btn.className = "pop-item";
   btn.classList.toggle("active", active);
   if (tone) btn.dataset.tone = tone;
-  // colore del testo per la riga (es. livelli thinking)
+  // text color for the row (e.g. thinking levels)
   if (color) btn.style.color = color;
   if (icon) {
     const ic = document.createElement("span");
@@ -3770,12 +3779,12 @@ function popItem(
   lbl.textContent = label;
   const m = document.createElement("span");
   m.className = "pop-item-meta";
-  // con tone (trust): segno "✓" sulla voce attiva
+  // with tone (trust): "✓" sign on the active item
   m.textContent = tone ? (active ? "✓" : "") : meta;
   btn.append(lbl, m);
   btn.addEventListener("click", (e) => {
-    // il menu vive dentro il pulsante-anchor: senza stop il click risalirebbe
-    // fino al bottone, che riaprirebbe il popover subito dopo la chiusura
+    // the menu lives inside the anchor button: without stop the click would
+    // bubble up to the button, which would reopen the popover right after the close
     e.stopPropagation();
     closePopover();
     onClick();
@@ -3784,7 +3793,7 @@ function popItem(
 }
 
 function openPopover(anchor: HTMLElement, build: (menu: HTMLElement) => void): void {
-  // toggle: riclick sullo stesso pulsante chiude
+  // toggle: clicking the same button again closes
   if (popoverAnchor === anchor) {
     closePopover();
     return;
@@ -3796,17 +3805,17 @@ function openPopover(anchor: HTMLElement, build: (menu: HTMLElement) => void): v
   anchor.appendChild(menu);
   popoverAnchor = anchor;
 
-  // Il menu è assoluto dentro la chip: con `left: 0` una chip vicina al bordo
-  // destro spingerebbe il menu fuori dal viewport (barra di scorrimento del
-  // body). Qui misuriamo e teniamo SEMPRE il popover dentro lo schermo,
-  // spostandolo/ridimensionandolo; il riclamp segue anche i resize.
+  // The menu is absolute inside the chip: with `left: 0` a chip near the right
+  // edge would push the menu out of the viewport (body scrollbar). Here we
+  // measure and ALWAYS keep the popover inside the screen, moving/resizing it;
+  // the reclamp also follows the resizes.
   const VIEWPORT_MARGIN = 8;
   const OPEN_GAP = 6; // uguale al calc(100% + 6px) del CSS
   const clampPopover = (): void => {
     const aRect = anchor.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    // --- orizzontale: dentro il viewport, preferibilmente allineato all'anchor ---
+    // --- horizontal: inside the viewport, preferably aligned to the anchor ---
     let w = menu.offsetWidth;
     const maxW = Math.max(160, vw - 2 * VIEWPORT_MARGIN);
     if (w > maxW) {
@@ -3818,7 +3827,7 @@ function openPopover(anchor: HTMLElement, build: (menu: HTMLElement) => void): v
       Math.min(aRect.left, vw - VIEWPORT_MARGIN - w),
     );
     menu.style.left = `${leftV - aRect.left}px`;
-    // --- verticale: preferisce aprire verso l'alto, altrimenti sotto ---
+    // --- vertical: prefers to open upward, otherwise below ---
     const h = menu.offsetHeight;
     const spaceAbove = aRect.top - VIEWPORT_MARGIN - OPEN_GAP;
     const spaceBelow = vh - aRect.bottom - VIEWPORT_MARGIN - OPEN_GAP;
@@ -3876,8 +3885,8 @@ async function openModelPopover(): Promise<void> {
         | undefined
     )?.models ?? [];
   openPopover(els.btnModel, (menu) => {
-    // ricerca: campo in cima, la lista si aggiorna appena si scrive almeno
-    // una lettera (filtro su nome, id e provider, case-insensitive)
+    // search: field on top, the list updates as soon as at least
+    // one letter is typed (filter on name, id and provider, case-insensitive)
     const search = document.createElement("input");
     search.type = "text";
     search.className = "pop-search";
@@ -3906,9 +3915,9 @@ async function openModelPopover(): Promise<void> {
               modelSupportsVision = Array.isArray(m.input) && m.input.includes("image");
               modelInfoText = [m.provider, m.name ?? m.id].filter(Boolean).join(" · ");
               renderModelInfo();
-              renderAttachments(); // i chip aggiornano thumbnail ↔ icona file
-              void fetchSessionStats(); // context window del nuovo modello
-              void fetchBalance(); // saldo del nuovo provider
+              renderAttachments(); // the chips update thumbnail ↔ file icon
+              void fetchSessionStats(); // context window of the new model
+              void fetchBalance(); // balance of the new provider
             }
           });
         });
@@ -3922,9 +3931,9 @@ async function openModelPopover(): Promise<void> {
     };
 
     search.addEventListener("input", () => render(search.value));
-    // il menu vive DENTRO il bottone: senza questi accorgimenti un click sul
-    // campo chiuderebbe il popover (toggle del pulsante) e il bottone
-    // ruberebbe il focus all'input (mousedown default)
+    // the menu lives INSIDE the button: without these precautions a click on
+    // the field would close the popover (button toggle) and the button would
+    // steal the focus from the input (default mousedown)
     search.addEventListener("mousedown", (e) => e.preventDefault());
     search.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -3932,7 +3941,7 @@ async function openModelPopover(): Promise<void> {
     });
     render("");
   });
-  // focus immediato sul campo di ricerca (se il popover si è aperto)
+  // immediate focus on the search field (if the popover opened)
   els.btnModel.querySelector<HTMLInputElement>(".pop-search")?.focus();
 }
 
@@ -3956,7 +3965,7 @@ async function openThinkingPopover(): Promise<void> {
         },
         chatIcon(),
         "",
-        thinkingColor(lvl), // colore del livello nella dropdown
+        thinkingColor(lvl), // level color in the dropdown
       );
     }
   });
@@ -3986,7 +3995,7 @@ function openTrustPopover(): void {
         "",
         o.status === current,
         () => {
-          // l'accesso completo è pericoloso: modale di conferma (non window.confirm)
+          // full access is dangerous: confirmation modal (not window.confirm)
           if (o.status === "trusted") {
             void showConfirm(t("trustFullConfirm")).then((ok) => {
               if (ok) applyTrust(o.status);
@@ -4002,9 +4011,9 @@ function openTrustPopover(): void {
   });
 }
 
-// --- modale di conferma (stesso comportamento in browser e webview VS Code) ----
+// --- confirmation modal (same behavior in browser and VS Code webview) -------
 
-// lightbox: immagine allegata ingrandita (click fuori o ESC per chiudere)
+// lightbox: enlarged attached image (outside click or ESC to close)
 function openImageLightbox(src: string, name: string): void {
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
@@ -4085,8 +4094,8 @@ els.trust.addEventListener("click", (e) => {
 
 function sendOrStop(): void {
   if (!transport) return;
-  // elaborazione (o compattazione) in corso → STEARING: il messaggio entra
-  // nella coda locale (dequeue lo riporta nell'editor), mai abort automatico
+  // processing (or compaction) in progress → STEERING: the message enters
+  // the local queue (dequeue brings it back to the editor), never auto-abort
   if (working || compacting) {
     submitSteering();
     return;
@@ -4095,7 +4104,7 @@ function sendOrStop(): void {
   if (!text && attachments.length === 0) return;
   if (text) pushMessageHistory(text);
   const wrapper = addMsg("user");
-  // allegati PRIMA del testo: immagini in griglia (click → lightbox), poi file
+  // attachments BEFORE the text: images in grid (click → lightbox), then files
   const imageAtts = modelSupportsVision
     ? attachments.filter((a) => a.mimeType.startsWith("image/") && a.dataBase64)
     : [];
@@ -4103,7 +4112,7 @@ function sendOrStop(): void {
   if (imageAtts.length > 0) {
     const grid = document.createElement("div");
     grid.className = "chat-image-grid";
-    // una sola immagine: cella più grande, senza crop aggressivo
+    // single image: bigger cell, no aggressive crop
     if (imageAtts.length === 1) grid.classList.add("single");
     for (const a of imageAtts) {
       const img = document.createElement("img");
@@ -4129,14 +4138,14 @@ function sendOrStop(): void {
     chip.append(icon, name);
     wrapper.appendChild(chip);
   }
-  // immagini inline solo se il modello è vision; altrimenti (e per i file) il path
+  // inline images only if the model is vision; otherwise (and for files) the path
   const inlineImages = imageAtts.map((a) => ({
     type: "image" as const,
     data: a.dataBase64!,
     mimeType: a.mimeType,
   }));
   const fileMentions = fileAtts.map((a) => `[attachment: ${a.path}]`);
-  // il testo va DOPO gli allegati
+  // the text goes AFTER the attachments
   if (text) {
     const bubble = document.createElement("div");
     bubble.className = "bubble user";
@@ -4151,28 +4160,28 @@ function sendOrStop(): void {
       inlineImages.length > 0 ? { images: inlineImages } : undefined,
     ),
   });
-  // loader di invio: rotella + timer finché non arriva la prima risposta
+  // send loader: spinner + timer until the first response arrives
   showSentLoader(wrapper);
-  // comando slash inviato: dopo che la bolla utente è in chat, segnala che
-  // i comandi estensione richiedono una modifica del core di pi.dev
+  // slash command sent: after the user bubble is in chat, signal that
+  // the extension commands need a pi.dev core change
   if (message.trim().startsWith("/")) notifyCmdNotImplemented();
-  // a invio completato (bolla + allegati + badge) si va SEMPRE in fondo: il
-  // vecchio scroll forzato prima della bolla non bastava — il contenuto
-  // aggiunto dopo lo lasciava sopra, e il follow "smart" poi credeva
-  // che l'utente avesse scrollato (dist > margine) e non si muoveva più
+  // at send completion (bubble + attachments + badge) ALWAYS go to the bottom:
+  // the old forced scroll before the bubble was not enough — the content
+  // added after left it above, and the "smart" follow then believed the
+  // user had scrolled (dist > margin) and did not move anymore
   scrollToBottom(true);
-  armExtensionsBlock(); // blocco "Extensions" se il primo output tarda > 3s
+  armExtensionsBlock(); // "Extensions" block if the first output takes > 3s
   els.input.value = "";
   resetInputHeight();
   clearAttachments();
   els.input.focus();
 }
 
-// --- stearing: coda locale + pannello (piano 0004) ---------------------------
+// --- steering: local queue + panel (plan 0004) ------------------------------
 
-// Invio durante elaborazione/compattazione: accoda nella coda ombra.
-// Le immagini viaggiano in memoria (solo testo persistito); i file restano
-// come menzione [attachment: path] nel testo.
+// Enter during processing/compaction: enqueue into the shadow queue.
+// The images travel in memory (only text persisted); the files stay as
+// [attachment: path] mentions in the text.
 function submitSteering(): void {
   const text = els.input.value.trim();
   const imageAtts = attachments.filter(
@@ -4202,7 +4211,7 @@ function submitSteering(): void {
 }
 
 function persistSteerQueue(): void {
-  // solo il testo sopravvive al reload (le immagini no: troppo pesanti)
+  // only the text survives the reload (the images no: too heavy)
   void ideRequest({
     type: "storeSteerQueue",
     items: steerShadow.map((m) => ({ text: m.text })),
@@ -4220,7 +4229,7 @@ async function loadSteerQueue(): Promise<void> {
   }
 }
 
-// placeholder della textarea: segnala che Invio accoda durante l'elaborazione
+// textarea placeholder: signals that Enter queues during processing
 function updateSteerPlaceholder(): void {
   if (working || compacting) {
     els.input.placeholder = t("steerPlaceholder");
@@ -4232,10 +4241,11 @@ function updateSteerPlaceholder(): void {
       : t("messagePlaceholder");
 }
 
-// pannello tra thread e composer: mostra i messaggi ANCORA da inviare (coda
-// ombra, stile normale) e quelli GIÀ consegnati a pi ma non ancora iniettati
-// (steerPending: stile muted + spinner, NON più dequeuabili — la coda di pi
-// non è mutabile via RPC). Appena pi li processa (message_start) spariscono.
+// panel between thread and composer: shows the messages STILL to send (shadow
+// queue, normal style) and those ALREADY delivered to pi but not yet injected
+// (steerPending: muted style + spinner, NOT dequeuable anymore — the pi queue
+// cannot be mutated via RPC). As soon as pi processes them (message_start)
+// they disappear.
 function renderSteerPanel(): void {
   const panel = els.steerPanel;
   const wasHidden = panel.hidden;
@@ -4246,10 +4256,10 @@ function renderSteerPanel(): void {
     return;
   }
   panel.hidden = false;
-  // il pannello prende spazio tra chat e composer: porta la chat in fondo
-  // così l'ultimo messaggio NON resta nascosto sotto il pannello
+  // the panel takes space between chat and composer: brings the chat to the
+  // bottom so the last message does NOT stay hidden under the panel
   if (wasHidden) scrollToBottom(true);
-  // header: titolo con conteggio + dequeue
+  // header: title with count + dequeue
   const head = document.createElement("div");
   head.className = "steer-head";
   const title = document.createElement("span");
@@ -4262,15 +4272,15 @@ function renderSteerPanel(): void {
   dequeue.type = "button";
   dequeue.className = "steer-dequeue";
   dequeue.textContent = t("steerDequeue");
-  // solo i messaggi NON ancora inviati tornano nell'editor: gli in-invio
-  // sono già nelle mani di pi e non possono essere recuperati
+  // only the NOT-yet-sent messages return to the editor: the in-flight ones
+  // are already in pi's hands and cannot be recovered
   dequeue.title = t("steerDequeueHint");
   dequeue.disabled = steerShadow.length === 0;
   dequeue.addEventListener("click", () => dequeueSteering());
   head.appendChild(dequeue);
   panel.appendChild(head);
-  // ORDINE DI INSERIMENTO PRESERVATO: coda ombra e in-invio uniti per sequenza
-  // (id st-N) — msg1 (in invio) resta al suo posto, msg2, msg3 sotto
+  // INSERTION ORDER PRESERVED: shadow and in-flight queues merged by sequence
+  // (id st-N) — msg1 (in flight) stays in its place, msg2, msg3 below
   const seqOf = (m: QueuedMessage): number => {
     const n = /^st-(\d+)$/.exec(m.id);
     return n ? Number(n[1]) : 0;
@@ -4299,8 +4309,9 @@ function appendSteerRow(panel: HTMLElement, text: string, sending: boolean): voi
   panel.appendChild(row);
 }
 
-// dequeue (parità Alt+↑ di pi.dev): riporta TUTTI i messaggi da inviare
-// nell'editor (uniti), svuota la coda ombra. Gli item già inviati a pi no.
+// dequeue (parity with pi.dev Alt+↑): brings ALL the to-send messages back
+// into the editor (joined), empties the shadow queue. The items already sent
+// to pi do not.
 function dequeueSteering(): void {
   if (steerShadow.length === 0) return;
   const texts = steerShadow.map((m) => m.text).join("\n\n");
@@ -4313,12 +4324,12 @@ function dequeueSteering(): void {
   els.input.focus();
 }
 
-// consegna al punto di pi.dev: streaming → prompt con streamingBehavior "steer"
-// (pi inietta dopo i tool call del turno, prima della prossima LLM call);
-// idle (agent_settled) → prompt normale. Modalità: one-at-a-time / all.
+// delivery at pi.dev's point: streaming → prompt with streamingBehavior "steer"
+// (pi injects after the turn's tool calls, before the next LLM call);
+// idle (agent_settled) → normal prompt. Mode: one-at-a-time / all.
 function deliverSteering(): void {
   if (steerShadow.length === 0) return;
-  if (compacting) return; // durante la compattazione niente consegna: ci pensa compaction_end
+  if (compacting) return; // during the compaction no delivery: compaction_end handles it
   const n = steeringMode === "all" ? steerShadow.length : 1;
   const toSend = steerShadow.splice(0, n);
   persistSteerQueue();
@@ -4334,10 +4345,10 @@ function deliverSteering(): void {
     if (behavior) opts.streamingBehavior = behavior;
     void rpcRequest(rpc.prompt(m.text, opts), `st-${++steerSeq}`, 0)
       .then(() => {
-        // ok: resta in steerPending finché message_start/queue_update lo toglie
+        // ok: stays in steerPending until message_start/queue_update removes it
       })
       .catch(() => {
-        // errore di preflight: torna in coda (se non è già stato iniettato)
+        // preflight error: back to the queue (if not already injected)
         const i = steerPending.indexOf(m);
         if (i >= 0) steerPending.splice(i, 1);
         if (!steerPending.includes(m)) {
@@ -4350,16 +4361,18 @@ function deliverSteering(): void {
   }
 }
 
-// riconciliazione con la coda nativa di pi: NON più mostrata — quando un
-// messaggio viene consegnato sparisce subito dalla box. Resta solo la pulizia
-// interna (message_start rimuove l'item consegnato e mostra la bolla in chat).
+// reconciliation with the native pi queue: NOT shown anymore — when a
+// message is delivered it immediately disappears from the box. Only the
+// internal cleanup stays (message_start removes the delivered item and
+// shows the bubble in chat).
 
-// gli "in invio" rimasti fermi quando pi è idle: pi li ha accodati (steer
-// arrivato dopo il check di continuation del turno) ma non parte MAI un turno
-// per iniettarli (la coda steer di pi viene drenata solo all'inizio del turno
-// successivo). Se pi ora non li ha più in coda (pendingMessageCount 0) sono
-// persi/scartati → tornano nella coda ombra e vengono rilanciati come prompt
-// NORMALI (idle → pi li processa subito, niente duplicati perché pi non li ha).
+// the "in-flight" items stuck when pi is idle: pi queued them (steer arrived
+// after the turn's continuation check) but NEVER starts a turn to inject them
+// (the pi steer queue is drained only at the start of the next turn). If pi
+// now no longer has them in the queue (pendingMessageCount 0) they are
+// lost/discarded → they return to the shadow queue and are relaunched as
+// NORMAL prompts (idle → pi processes them right away, no duplicates because
+// pi does not have them).
 async function reconcileStuckPending(): Promise<void> {
   if (steerPending.length === 0) return;
   try {
@@ -4375,21 +4388,21 @@ async function reconcileStuckPending(): Promise<void> {
       steerShadow.unshift(...lost);
       persistSteerQueue();
       renderSteerPanel();
-      deliverSteering(); // idle → prompt normali → processati subito
+      deliverSteering(); // idle → normal prompts → processed right away
     }
   } catch {
-    // timeout / errore: lascia stare, la prossima occasione riprova
+    // timeout / error: leave it, the next occasion retries
   }
 }
 
-// messaggio utente iniettato da pi (message_start ruolo user): se era un item
-// in steerPending viene rimosso e mostrato in chat (non era ottimistico); se
-// è il messaggio inviato normalmente è già reso → nessuna bolla extra.
+// user message injected by pi (message_start user role): if it was an item in
+// steerPending it is removed and shown in chat (it was not optimistic); if it
+// is the normally sent message it is already rendered → no extra bubble.
 function handleUserMessageStart(evt: RpcEvent): void {
   const content = (evt as { message?: { content?: unknown } }).message?.content;
   const text = extractTextContent(content);
-  // pulisce da ENTRAMBE le code: l'item consegnato può trovarsi in
-  // steerPending (in attesa di iniezione) o essere tornato in steerShadow
+  // cleans from BOTH queues: the delivered item can be in
+  // steerPending (waiting for injection) or have returned to steerShadow
   const pIdx = steerPending.findIndex((m) => m.text === text);
   const sIdx = steerShadow.findIndex((m) => m.text === text);
   if (pIdx >= 0) steerPending.splice(pIdx, 1);
@@ -4397,7 +4410,7 @@ function handleUserMessageStart(evt: RpcEvent): void {
   if (pIdx < 0 && sIdx < 0) return;
   persistSteerQueue();
   renderSteerPanel();
-  // bolla utente reale (lo stearing non era stato mostrato ottimisticamente)
+  // real user bubble (the steering had not been shown optimistically)
   const wrapper = addMsg("user");
   const bubble = document.createElement("div");
   bubble.className = "bubble user";
@@ -4406,16 +4419,16 @@ function handleUserMessageStart(evt: RpcEvent): void {
   scrollToBottom();
 }
 
-// --- aggregazione blocchi pensiero/tool (3px) -------------------------------
-// Regole: 1) blocco pensiero e tools CONSECUTIVI → gap 3px; 2) dopo un
-// pensiero/tool, se il successivo NON è pensiero/tool → gap 14px.
-// Valutato appena il primo blocco del messaggio si materializza (mai
-// retroattivo): nessun saltone.
+// --- thinking/tool block aggregation (3px) ---------------------------------
+// Rules: 1) CONSECUTIVE thinking and tool blocks → 3px gap; 2) after a
+// thinking/tool, if the next is NOT thinking/tool → 14px gap.
+// Evaluated as soon as the message's first block materializes (never
+// retroactive): no jumps.
 function msgEndsWithThinkTool(msg: Element): boolean {
   const last = msg.lastElementChild;
   if (!last) return false;
   if (last.classList.contains("tool-card")) return true;
-  // slot del pensiero come ultimo figlio: conta solo se contiene la card
+  // thinking slot as last child: counts only if it contains the card
   if (last.classList.contains("thinking-slot")) {
     return !!last.querySelector(".thinking-card");
   }
@@ -4432,8 +4445,8 @@ function msgStartsWithThinkTool(msg: Element): boolean {
   return false;
 }
 
-// applica il gap 3px (14 − 11) se il messaggio precedente finisce con
-// pensiero/tool e il corrente inizia con pensiero/tool
+// applies the 3px gap (14 − 11) if the previous message ends with
+// thinking/tool and the current starts with thinking/tool
 function setToolChain(msg: Element): void {
   msg.classList.add("tool-chain");
   (msg as HTMLElement).style.marginTop = "-11px";
@@ -4451,9 +4464,10 @@ function applyToolChain(): void {
   }
 }
 
-// il messaggio inizia col tool solo se non c'è pensiero né testo prima.
-// NB: il primo figlio è SEMPRE lo slot del pensiero (anche vuoto) → qui la
-// chain va impostata DIRETTAMENTE, senza passare da msgStartsWithThinkTool.
+// the message starts with the tool only if there is no thinking nor text
+// before. NOTE: the first child is ALWAYS the thinking slot (even empty)
+// → here the chain must be set DIRECTLY, without going through
+// msgStartsWithThinkTool.
 function applyToolChainIfToolFirst(): void {
   if (!currentMsg) return;
   if (currentMsg.querySelector(".thinking-card")) return;
@@ -4464,9 +4478,9 @@ function applyToolChainIfToolFirst(): void {
   }
 }
 
-// --- palette comandi slash (piano 0003): SOLO comandi estensione ------------
+// --- slash command palette (plan 0003): ONLY extension commands -------------
 interface SlashCommand {
-  name: string; // senza "/" iniziale
+  name: string; // without the leading "/"
   description?: string;
 }
 let slashCommands: SlashCommand[] = [];
@@ -4474,8 +4488,8 @@ let cmdOpen = false;
 let cmdSelected = 0;
 let cmdMatches: SlashCommand[] = [];
 
-// lista comandi estensione da get_commands (source "extension"), fetch a
-// boot e lazy al primo "/" (la lista può cambiare con le estensioni)
+// extension command list from get_commands (source "extension"), fetched at
+// boot and lazily at the first "/" (the list can change with the extensions)
 async function fetchSlashCommands(): Promise<void> {
   try {
     const res = await rpcRequest(rpc.getCommands(), `cmds-${++cmdSeq}`, 8000);
@@ -4492,19 +4506,19 @@ async function fetchSlashCommands(): Promise<void> {
         description: c.description ?? "",
       }));
   } catch {
-    // pi non ancora pronto: resta vuota; il lazy fetch ritenta al prossimo "/"
+    // pi not ready yet: stays empty; the lazy fetch retries at the next "/"
   }
 }
 let cmdSeq = 0;
 
-// chiude il dropdown (senza toccare il testo)
+// closes the dropdown (without touching the text)
 function closeCmdDropdown(): void {
   cmdOpen = false;
   els.cmdDropdown.hidden = true;
 }
 
-// filtraggio + render: il comando è il primo token (prima dello spazio); se
-// l'utente sta già digitando argomenti (spazio) il comando è scelto → chiuso
+// filtering + render: the command is the first token (before the space); if
+// the user is already typing arguments (space) the command is chosen → closed
 function updateCmdDropdown(): void {
   const raw = els.input.value;
   if (!raw.startsWith("/")) {
@@ -4513,7 +4527,7 @@ function updateCmdDropdown(): void {
   }
   const firstSpace = raw.indexOf(" ");
   if (firstSpace !== -1) {
-    closeCmdDropdown(); // args in corso: l'estensione gestisce il resto
+    closeCmdDropdown(); // args in progress: the extension handles the rest
     return;
   }
   const q = raw.slice(1).toLowerCase();
@@ -4559,21 +4573,21 @@ function renderCmdSelection(): void {
   els.cmdCounter.textContent = `(${cmdSelected + 1}/${cmdMatches.length})`;
 }
 
-// link della issue pi-core (vuoto finché non apriamo la issue upstream):
-// quando impostato, il blocco "non ancora implementato" lo mostra
+// pi-core issue link (empty until we open the upstream issue):
+// when set, the "not yet implemented" block shows it
 const PI_CORE_ISSUE_URL = "";
 
-// blocco informativo: il comando estensione richiede il supporto del core
-// di pi.dev (ui.custom) non ancora disponibile — vedi docs/issues/pi-core
+// informative block: the extension command requires the pi.dev core support
+// (ui.custom) not yet available — see docs/issues/pi-core
 function notifyCmdNotImplemented(): void {
   const link = PI_CORE_ISSUE_URL ? `\n${PI_CORE_ISSUE_URL}` : "";
   addStatusLine(`${t("cmdNotImplemented")}${link}`);
 }
 
-// accetta il comando selezionato: riempie la composer con "/name " (spazio
-// per gli eventuali sottocomandi) e chiude il dropdown — NIENTE invio.
-// I comandi estensione richiedono il core di pi.dev (ui.custom): lo si
-// segnala subito con un blocco informativo.
+// accepts the selected command: fills the composer with "/name " (space
+// for possible subcommands) and closes the dropdown — NO send.
+// The extension commands require the pi.dev core (ui.custom): it is
+// signaled right away with an informative block.
 function acceptCmd(name: string): void {
   els.input.value = `/${name} `;
   const len = els.input.value.length;
@@ -4582,8 +4596,8 @@ function acceptCmd(name: string): void {
   els.input.focus();
 }
 
-// palette esplorativa (Ctrl+K): modale con ricerca, Invio/click riempie la
-// composer; Esc/click fuori chiude
+// exploratory palette (Ctrl+K): modal with search, Enter/click fills the
+// composer; Esc/outside click closes
 function openCmdPalette(): void {
   void (async () => {
     if (slashCommands.length === 0) await fetchSlashCommands();
@@ -4685,13 +4699,13 @@ function openCmdPalette(): void {
   })();
 }
 
-// --- allegati (paste di file e immagini reali) -------------------------------
+// --- attachments (paste of real files and images) ---------------------------
 
 interface PendingAttachment {
   path: string;
   name: string;
   mimeType: string;
-  dataBase64?: string; // presente solo per le immagini (anteprima + invio inline)
+  dataBase64?: string; // present only for images (preview + inline send)
 }
 
 let attachments: PendingAttachment[] = [];
@@ -4720,7 +4734,7 @@ function renderAttachments(): void {
     chip.className = "attachment-chip";
     const thumb = document.createElement("span");
     thumb.className = "attachment-thumb";
-    // thumbnail solo per modelli vision; altrimenti icona file (niente blob)
+    // thumbnail only for vision models; otherwise file icon (no blob)
     if (modelSupportsVision && a.dataBase64 && a.mimeType.startsWith("image/")) {
       const img = document.createElement("img");
       img.src = `data:${a.mimeType};base64,${a.dataBase64}`;
@@ -4751,27 +4765,27 @@ function fileToBase64(file: File): Promise<string> {
       const result = typeof reader.result === "string" ? reader.result : "";
       resolve(result.split(",")[1] ?? "");
     };
-    reader.onerror = () => reject(new Error("lettura file fallita"));
+    reader.onerror = () => reject(new Error("file read failed"));
     reader.readAsDataURL(file);
   });
 }
 
-// --- compressione immagini (client-side) -------------------------------------
+// --- client-side image compression -------------------------------------------
 
-const MAX_IMAGE_EDGE = 1024; // px: lato massimo dopo il downscale
-const MAX_IMAGE_BYTES = 150 * 1024; // sotto questa soglia non ricomprimiamo
+const MAX_IMAGE_EDGE = 1024; // px: max side after the downscale
+const MAX_IMAGE_BYTES = 150 * 1024; // below this threshold we do not recompress
 const IMAGE_QUALITY = 0.8; // JPEG/WebP
 
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("decodifica immagine fallita"));
+    img.onerror = () => reject(new Error("image decode failed"));
     img.src = url;
   });
 }
 
-// Rileva il canale alpha campionando (step 8px) il canvas ridimensionato.
+// Detects the alpha channel by sampling (8px step) the resized canvas.
 function hasTransparency(ctx: CanvasRenderingContext2D, w: number, h: number): boolean {
   const step = 8;
   const data = ctx.getImageData(0, 0, w, h).data;
@@ -4781,10 +4795,11 @@ function hasTransparency(ctx: CanvasRenderingContext2D, w: number, h: number): b
   return false;
 }
 
-// Comprime le immagini incollate/trascinate PRIMA del salvataggio e dell'invio:
-// downscale a max 1024px + JPEG q0.8 (PNG se c'è trasparenza). Il blob base64
-// che pi salva in sessione scende da MB a ~50-150KB, così i re-invii di pi a
-// ogni turno restano piccoli e veloci. GIF e immagini già piccole: invariate.
+// Compresses the pasted/dropped images BEFORE saving and sending:
+// downscale to max 1024px + JPEG q0.8 (PNG if there is transparency). The
+// base64 blob pi saves in the session drops from MB to ~50-150KB, so pi's
+// re-sends at every turn stay small and fast. GIF and already small images:
+// unchanged.
 async function compressImage(file: File): Promise<{ base64: string; mimeType: string }> {
   const original = await fileToBase64(file);
   if (
@@ -4877,7 +4892,7 @@ async function handlePastedFile(file: File): Promise<void> {
       path,
       name,
       mimeType,
-      // teniamo il base64 solo per le immagini (anteprima + invio inline se vision)
+      // we keep the base64 only for the images (preview + inline send if vision)
       dataBase64: isImage ? base64 : undefined,
     });
   }
@@ -4895,11 +4910,11 @@ els.input.addEventListener("paste", (e) => {
     e.preventDefault();
     for (const f of files) void handlePastedFile(f);
   }
-  // testo incollato: nessuna manipolazione — il paste default del browser lo
-  // inserisce invariato (i path restano testo, mai convertiti in allegati)
+  // pasted text: no manipulation — the browser default paste inserts it
+  // unchanged (the paths stay text, never converted to attachments)
 });
 
-// --- drag & drop: tutta la finestra è zona di drop con overlay -----------------
+// --- drag & drop: the whole window is a drop zone with overlay -----------------
 
 els.dropOverlayIcon.innerHTML = attachFileIcon();
 els.dropOverlayText.textContent = t("dropToAttach");
@@ -4943,10 +4958,10 @@ document.addEventListener("drop", (e) => {
 });
 
 els.send.addEventListener("click", sendOrStop);
-// nuova chat in un altro pannello: la gestisce il companion (solo in IDE;
-// standalone la richiesta cade nel vuoto e la UI resta com'è)
-// nuova chat: in IDE la gestisce il companion (nuova webview); in standalone
-// apre una NUOVA TAB del browser con una nuova sessione (piano 0005)
+// new chat in another panel: handled by the companion (only in the IDE;
+// standalone the request falls into the void and the UI stays as is)
+// new chat: in the IDE the companion handles it (new webview); standalone
+// opens a NEW BROWSER TAB with a new session (plan 0005)
 els.newChat.addEventListener("click", () => {
   if (runtime.isVsCode) {
     void ideRequest({ type: "openNewChat" });
@@ -4955,10 +4970,10 @@ els.newChat.addEventListener("click", () => {
   }
 });
 
-// --- cronologia messaggi (↑/↓ con input vuoto) --------------------------------
-// Il placeholder mostra l'ultimo messaggio inviato; TAB lo inserisce nella box,
-// ESC torna al placeholder standard. Il placeholder standard suggerisce ↑/↓
-// quando la cronologia esiste.
+// --- message history (↑/↓ with empty input) ----------------------------------
+// The placeholder shows the last sent message; TAB inserts it in the box,
+// ESC returns to the standard placeholder. The standard placeholder
+// suggests ↑/↓ when the history exists.
 
 const HISTORY_KEY = "pi-webview-msg-history";
 const messageHistory: string[] = (() => {
@@ -4972,10 +4987,10 @@ const messageHistory: string[] = (() => {
     return [];
   }
 })();
-let historyIndex = -1; // -1 = nessun preview
+let historyIndex = -1; // -1 = no preview
 
 function setStandardPlaceholder(): void {
-  // durante l'elaborazione il placeholder segnala lo stearing (Invio accoda)
+  // during processing the placeholder signals the steering (Enter queues)
   updateSteerPlaceholder();
 }
 
@@ -4997,13 +5012,13 @@ function pushMessageHistory(text: string): void {
   try {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(messageHistory));
   } catch {
-    // localStorage non disponibile: cronologia solo in memoria
+    // localStorage unavailable: history only in memory
   }
   setStandardPlaceholder();
 }
 
-// semina la cronologia dai messaggi utente della sessione caricata (una volta
-// per sessione webview), così ↑ funziona anche dopo il resume
+// seeds the history from the user messages of the loaded session (once
+// per webview session), so ↑ works also after the resume
 let historySeeded = false;
 
 function seedMessageHistory(messages: unknown[]): void {
@@ -5062,9 +5077,9 @@ els.input.addEventListener("keydown", (e) => {
       return;
     }
   }
-  // autocomplete comandi slash (piano 0003): quando il dropdown è aperto,
-  // le frecce navigano, Enter/Tab accettano (mai invio/stearing), Esc chiude
-  // (mai STOP)
+  // slash command autocomplete (plan 0003): when the dropdown is open,
+  // the arrows navigate, Enter/Tab accept (never send/steering), Esc closes
+  // (never STOP)
   if (cmdOpen) {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
@@ -5092,19 +5107,19 @@ els.input.addEventListener("keydown", (e) => {
     }
     if (e.key === "Escape") {
       e.preventDefault();
-      e.stopPropagation(); // NON innescare lo STOP
+      e.stopPropagation(); // do NOT trigger STOP
       closeCmdDropdown();
       return;
     }
   }
-  // Invio SEMPRE possibile: durante l'elaborazione accoda (stearing),
-  // da idle invia subito. Shift+Invio = a capo.
+  // Enter ALWAYS possible: during processing it queues (steering),
+  // from idle it sends right away. Shift+Enter = new line.
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     sendOrStop();
     return;
   }
-  // ↑ con input vuoto → naviga la cronologia (solo se esiste)
+  // ↑ with empty input → navigate the history (only if it exists)
   if (
     e.key === "ArrowUp" &&
     !e.shiftKey &&
@@ -5117,20 +5132,21 @@ els.input.addEventListener("keydown", (e) => {
   }
 });
 
-// digitando durante il preview si torna al flusso normale
+// typing during the preview returns to the normal flow
 els.input.addEventListener("input", () => {
   if (historyIndex >= 0) exitHistoryPreview();
   updateCmdDropdown();
   autogrowInput(); // UNA riga di default → cresce di una riga alla volta fino a 5
 });
 
-// --- autogrow input: UNA riga di default (32px), max 5 righe (line-height 21 +
-// padding 15 → max 120px; font 14px come la chat) ------------------------
+// --- autogrow input: ONE line by default (32px), max 5 lines (line-height 21 +
+// padding 15 → max 120px; font 14px like the chat) ------------------------
 const INPUT_MAX_HEIGHT = 120;
 function autogrowInput(): void {
   const el = els.input;
-  // MAI "auto": con max-height CSS la box si gonfia subito al max. Misura da
-  // 0px così scrollHeight riflette il contenuto reale → crescita riga per riga.
+  // NEVER "auto": with the CSS max-height the box inflates to the max right
+  // away. Measure from 0px so scrollHeight reflects the real content →
+  // line-by-line growth.
   el.style.height = "0px";
   el.style.height = Math.min(el.scrollHeight, INPUT_MAX_HEIGHT) + "px";
 }
@@ -5138,7 +5154,7 @@ function resetInputHeight(): void {
   els.input.style.height = "";
 }
 
-// palette comandi: Ctrl+K (o Meta+K su macOS)
+// palette command: Ctrl+K (or Meta+K on macOS)
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
     e.preventDefault();
@@ -5146,7 +5162,7 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// lo stato di lavoro arriva dagli eventi di pi
+// the working state comes from the pi events
 function trackWorking(evt: RpcEvent): void {
   if (evt.type === "agent_start") {
     working = true;
@@ -5155,22 +5171,23 @@ function trackWorking(evt: RpcEvent): void {
     updateThinkingStopBtn(true);
   } else if (evt.type === "agent_settled") {
     working = false;
-    settleSentLoader(); // senza risposta: congela comunque il tempo atteso
+    settleSentLoader(); // without a response: freeze the waited time anyway
     hideExtensionsBlock();
-    // ferma i timer dei tool rimasti attivi (es. tool ABORTATO dallo STOP:
-    // niente tool_execution_end → il timer girerà all'infinito)
+    // stops the tool timers left active (e.g. tool ABORTED by STOP:
+    // no tool_execution_end → the timer would run forever)
     clearToolTimers();
-    void fetchSessionStats(); // context/token aggiornati a fine turno
-    void fetchBalance(); // il saldo cambia dopo l'uso
+    void fetchSessionStats(); // context/token updated at turn end
+    void fetchBalance(); // the balance changes after the usage
     updateSendButton();
     updateSteerPlaceholder();
     updateThinkingStopBtn(false);
-    // a fine turno pi può aver assegnato il nome alla sessione (auto-title)
+    // at turn end pi may have assigned a name to the session (auto-title)
     void refreshSessionTitle();
-    // stearing: da idle si consegna il prossimo messaggio accodato
+    // steering: from idle the next queued message is delivered
     deliverSteering();
-    // stearing: riconcilia gli "in invio" rimasti fermi (pi idle non li ha
-    // più in coda → persi/scartati → torna in coda ombra e rilancio)
+    // steering: reconcile the stuck "in-flight" items (pi idle no longer
+    // has them in the queue → lost/discarded → back to the shadow queue
+    // and relaunch)
     void reconcileStuckPending();
   }
 }
@@ -5180,7 +5197,7 @@ els.connectBtn.addEventListener("click", () => {
   if (url) void connect(url);
 });
 
-// --- demo (dev): conversazione di esempio, nessuna connessione ----------------
+// --- demo (dev): sample conversation, no connection ---------------------------
 
 function renderDemo(): void {
   const user = addMsg("user");
@@ -5191,7 +5208,7 @@ function renderDemo(): void {
 
   const asst = addMsg("assistant");
 
-  // pensiero PRIMA del testo (collassato per default)
+  // thinking BEFORE the text (collapsed by default)
   const thought = document.createElement("div");
   thought.className = "thinking-card";
   const { head } = makeThinkingHead(false);
@@ -5235,10 +5252,10 @@ function renderDemo(): void {
   asst.appendChild(tool);
 }
 
-// --- avvio -------------------------------------------------------------------
+// --- startup -----------------------------------------------------------------
 
-// init tema/stringhe immediato (a modulo scope): in webview VS Code senza
-// questo il testo resterebbe col colore di default (nero su sfondo dell'IDE)
+// immediate theme/strings init (at module scope): in the VS Code webview
+// without this the text would stay with the default color (black on the IDE bg)
 applyTheme(themePref);
 applyUiStrings();
 
@@ -5247,8 +5264,8 @@ async function boot(): Promise<void> {
     renderDemo();
     hideBootLoader();
   }
-  // modalità runtime: dentro un IDE (es. webview VS Code) si usa postMessage,
-  // standalone il bridge WebSocket (src/web/environment.ts)
+  // runtime mode: inside an IDE (e.g. VS Code webview) postMessage is used,
+  // standalone the WebSocket bridge (src/web/environment.ts)
   if (runtime.isVsCode) {
     const vscode = createVsCodeTransport();
     if (vscode) {

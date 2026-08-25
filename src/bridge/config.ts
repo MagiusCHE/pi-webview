@@ -1,8 +1,8 @@
-// Config utente in cartella dedicata per SO (concept 0002 D7):
+// User config in a per-OS dedicated folder (concept 0002 D7):
 // - Linux:   $XDG_CONFIG_HOME/pi-webview  (default ~/.config/pi-webview)
 // - macOS:   ~/Library/Application Support/pi-webview
 // - Windows: %APPDATA%\pi-webview
-// Il file è config.json. Serve a UI e futuro adapter IDE.
+// The file is config.json. Serves the UI and the future IDE adapter.
 
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -11,11 +11,11 @@ import type { CompactionSettings, UserConfig } from "../ide/protocol.ts";
 
 export const DEFAULT_CONFIG: UserConfig = { theme: "system", historyLimit: 30 };
 
-// soglie di default della compattazione automatica di pi (config ~/.pi/config.json)
+// default thresholds of pi's automatic compaction (config ~/.pi/config.json)
 const DEFAULT_COMPACTION = { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000 };
 
-// Legge la sezione `compaction` della config utente di pi (~/.pi/config.json):
-// è la proprietà che pi.dev usa per l'auto-compaction (soglia = contextWindow − reserveTokens)
+// Reads the `compaction` section of the pi user config (~/.pi/config.json):
+// the property pi.dev uses for auto-compaction (threshold = contextWindow − reserveTokens)
 export function readCompactionSettings(): CompactionSettings {
   try {
     const raw = readFileSync(join(homedir(), ".pi", "config.json"), "utf8");

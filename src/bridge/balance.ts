@@ -1,6 +1,6 @@
-// Saldo reale del provider (come pi.dev / CodexBar): legge la API key di pi
-// da auth.json e chiama l'endpoint di balance del provider. La key resta nel
-// processo (mai inviata alla UI): alla webview arriva solo { currency, balance }.
+// Real provider balance (like pi.dev / CodexBar): reads the pi API key from
+// auth.json and calls the provider's balance endpoint. The key stays in the
+// process (never sent to the UI): the webview only gets { currency, balance }.
 
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -30,7 +30,7 @@ function readApiKey(provider: string): string | null {
   }
 }
 
-/** Saldo per i provider con endpoint pubblico; null per gli altri. */
+/** Balance for providers with a public endpoint; null for the others. */
 export async function fetchProviderBalance(
   provider: string,
 ): Promise<ProviderBalance | null> {
@@ -46,7 +46,7 @@ export async function fetchProviderBalance(
         balance_infos?: Array<{ currency: string; total_balance: string }>;
       };
       const infos = data.balance_infos ?? [];
-      // preferisci USD (come pi.dev), altrimenti la prima valuta disponibile
+      // prefer USD (like pi.dev), otherwise the first available currency
       const info = infos.find((i) => i.currency === "USD") ?? infos[0];
       if (!info) return null;
       return { currency: info.currency, balance: Number(info.total_balance) };
@@ -64,12 +64,12 @@ export async function fetchProviderBalance(
       return { currency: "USD", balance: remaining };
     }
   } catch {
-    // rete/endpoint non raggiungibili: niente saldo (la UI resta senza)
+    // network/endpoint unreachable: no balance (the UI stays without it)
   }
   return null;
 }
 
-/** "$36.50" / "¥110.00" — formattazione per la chip del modello */
+/** "$36.50" / "¥110.00" — formatting for the model chip */
 export function formatBalance(b: ProviderBalance): string {
   const amount = b.balance.toFixed(2);
   return b.currency === "CNY" ? `¥${amount}` : `$${amount}`;

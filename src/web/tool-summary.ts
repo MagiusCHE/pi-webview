@@ -1,11 +1,11 @@
-// Sunto dell'header delle card dei tool: il nome del tool (accent) e gli
-// argomenti attenuati (muted). Nessuna troncatura JS: è il CSS (ellipsis su
-// una riga) a tagliare usando tutto lo spazio disponibile. Per i tool file
-// (read/edit/write/...) il percorso è reso relativo al workspace (./…).
+// Summary of the tool card headers: the tool name (accent) and the muted
+// arguments. No JS truncation: the CSS (single-line ellipsis) does the cutting
+// using all the available space. For file tools (read/edit/write/...) the path
+// is made relative to the workspace (./…).
 
 export interface ToolSummary {
   name: string;
-  args: string; // vuoto se non c'è un sunto utile
+  args: string; // empty when there is no useful summary
 }
 
 export function toolSummary(
@@ -38,8 +38,8 @@ export function toolSummary(
   switch (name) {
     case "bash": {
       const cmd = str("command");
-      // come pi.dev: "$" evidenziato (accent nel nome), comando attenuato
-      // negli args — senza la parola "bash"
+      // like pi.dev: "$" highlighted (accent in the name), command muted
+      // in the args — without the word "bash"
       if (!cmd) return { name: "$", args: "" };
       return { name: "$", args: cmd };
     }

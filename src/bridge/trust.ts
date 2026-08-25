@@ -1,7 +1,7 @@
-// Livello di trust del progetto corrente, come pi.dev:
-// - ~/.pi/agent/trust.json → map percorso → bool (decisione salvata con /trust)
+// Trust level of the current project, like pi.dev:
+// - ~/.pi/agent/trust.json → map path → bool (decision saved with /trust)
 // - defaultProjectTrust in ~/.pi/agent/settings.json → "ask" | "always" | "never"
-// (docs/settings.md di pi, sezione "Project Trust").
+// (docs/settings.md of pi, "Project Trust" section).
 
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
@@ -23,7 +23,7 @@ export function trustDir(): string {
   return join(homedir(), ".pi", "agent");
 }
 
-// la decisione vale per la cartella o un parent (come pi)
+// the decision applies to the folder or a parent (like pi)
 function findTrust(
   trustFile: Record<string, unknown>,
   workspace: string,
@@ -56,8 +56,8 @@ export function getTrust(workspace: string, dir: string = trustDir()): TrustResu
   return { status, workspace };
 }
 
-// Scrive una decisione di trust per il workspace (come /trust di pi):
-// trusted → true, untrusted → false, ask → rimuove la voce (fallback al default).
+// Writes a trust decision for the workspace (like pi's /trust):
+// trusted → true, untrusted → false, ask → removes the entry (falls back to the default).
 export function setTrust(
   workspace: string,
   status: TrustStatus,
@@ -73,7 +73,7 @@ export function setTrust(
   try {
     writeFileSync(path, JSON.stringify(trustFile, null, 2) + "\n");
   } catch {
-    // directory non scrivibile: riporta comunque lo stato richiesto
+    // directory not writable: still report the requested state
   }
   return getTrust(workspace, dir);
 }

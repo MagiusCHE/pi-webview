@@ -78,6 +78,7 @@
     "compacted": "Compattato",
     "compactionError": "Compattazione non riuscita",
     "piDied": "pi è terminato: ricarica la finestra per ricollegarti",
+    "piDiedHint": "pi è terminato o non è partito. Verifica che funzioni dal terminale: `{command}` — se lancia un errore, pi non è configurato correttamente.",
     "clickToCompact": "Click per compattare",
     "autoCompactAt": "auto-compact ≥ {pct}%",
     "autoCompactOff": "auto-compact: disattivato",

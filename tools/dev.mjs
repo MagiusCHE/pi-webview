@@ -1,5 +1,5 @@
-// `pnpm dev` — avvia bridge (--debug) + vite (HMR) e apre il browser.
-// Legge l'URL del bridge dall'output del bridge e lo passa a vite via env.
+// `pnpm dev` — starts bridge (--debug) + vite (HMR) and opens the browser.
+// Reads the bridge URL from the bridge output and passes it to vite via env.
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -43,7 +43,7 @@ bridge.on("exit", (code) => {
   killAll(code ?? 1);
 });
 
-// 2) vite (dopo che il bridge è pronto)
+// 2) vite (after the bridge is ready)
 let startedVite = false;
 async function startVite(wsUrl) {
   startedVite = true;

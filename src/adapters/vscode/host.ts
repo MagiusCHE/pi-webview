@@ -1,6 +1,6 @@
-// Host condiviso tra sidebar (view) e pannelli "nuova chat": spawna
-// `pi --mode rpc`, traduce l'IDE bridge protocol via postMessage e gestisce
-// le richieste IDE (config, sessioni, trust, allegati, selezione).
+// Shared host between the sidebar (view) and the "new chat" panels: spawns
+// `pi --mode rpc`, translates the IDE bridge protocol via postMessage and
+// handles IDE requests (config, sessions, trust, attachments, selection).
 
 import * as vscode from "vscode";
 import { execFile } from "node:child_process";
@@ -37,20 +37,22 @@ import type {
 } from "../../ide/protocol.ts";
 
 export interface PiHostCallbacks {
-  /** la webview ha cambiato sessione corrente */
+  /** the webview changed the current session */
   onSessionChange: (path: string) => void;
-  /** la webview chiede una nuova chat in un altro pannello */
+  /** the webview requests a new chat in another panel */
   onNewChat: () => void;
 }
 
 export abstract class PiWebviewHost {
   protected pi: PiProcess | null = null;
+  /** command line pi was launched with (for error messages) */
+  protected piCommand = "";
   protected webview: vscode.Webview | null = null;
   protected config = new ConfigStore();
   private selectionTimer: ReturnType<typeof setTimeout> | null = null;
-  /** sessione corrente (aggiornata via storeSession): serve al riavvio di pi */
+  /** current session (updated via storeSession): needed when restarting pi */
   protected currentSessionPath: string | undefined;
-  /** true durante un riavvio voluto (setCliFlags): l'exit di pi non è un crash */
+  /** true during an intentional restart (setCliFlags): pi's exit is not a crash */
   private restarting = false;
 
   constructor(
@@ -58,7 +60,7 @@ export abstract class PiWebviewHost {
     protected cb: PiHostCallbacks,
   ) {}
 
-  /** flag CLI di lancio di pi, persistiti per workspace (blocco 3 settings) */
+  /** pi launch CLI flags, persisted per workspace (settings block 3) */
   protected cliFlags(): CliFlags {
     return (
       this.context.workspaceState.get<CliFlags>("pi-webview.cliFlags") ?? {
@@ -67,9 +69,9 @@ export abstract class PiWebviewHost {
     );
   }
 
-  /** riavvia pi con le opzioni di lancio correnti (setCliFlags): la webview
-   *  riceve connection_closed(reason restart) + pi_restarted per re-inizializzarsi
-   *  senza reload (trasparente); la sessione corrente viene ripresa con --session */
+  /** restarts pi with the current launch options (setCliFlags): the webview
+   *  gets connection_closed(reason restart) + pi_restarted to re-initialize
+   *  without a reload (transparent); the current session is resumed with --session */
   protected restartPi(): void {
     const sessionPath = this.currentSessionPath;
     this.restarting = true;
@@ -84,10 +86,10 @@ export abstract class PiWebviewHost {
     this.post({ channel: "rpc", payload: { type: "pi_restarted" } satisfies RpcEvent });
   }
 
-  // --- flag CLI di lancio (blocco 3 settings) --------------------------------
+  // --- launch CLI flags (settings block 3) ---------------------------------
 
-  /** flag registrati da pi + estensioni, letti da `pi --help` (sezione
-   *  "Extension CLI Flags"); parsati una volta e cacheati per host */
+  /** flags registered by pi + extensions, read from `pi --help` (section
+   *  "Extension CLI Flags"); parsed once and cached for the host */
   private cachedFlags: CliFlagInfo[] | null = null;
 
   private async fetchAvailableFlags(): Promise<CliFlagInfo[]> {
@@ -120,13 +122,13 @@ export abstract class PiWebviewHost {
     }
   }
 
-  /** valori attivi (flag → valore) della SESSIONE CORRENTE: letti dalla
-   *  entry custom nel file jsonl della sessione (per-sessione, non globali) */
+  /** active values (flag → value) of the CURRENT session: read from the
+   *  custom entry in the session jsonl file (per-session, not global) */
   protected cliFlagValues(): CliFlags {
     return readSessionCliFlags(this.currentSessionPath ?? "");
   }
 
-  /** argomenti CLI per i flag attivi (es. --session-control, --preset <v>) */
+  /** CLI arguments for the active flags (e.g. --session-control, --preset <v>) */
   private cliFlagArgs(): string[] {
     const args: string[] = [];
     for (const [name, value] of Object.entries(this.cliFlagValues())) {
@@ -141,7 +143,7 @@ export abstract class PiWebviewHost {
   protected workspace(): string | undefined {
     const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (folder) return folder;
-    // nessuna cartella di lavoro: fallback sul documento attivo o cwd
+    // no workspace folder: fall back to the active document or cwd
     const doc = vscode.window.activeTextEditor?.document.uri;
     if (doc && doc.scheme === "file") {
       return vscode.workspace.getWorkspaceFolder(doc)?.uri.fsPath ?? process.cwd();
@@ -149,22 +151,42 @@ export abstract class PiWebviewHost {
     return process.cwd();
   }
 
-  /** spawna pi --mode rpc; con sessionPath riprende quella sessione (--session) */
+  /** spawns pi --mode rpc; with sessionPath resumes that session (--session) */
   protected startPi(sessionPath?: string): void {
     const piCmd = resolvePi();
     if (!piCmd.found) {
-      void vscode.window.showErrorMessage(
-        `Comando '${piCmd.command}' non trovato: installa pi con npm install -g @earendil-works/pi-coding-agent`,
+      // the binary may exist in the user's shell but NOT in the extension
+      // host PATH (VS Code launched from a desktop icon does not inherit the
+      // shell PATH: ~/.local/bin, npm global bin, nvm… are missing). The
+      // message must say PATH, not "not installed". Log the searched PATH:
+      // it lands in Developer Tools Console and in the exthost log on the
+      // user machine (Help → Toggle Developer Tools → Console).
+      console.error(
+        "[pi-webview] 'pi' not found in the extension host PATH",
+        { command: piCmd.command, path: process.env.PATH ?? "" },
       );
+      const install = "npm install -g @earendil-works/pi-coding-agent";
+      const hint = `Se da terminale \`command -v pi\` funziona, il problema è il PATH: VS Code avviato da icona/desktop non eredita la shell. Avvialo dal terminale o aggiungi la cartella di pi al PATH. Altrimenti installalo con \`${install}\``;
+      void vscode.window.showErrorMessage(
+        `Comando '${piCmd.command}' non trovato nel PATH di VS Code. ${hint}`,
+      );
+      this.post({
+        channel: "rpc",
+        payload: {
+          type: "connection_closed",
+          command: `${piCmd.command} --mode rpc`,
+          error: `'${piCmd.command}' non trovato nel PATH di VS Code (il terminale può avere un PATH diverso)`,
+        },
+      });
       return;
     }
     const bashWarning = checkBashOnWindows();
     if (bashWarning) void vscode.window.showWarningMessage(bashWarning);
 
-    // una sessione salvata di un ALTRO workspace (header cwd ≠ cartella aperta)
-    // va FORKATA nel workspace corrente prima del resume (come il resume
-    // cross-folder di pi): mai riprendere una sessione estranea così com'è.
-    // Il fork replica header+cronologia nella cartella del progetto attivo.
+    // a session saved in ANOTHER workspace (header cwd ≠ open folder) must be
+    // FORKED into the current workspace before resuming (like pi's
+    // cross-folder resume): never resume a foreign session as-is.
+    // The fork replicates header+history in the active project folder.
     if (sessionPath && existsSync(sessionPath)) {
       try {
         const info = getSessionInfo(sessionPath);
@@ -174,8 +196,8 @@ export abstract class PiWebviewHost {
           sessionPath = forked.path;
         }
       } catch (err) {
-        // fork non riuscito: la sessione originale resta, ma avvisa (la UI
-        // mostrerebbe una sessione fuori workspace: meglio segnalarlo)
+        // fork failed: keep the original session but warn (the UI would
+        // show a session outside the workspace: better to flag it)
         void vscode.window.showWarningMessage(
           `pi-webview: impossibile riprendere la sessione nel workspace corrente: ${
             err instanceof Error ? err.message : String(err)
@@ -186,36 +208,49 @@ export abstract class PiWebviewHost {
 
     const sessionArgs =
       sessionPath && existsSync(sessionPath) ? ["--session", sessionPath] : [];
-    // se si riprende una sessione, è quella (eventualmente forkata) la corrente
+    // when resuming a session, it (possibly forked) becomes the current one
     if (sessionArgs.length > 0) this.currentSessionPath = sessionPath;
-    // flag CLI dalle impostazioni (blocco 3: es. --session-control)
+    // CLI flags from settings (block 3: e.g. --session-control)
     const cliFlagArgs = this.cliFlagArgs();
+    // actual command line used to launch pi (for error messages: suggested
+    // to the user to verify pi works from a terminal)
+    this.piCommand = [piCmd.command, "--mode", "rpc", ...sessionArgs, ...cliFlagArgs].join(" ");
 
     this.pi = new PiProcess(
       piCmd.command,
       {
         onEvent: (evt) => {
-          // TUTTI gli extension_ui_request (select/confirm/input/editor/notify/
-          // setStatus/…) vengono inoltrati ALLA WEBVIEW: i modali compaiono
-          // nella sidebar dove guarda l'utente, non come dialoghi nativi VS
-          // Code in cima all'editor (facili da ignorare → sembra "non
-          // funzioni"). La webview risponde con extension_ui_response, che
-          // handleFrame fa arrivare a pi. I dialoghi nativi erano il motivo
-          // per cui ask_user sembrava "cancellato" a caso.
+          // ALL extension_ui_request (select/confirm/input/editor/notify/
+          // setStatus/…) are forwarded TO THE WEBVIEW: modals appear in the
+          // sidebar where the user is looking, not as native VS Code dialogs
+          // on top of the editor (easy to miss → looks like "not working").
+          // The webview replies with extension_ui_response, which handleFrame
+          // delivers to pi. Native dialogs were why ask_user seemed randomly
+          // "cancelled".
           this.post({ channel: "rpc", payload: evt as RpcEvent });
         },
         onStderr: (line) => console.warn("[pi]", line),
-        onExit: () => {
-          if (this.restarting) return; // riavvio voluto: non è un crash
-          void vscode.window.showWarningMessage("pi è terminato in modo inatteso");
-          // avvisa la webview: sblocca la UI (working/compact) e mostra l'errore
-          this.post({ channel: "rpc", payload: { type: "connection_closed" } });
+        onExit: (_code, _signal, error) => {
+          if (this.restarting) return; // intentional restart: not a crash
+          // asks the user to verify pi from a terminal with the SAME command
+          // line used here, so the real error becomes visible
+          const hint = `Verifica che pi funzioni lanciando \`${this.piCommand}\` dal terminale.`;
+          void vscode.window.showWarningMessage(
+            error
+              ? `pi non è partito (${error}). ${hint}`
+              : `pi è terminato in modo inatteso. ${hint}`,
+          );
+          // notifies the webview: unlocks the UI (working/compact) and shows the error
+          this.post({
+            channel: "rpc",
+            payload: { type: "connection_closed", command: this.piCommand, error },
+          });
         },
       },
-      // marker: l'estensione pi-webview (lato pi) sa che è già integrato (niente re-install).
-      // cwd = cartella di lavoro VS Code: senza, pi usa il cwd dell'extension
-      // host (spesso di un'altra workspace) → l'agente risponde la directory
-      // sbagliata anche se la sessione è di un'altra cartella
+      // marker: the pi-webview extension (pi side) knows it is already integrated (no re-install).
+      // cwd = VS Code workspace folder: without it, pi uses the extension
+      // host cwd (often another workspace) → the agent answers the wrong
+      // directory even if the session belongs to another folder
       {
         env: { ...process.env, PI_WEBVIEW_COMPANION: "1" },
         args: [...sessionArgs, ...cliFlagArgs],
@@ -262,7 +297,7 @@ export abstract class PiWebviewHost {
         return;
       case "storeSession":
         this.cb.onSessionChange(req.path);
-        // traccia la sessione corrente: serve al riavvio (Applica CLI flags)
+        // track the current session: needed for restart (Apply CLI flags)
         this.currentSessionPath = req.path;
         this.respond(req.id, true);
         return;
@@ -288,7 +323,7 @@ export abstract class PiWebviewHost {
         this.respond(req.id, true, { workspace: this.workspace() });
         return;
       case "getVersion":
-        // versione dell'addon VS Code (il companion stesso)
+        // VS Code addon version (the companion itself)
         this.respond(req.id, true, {
           source: "vscode",
           version:
@@ -298,7 +333,7 @@ export abstract class PiWebviewHost {
         });
         return;
       case "getCliFlags":
-        // flag disponibili (pi + estensioni, da `pi --help`) + valori attivi
+        // available flags (pi + extensions, from `pi --help`) + active values
         void this.fetchAvailableFlags().then((available) =>
           this.respond(req.id, true, {
             available,
@@ -307,9 +342,9 @@ export abstract class PiWebviewHost {
         );
         return;
       case "setCliFlags": {
-        // applica: scrive nella sessione (entry custom nel jsonl) + riavvia pi
-        // con la nuova riga di comando (la webview ha già fatto dequeue+stop
-        // se c'era un'elaborazione)
+        // apply: write to the session (custom entry in the jsonl) + restart pi
+        // with the new command line (the webview already did dequeue+stop
+        // if there was an in-flight run)
         const next: CliFlags = req.flags ?? {};
         writeSessionCliFlags(this.currentSessionPath ?? "", next);
         this.respond(req.id, true, { flags: next });
@@ -358,9 +393,9 @@ export abstract class PiWebviewHost {
       case "deleteSession":
         try {
           deleteSessionFile(req.path);
-          // toglie la sessione eliminata dalle chat salvate (workspaceState).
-          // NB: NIENTE import da panels.ts qui (import circolare host↔panels:
-          // romperebbe l'attivazione dell'estensione) → aggiorna lo state inline.
+          // removes the deleted session from saved chats (workspaceState).
+          // NOTE: NO import from panels.ts here (circular host↔panels import:
+          // would break extension activation) → update the state inline.
           const CHATS_KEY = "pi-webview.chats";
           const chats = this.context.workspaceState.get<string[]>(CHATS_KEY);
           if (chats) {
@@ -383,7 +418,7 @@ export abstract class PiWebviewHost {
         }
         return;
       case "storeSteerQueue":
-        // coda stearing persistita per workspace: sopravvive al reload
+        // steering queue persisted per workspace: survives reload
         void this.context.workspaceState.update(
           "pi-webview.steerQueue",
           req.items.length ? req.items : null,
@@ -440,10 +475,10 @@ export abstract class PiWebviewHost {
     }
   }
 
-  // --- selezione editor ------------------------------------------------------
+  // --- editor selection -----------------------------------------------------
 
-  /** ultima selezione nota (persiste anche quando il focus va sulla webview
-   *  o sul terminale: la selezione NON deve sparire cliccando nell'input) */
+  /** last known selection (persists even when focus goes to the webview
+   *  or the terminal: the selection must NOT disappear when clicking the input) */
   private lastSelection: {
     filePath?: string;
     workspaceFolder?: string;
@@ -453,10 +488,10 @@ export abstract class PiWebviewHost {
   postSelection(): void {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.uri.scheme !== "file") {
-      // nessun editor di testo attivo (focus su webview/terminale/pannello):
-      // NON azzerare — ri-pubblica l'ultima selezione nota (se c'è). VS Code
-      // tratta il WebviewPanel come "editor attivo" → senza questo il focus
-      // sull'input della webview cancellerebbe la selezione allegata.
+      // no active text editor (focus on webview/terminal/panel):
+      // DO NOT clear — re-post the last known selection (if any). VS Code
+      // treats the WebviewPanel as an "active editor" → without this, focus
+      // on the webview input would cancel the attached selection.
       if (this.lastSelection) {
         this.post({
           channel: "ide",
@@ -487,7 +522,7 @@ export abstract class PiWebviewHost {
         },
       }));
     if (ranges.length > 0) {
-      // selezione presente: la ricordo (per il caso "focus sulla webview")
+      // selection present: remember it (for the "webview focus" case)
       this.lastSelection = {
         filePath: doc.uri.fsPath,
         workspaceFolder: vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath,
@@ -502,7 +537,7 @@ export abstract class PiWebviewHost {
       });
       return;
     }
-    // selezione VUOTA nel file attivo: l'utente ha davvero deselezionato
+    // EMPTY selection in the active file: the user really deselected
     this.lastSelection = null;
     this.post({
       channel: "ide",
@@ -510,7 +545,7 @@ export abstract class PiWebviewHost {
     });
   }
 
-  /** selezione editor → questa webview (debounce) */
+  /** editor selection → this webview (debounced) */
   protected attachSelectionListener(): void {
     const pushSelection = () => {
       if (this.selectionTimer) clearTimeout(this.selectionTimer);
@@ -523,7 +558,7 @@ export abstract class PiWebviewHost {
     this.postSelection();
   }
 
-  // --- HTML della webview (stesso bundle per view e pannelli) -----------------
+  // --- webview HTML (same bundle for view and panels) ----------------------
 
   protected webviewHtml(webview: vscode.Webview): string {
     const webDir = vscode.Uri.joinPath(this.context.extensionUri, "dist", "web");

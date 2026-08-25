@@ -1,7 +1,7 @@
-// Legge la versione del companion direttamente dal vsix (fonte di verità),
-// senza dipendenze: il vsix è uno zip e la versione sta in
-// `extension.vsixmanifest` come `Version="x.y.z"`.
-// Usa solo node:fs + node:zlib (inflateRawSync per il metodo deflate).
+// Reads the companion version directly from the vsix (source of truth),
+// without dependencies: the vsix is a zip and the version lives in
+// `extension.vsixmanifest` as `Version="x.y.z"`.
+// Uses only node:fs + node:zlib (inflateRawSync for the deflate method).
 
 import { readFileSync } from "node:fs";
 import { inflateRawSync } from "node:zlib";
@@ -9,8 +9,8 @@ import { inflateRawSync } from "node:zlib";
 const LOCAL_FILE_HEADER = 0x04034b50;
 
 /**
- * Ritorna la versione semver del vsix (da `extension.vsixmanifest`),
- * o `undefined` se il file non è leggibile o il manifest non la contiene.
+ * Returns the semver version of the vsix (from `extension.vsixmanifest`),
+ * or `undefined` if the file is unreadable or the manifest lacks it.
  */
 export function readVsixVersion(vsixPath: string): string | undefined {
   const buf = readFileSync(vsixPath);

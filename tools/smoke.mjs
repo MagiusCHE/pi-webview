@@ -1,6 +1,6 @@
-// `pnpm smoke` — smoke test del bridge senza LLM (piano 0001 step 3):
-// avvia il bridge, si collega via WebSocket e verifica il protocollo RPC
-// con comandi che non richiedono il modello (get_state, get_commands).
+// `pnpm smoke` — bridge smoke test without an LLM (plan 0001 step 3):
+// starts the bridge, connects via WebSocket and verifies the RPC protocol
+// with commands that do not need the model (get_state, get_commands).
 
 import { spawn } from "node:child_process";
 import WebSocket from "ws";

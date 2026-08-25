@@ -6,12 +6,12 @@ test('bash: come pi.dev — "$" evidenziato, comando negli args attenuati', () =
   const s = toolSummary("bash", JSON.stringify({ command: "ls -la" }));
   assert.equal(s.name, "$");
   assert.equal(s.args, "ls -la");
-  // nessuna troncatura JS: è il CSS (ellipsis su una riga) a tagliare
+  // no JS truncation: the CSS (single-line ellipsis) does the cutting
   const long = "x".repeat(80);
   const s2 = toolSummary("bash", JSON.stringify({ command: long }));
   assert.equal(s2.name, "$");
   assert.equal(s2.args, long);
-  // comando assente → solo il dollaro
+  // command missing → only the dollar
   assert.deepEqual(toolSummary("bash", "{}"), { name: "$", args: "" });
 });
 
@@ -63,7 +63,7 @@ test("path relativi al workspace (./…) quando dentro il progetto", () => {
     ws,
   );
   assert.equal(s.args, "./src/x.ts");
-  // fuori dal workspace: resta assoluto
+  // outside the workspace: stays absolute
   const s2 = toolSummary("read", JSON.stringify({ path: "/etc/hosts" }), ws);
   assert.equal(s2.args, "/etc/hosts");
 });

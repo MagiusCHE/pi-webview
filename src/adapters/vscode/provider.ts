@@ -1,6 +1,6 @@
-// Adapter VS Code (piano 0002): webview della sidebar. La logica condivisa
-// (spawn pi, bridge protocol, selezione) vive in PiWebviewHost (host.ts);
-// qui solo il wiring della view e la gestione della chat 0 (sidebar).
+// VS Code adapter (plan 0002): sidebar webview. Shared logic (pi spawn,
+// bridge protocol, selection) lives in PiWebviewHost (host.ts); here only
+// the view wiring and chat 0 (sidebar) management.
 
 import * as vscode from "vscode";
 import { PiWebviewHost } from "./host.ts";
@@ -26,7 +26,7 @@ export class PiWebviewProvider
     };
     webviewView.webview.html = this.webviewHtml(webviewView.webview);
 
-    // la sidebar è la chat 0: riprende la prima sessione salvata (se esiste)
+    // the sidebar is chat 0: resumes the first saved session (if any)
     this.startPi(PiPanelManager.instance(this.context).sessionAt(0));
 
     webviewView.webview.onDidReceiveMessage((frame: Frame) => {

@@ -9,11 +9,11 @@ test("getTrust: decisione salvata (trust.json) per la cartella o un parent", () 
   const dir = mkdtempSync(join(tmpdir(), "pi-webview-trust-"));
   try {
     writeFileSync(join(dir, "trust.json"), JSON.stringify({ "/work/proj": true }));
-    // match esatto
+    // exact match
     assert.equal(getTrust("/work/proj", dir).status, "trusted");
-    // match parent
+    // parent match
     assert.equal(getTrust("/work/proj/sub/deep", dir).status, "trusted");
-    // nessuna decisione → ask (default)
+    // no decision → ask (default)
     assert.equal(getTrust("/altro", dir).status, "ask");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -28,9 +28,9 @@ test("getTrust: decisione negativa e defaultProjectTrust", () => {
       join(dir, "settings.json"),
       JSON.stringify({ defaultProjectTrust: "always" }),
     );
-    // decisione esplicita vince sul default
+    // explicit decision wins over the default
     assert.equal(getTrust("/work/proj", dir).status, "untrusted");
-    // senza decisione → always → trusted
+    // without a decision → always → trusted
     assert.equal(getTrust("/altro", dir).status, "trusted");
   } finally {
     rmSync(dir, { recursive: true, force: true });

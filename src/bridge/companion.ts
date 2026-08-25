@@ -1,10 +1,10 @@
-// Verifica del companion VS Code, eseguita da `piw` all'avvio (best effort,
-// non blocca mai il bridge). Divisione dei compiti:
-//   - estensione pi all'avvio: SOLO ensure del link `piw`
-//   - `piw` all'avvio: SOLO verifica/installazione del companion VS Code
-// Il check è idempotente: se il companion installato ha la stessa versione
-// del vsix incluso nel pacchetto non fa nulla. Se `code` non è nella PATH
-// (nessun VS Code / CLI non integrata) skippa in silenzio.
+// VS Code companion check, run by `piw` at startup (best effort, never
+// blocks the bridge). Task split:
+//   - pi extension at startup: ONLY the `piw` link ensure
+//   - `piw` at startup: ONLY VS Code companion check/install
+// The check is idempotent: if the installed companion matches the vsix
+// bundled in the package it does nothing. If `code` is not on the PATH (no
+// VS Code / CLI not integrated) it skips silently.
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -18,10 +18,10 @@ const execFileAsync = promisify(execFile);
 const COMPANION_ID = "magiusche.pi-webview-ide";
 const VSIX_NAME = "pi-webview-ide.vsix";
 
-// Segnale di reload per l'IDE (contratto multi-IDE, docs/concept/0004): stesso
-// file scritto dall'estensione pi — quando il companion viene AGGIORNATO mentre
-// l'IDE è aperto, il companion (in esecuzione) legge qui la versione target e
-// chiede il reload della finestra.
+// Reload signal for the IDE (multi-IDE contract, docs/concept/0004): same
+// file written by the pi extension — when the companion is UPDATED while the
+// IDE is open, the companion (running) reads the target version here and
+// asks for a window reload.
 const RELOAD_SIGNAL = join(homedir(), ".pi", "pi-webview", "companion-reload.json");
 
 function writeReloadSignal(version: string): void {
@@ -41,7 +41,7 @@ function clearReloadSignal(): void {
   }
 }
 
-// --- lettura versione dal vsix (zip, solo node:fs + node:zlib) -------------
+// --- reading the version from the vsix (zip, only node:fs + node:zlib) ----
 
 const LOCAL_FILE_HEADER = 0x04034b50;
 
@@ -72,7 +72,7 @@ function readVsixVersion(vsixPath: string): string | undefined {
   return undefined;
 }
 
-// --- CLI `code` portabile (su Windows è un .cmd: serve cmd /c) --------------
+// --- portable `code` CLI (on Windows it is a .cmd: needs cmd /c) -----------
 
 function runCode(args: string[], timeoutMs: number): Promise<string> {
   if (process.platform === "win32") {
@@ -100,28 +100,28 @@ async function installedCompanionVersion(): Promise<string | null> {
 }
 
 /**
- * Verifica il companion VS Code rispetto al vsix incluso nel pacchetto e lo
- * installa/aggiorna se manca o è datato. Best effort: ogni errore (code CLI
- * assente, lettura vsix fallita, install fallita) viene solo segnalato.
- * Ritorna il messaggio da stampare in console (o null se niente da dire).
+ * Checks the VS Code companion against the vsix bundled in the package and
+ * installs/updates it if missing or outdated. Best effort: any error (missing
+ * code CLI, failed vsix read, failed install) is only reported.
+ * Returns the message to print on console (or null if nothing to say).
  */
 export async function ensureVscodeCompanion(packageRoot: string): Promise<string | null> {
   const vsixPath = join(packageRoot, "companion", VSIX_NAME);
   try {
     const vsixVersion = readVsixVersion(vsixPath);
-    if (vsixVersion === undefined) return null; // vsix non leggibile: skip
+    if (vsixVersion === undefined) return null; // vsix unreadable: skip
     const installed = await installedCompanionVersion();
     if (installed !== null && installed === vsixVersion) {
-      clearReloadSignal(); // già aggiornato: nessun segnale pendente
+      clearReloadSignal(); // already updated: no pending signal
       return null; // ok
     }
     await runCode(["--install-extension", vsixPath, "--force"], 60_000);
-    // update (non installazione fresca) → segnala all'IDE aperto il reload
+    // update (not fresh install) → signal the open IDE to reload
     if (installed !== null) writeReloadSignal(vsixVersion);
     return installed === null
       ? `piw: companion VS Code installato (${vsixVersion}). Reload della finestra VS Code per attivare la webview.`
       : `piw: companion VS Code aggiornato ${installed} → ${vsixVersion}. Reload della finestra VS Code.`;
   } catch {
-    return null; // code mancante / errore: mai rompere l'avvio del bridge
+    return null; // missing code / error: never break the bridge startup
   }
 }

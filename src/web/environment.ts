@@ -1,8 +1,8 @@
-// Rilevamento della modalità di esecuzione della UI:
-// - "standalone" → browser normale (bridge WebSocket)
-// - "vscode"     → webview di VS Code (postMessage, tema dell'IDE)
-// - "ide"        → altro IDE (futuro: iniettano un global o un ?ide=…)
-// Permette di variare il comportamento in base all'ambiente (concept 0002 D2/D3).
+// Detection of the UI execution mode:
+// - "standalone" → normal browser (WebSocket bridge)
+// - "vscode"     → VS Code webview (postMessage, IDE theme)
+// - "ide"        → other IDE (future: they inject a global or an ?ide=…)
+// Allows varying the behavior based on the environment (concept 0002 D2/D3).
 
 export type RuntimeMode = "standalone" | "vscode" | "ide";
 
@@ -15,7 +15,7 @@ export interface RuntimeInfo {
 function detectMode(): RuntimeMode {
   const win = window as unknown as { acquireVsCodeApi?: unknown };
   if (typeof win.acquireVsCodeApi === "function") return "vscode";
-  // futuri IDE: marker iniettato (global) o query param esplicito
+  // future IDEs: injected marker (global) or explicit query param
   const params = new URLSearchParams(location.search);
   if (params.get("ide")) return "ide";
   return "standalone";

@@ -1,4 +1,4 @@
-// Apre il browser di default in modo cross-platform (concept 0002 D6).
+// Opens the default browser cross-platform (concept 0002 D6).
 import { spawn } from "node:child_process";
 
 export function openBrowser(url) {
@@ -11,7 +11,7 @@ export function openBrowser(url) {
         : ["xdg-open", [url]];
   const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
   child.on("error", () => {
-    // niente browser disponibile: l'utente apre l'URL a mano
+    // no browser available: the user opens the URL manually
   });
   child.unref();
 }

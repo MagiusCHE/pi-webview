@@ -1,6 +1,6 @@
-// Framing JSONL del protocollo RPC di pi (docs/rpc.md):
-// - split SOLO su \n (mai readline di Node: spezza su U+2028/U+2029)
-// - accetta \r\n scartando il \r finale
+// JSONL framing of the pi RPC protocol (docs/rpc.md):
+// - split ONLY on \n (never Node's readline: it splits on U+2028/U+2029)
+// - accepts \r\n discarding the trailing \r
 
 export interface JsonlParser {
   push(chunk: string | Uint8Array): void;

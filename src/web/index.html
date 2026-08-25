@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <!-- loader di avvio: copre l'interfaccia finché non ci sono dati -->
+    <!-- boot loader: covers the UI until there is data -->
     <div id="boot-loader" class="boot-loader">
       <div class="boot-loader-content">
         <span class="spinner"></span>
@@ -42,7 +42,7 @@
       </button>
     </header>
 
-    <!-- dialog modale impostazioni -->
+    <!-- settings modal dialog -->
     <div id="settings-modal" class="modal-backdrop" hidden>
       <div class="modal">
         <div class="modal-head">
@@ -89,9 +89,9 @@
           <label id="settings-version-label">Versione</label>
           <span id="settings-version" class="settings-version">–</span>
         </div>
-        <!-- impostazioni di pi.dev: blocco 2 (via /settings, da pi.dev) →
-             placeholder; blocco 3 (flag CLI di lancio) → righe dinamiche
-             dai flag registrati da pi+estensioni + pulsante Applica -->
+        <!-- pi.dev settings: block 2 (via /settings, from pi.dev) → placeholder;
+             block 3 (launch CLI flags) → dynamic rows from the flags
+             registered by pi+extensions + Apply button -->
         <div class="settings-section">
           <div class="settings-section-title" id="settings-pidev-title">pi.dev</div>
           <div class="settings-note" id="settings-pidev-note">…</div>
@@ -115,11 +115,11 @@
       ></button>
     </main>
 
-    <!-- pannello stearing: visibile solo quando ci sono messaggi in coda -->
+    <!-- steering panel: visible only when there are queued messages -->
     <div id="steer-panel" class="steer-panel" hidden></div>
 
-    <!-- blocco selezione editor: UNA riga discreta, appare solo quando c'è
-         una selezione evidente (come lo stearing, tra thread e composer) -->
+    <!-- editor selection block: one discreet row, appears only when there is
+         an evident selection (like the steering, between thread and composer) -->
     <div id="selection-panel" class="selection-panel" hidden></div>
 
     <footer>
@@ -127,10 +127,10 @@
         <input id="connect-url" type="text" placeholder="ws://127.0.0.1:PORT?token=…" />
         <button id="btn-connect">Connetti</button>
       </div>
-      <!-- badge contesto/slot: barra ADIACENTE alla inputbox (sopra, senza gap),
-           stessa larghezza fluida (max 56rem centrato). Contiene il gauger del
-           contesto (built-in) + gli SLOT riempiti dalle estensioni pi via
-           ctx.ui.setStatus (es. tokens-per-second). -->
+      <!-- context/slot badge: bar ADJACENT to the inputbox (above, no gap),
+           same fluid width (max 56rem centered). Contains the context
+           gauge (built-in) + the SLOTS filled by pi extensions via
+           ctx.ui.setStatus (e.g. tokens-per-second). -->
       <div id="stats-badge" class="stats-badge" title="">
         <span class="stats-part stats-ctx">
           <svg class="ctx-gauge" viewBox="0 0 36 36" aria-hidden="true">
@@ -142,8 +142,8 @@
         <span id="stats-slots" class="stats-slots"></span>
       </div>
       <div class="input-box">
-        <!-- STOP separato: a cavallo dell'angolo in basso a destra
-             dell'input box, visibile solo durante l'elaborazione (piano 0004) -->
+        <!-- separate STOP: straddling the bottom-right corner of the
+             input box, visible only while processing (plan 0004) -->
         <button
           id="stats-stop"
           class="stats-stop"
@@ -151,8 +151,8 @@
           title=""
           hidden
         ></button>
-        <!-- dropdown autocomplete comandi slash (piano 0003): SOLO comandi
-             estensione; apre verso l'alto sopra l'input box -->
+        <!-- slash command autocomplete dropdown (plan 0003): ONLY extension
+             commands; opens upward above the input box -->
         <div id="cmd-dropdown" class="cmd-dropdown" hidden>
           <div id="cmd-list" class="cmd-list"></div>
           <div class="cmd-footer"><span id="cmd-counter"></span></div>
@@ -175,7 +175,7 @@
           <button id="btn-thinking" class="toolbar-chip" type="button" title="Pensiero">
             <span id="thinking-info"></span>
           </button>
-          <!-- STOP + invio vicini (2px), gruppo che non si tocca con gli altri -->
+          <!-- STOP + send close together (2px), a group that does not touch the others -->
           <span class="send-group">
             <button
               id="btn-stop"
@@ -190,7 +190,7 @@
       </div>
     </footer>
 
-    <!-- overlay drag & drop -->
+    <!-- drag & drop overlay -->
     <div id="drop-overlay" class="drop-overlay" hidden>
       <div class="drop-overlay-content">
         <span id="drop-overlay-icon" class="drop-overlay-icon"></span>

@@ -72,6 +72,7 @@ webview è la UI.
 
 ## Convenzioni
 
+- **Commenti nel codice: SOLO in inglese** (mai commenti in italiano). Vale per tutto il sorgente: TS, CSS, HTML, script `tools/`, test.
 - Commit message in **inglese** (da ora in poi). Niente push automatico.
 - **Firma dei commit**: aggiungere SEMPRE in coda il trailer
   `Co-authored-by: pi.dev <agent@pi.dev> (DeepSeek V4 Flash)` — con il nome

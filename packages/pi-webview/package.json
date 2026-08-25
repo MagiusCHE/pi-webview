@@ -1,6 +1,6 @@
 {
   "name": "@magiusche/pi-webview",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "WebView UI for the pi coding agent, integrated into the IDE (VS Code first)",
   "type": "module",
   "license": "MIT",

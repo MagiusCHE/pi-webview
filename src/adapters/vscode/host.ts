@@ -9,7 +9,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PiProcess } from "../../bridge/pi-process.ts";
-import { resolvePi, findPiFallback, checkBashOnWindows } from "../../bridge/spawn.ts";
+import { resolvePi, findPiFallback, findPiViaShell, checkBashOnWindows } from "../../bridge/spawn.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -167,10 +167,12 @@ export abstract class PiWebviewHost {
     return process.cwd();
   }
 
-  /** spawns pi --mode rpc; with sessionPath resumes that session (--session) */
-  protected startPi(sessionPath?: string): void {
+  /** spawns pi --mode rpc; with sessionPath resumes that session (--session).
+   *  piOverride: an already-resolved absolute path (e.g. found by the login
+   *  shell probe) — skips the PATH/fallback search. */
+  protected startPi(sessionPath?: string, piOverride?: string): void {
     logLine(`startPi session=${sessionPath ?? ""} pid=${process.pid}`);
-    let piCmd = resolvePi();
+    let piCmd = piOverride ? { command: piOverride, found: true, path: piOverride } : resolvePi();
     logLine(
       `resolvePi: found=${piCmd.found} command=${piCmd.command} path=${piCmd.path ?? ""} PATH=${(process.env.PATH ?? "").slice(0, 400)}`,
     );
@@ -178,7 +180,7 @@ export abstract class PiWebviewHost {
     // Code): before declaring "not found", check the well-known locations
     // (~/.local/bin, npm global, pnpm, homebrew…). If found, spawn the
     // absolute path directly.
-    if (!piCmd.found) {
+    if (!piCmd.found && !piOverride) {
       const fallback = findPiFallback();
       if (fallback) {
         logLine(`fallback found: ${fallback.path}`);
@@ -190,29 +192,21 @@ export abstract class PiWebviewHost {
       }
     }
     if (!piCmd.found) {
-      // the binary may exist in the user's shell but NOT in the extension
-      // host PATH (VS Code launched from a desktop icon does not inherit the
-      // shell PATH: ~/.local/bin, npm global bin, nvm… are missing). The
-      // message must say PATH, not "not installed". Log the searched PATH:
-      // it lands in Developer Tools Console and in the exthost log on the
-      // user machine (Help → Toggle Developer Tools → Console).
-      console.error(
-        "[pi-webview] 'pi' not found in the extension host PATH",
-        { command: piCmd.command, path: process.env.PATH ?? "" },
-      );
-      const install = "npm install -g @earendil-works/pi-coding-agent";
-      logLine(`'pi' NOT FOUND (PATH above) — fallback also missed`);
-      const hint = `Se da terminale \`command -v pi\` funziona, il problema è il PATH: VS Code avviato da icona/desktop non eredita la shell. Avvialo dal terminale o aggiungi la cartella di pi al PATH. Altrimenti installalo con \`${install}\``;
-      void vscode.window.showErrorMessage(
-        `Comando '${piCmd.command}' non trovato nel PATH di VS Code. ${hint}`,
-      );
-      this.post({
-        channel: "rpc",
-        payload: {
-          type: "connection_closed",
-          command: `${piCmd.command} --mode rpc`,
-          error: `'${piCmd.command}' non trovato nel PATH di VS Code (il terminale può avere un PATH diverso)`,
-        },
+      // neither the host PATH nor the known dirs: probe the user's login
+      // shell (nvm/bun/volta/custom prefixes are unknowable in advance).
+      // Do NOT show the error yet: if the shell finds pi, pi starts and the
+      // webview works; the error appears only if the probe fails too.
+      logLine(`'pi' not in host PATH or fallback dirs — probing login shell`);
+      void findPiViaShell().then((res) => {
+        if (res && this.pi === null && this.webview) {
+          logLine(`shell probe found: ${res.path}`);
+          this.startPi(sessionPath, res.path ?? res.command);
+        } else if (res) {
+          logLine(`shell probe found but pi already running`);
+        } else {
+          logLine(`shell probe: not found — showing the error`);
+          this.showPiMissing(piCmd);
+        }
       });
       return;
     }
@@ -296,6 +290,23 @@ export abstract class PiWebviewHost {
     );
     this.pi.start();
     logLine(`spawning: ${this.piCommand}`);
+  }
+
+  /** real "pi not found" error, shown only after PATH + dirs + shell probe all miss */
+  private showPiMissing(piCmd: { command: string }): void {
+    const install = "npm install -g @earendil-works/pi-coding-agent";
+    const hint = `Se da terminale \`command -v pi\` funziona, il problema è il PATH: VS Code avviato da icona/desktop non eredita la shell. Avvialo dal terminale o aggiungi la cartella di pi al PATH. Altrimenti installalo con \`${install}\``;
+    void vscode.window.showErrorMessage(
+      `Comando '${piCmd.command}' non trovato nel PATH di VS Code. ${hint}`,
+    );
+    this.post({
+      channel: "rpc",
+      payload: {
+        type: "connection_closed",
+        command: `${piCmd.command} --mode rpc`,
+        error: `'${piCmd.command}' non trovato nel PATH di VS Code (il terminale può avere un PATH diverso)`,
+      },
+    });
   }
 
   protected post(frame: Frame): void {

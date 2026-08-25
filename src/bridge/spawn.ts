@@ -4,6 +4,10 @@
 import { accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 export function piBinName(platform: NodeJS.Platform = process.platform): string {
   return platform === "win32" ? "pi.cmd" : "pi";
@@ -60,7 +64,12 @@ export function findPiFallback(
       : [
           join(home, ".local", "bin", piBinName(platform)),
           join(home, ".npm-global", "bin", piBinName(platform)),
+          join(home, ".npm-packages", "bin", piBinName(platform)),
+          join(home, ".node", "bin", piBinName(platform)),
           join(home, ".local", "share", "pnpm", piBinName(platform)),
+          join(home, ".bun", "bin", piBinName(platform)),
+          join(home, ".volta", "bin", piBinName(platform)),
+          join(home, ".cargo", "bin", piBinName(platform)),
           "/usr/local/bin/" + piBinName(platform),
           "/opt/homebrew/bin/" + piBinName(platform),
         ];
@@ -70,6 +79,45 @@ export function findPiFallback(
       return { command: p, found: true, path: p };
     } catch {
       // not there / not executable: next candidate
+    }
+  }
+  return null;
+}
+
+// Last resort: ask the user's login shell where `pi` is. The extension host
+// PATH can miss ANY shell-only location (nvm, bun, volta, custom npm prefix…)
+// and no fixed-dir list can cover them all. Running the login shell
+// (`bash -lc 'command -v pi'`) reproduces exactly what the user's terminal
+// sees. Tries $SHELL, then bash, zsh, sh. Cached: the probe is expensive
+// (login shell) and runs at most once per host process.
+let shellProbePromise: Promise<PiResolution | null> | null = null;
+
+export function findPiViaShell(): Promise<PiResolution | null> {
+  if (!shellProbePromise) shellProbePromise = probeShell();
+  return shellProbePromise;
+}
+
+async function probeShell(): Promise<PiResolution | null> {
+  if (process.platform === "win32") return null; // Windows: use the APPDATA fallback
+  const shells = [
+    ...new Set([process.env.SHELL, "bash", "zsh", "sh"].filter((s): s is string => !!s)),
+  ];
+  for (const shell of shells) {
+    try {
+      const { stdout } = await execFileAsync(shell, ["-lc", "command -v pi"], {
+        timeout: 6000,
+      });
+      const p = stdout.trim().split(/\r?\n/)[0] ?? "";
+      if (p) {
+        try {
+          accessSync(p, constants.X_OK);
+          return { command: p, found: true, path: p };
+        } catch {
+          // reported but not executable: try the next shell
+        }
+      }
+    } catch {
+      // shell missing / command failed: next shell
     }
   }
   return null;

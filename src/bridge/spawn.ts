@@ -1,7 +1,7 @@
 // Resolution of the `pi` binary cross-platform (concept 0002 D6):
 // on Windows the npm shim is `pi.cmd`, elsewhere `pi`.
 
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -81,6 +81,24 @@ export function findPiFallback(
       // not there / not executable: next candidate
     }
   }
+  // versioned custom node installs (e.g. pi-node): ~/.local/share/pi-node/node-*/bin
+  if (platform !== "win32") {
+    try {
+      const piNodeDir = join(home, ".local", "share", "pi-node");
+      for (const entry of readdirSync(piNodeDir, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !entry.name.startsWith("node-")) continue;
+        const p = join(piNodeDir, entry.name, "bin", piBinName(platform));
+        try {
+          accessSync(p, constants.X_OK);
+          return { command: p, found: true, path: p };
+        } catch {
+          // no pi in this node version: next one
+        }
+      }
+    } catch {
+      // no pi-node dir: skip
+    }
+  }
   return null;
 }
 
@@ -102,22 +120,32 @@ async function probeShell(): Promise<PiResolution | null> {
   const shells = [
     ...new Set([process.env.SHELL, "bash", "zsh", "sh"].filter((s): s is string => !!s)),
   ];
-  for (const shell of shells) {
-    try {
-      const { stdout } = await execFileAsync(shell, ["-lc", "command -v pi"], {
-        timeout: 6000,
-      });
-      const p = stdout.trim().split(/\r?\n/)[0] ?? "";
-      if (p) {
-        try {
-          accessSync(p, constants.X_OK);
-          return { command: p, found: true, path: p };
-        } catch {
-          // reported but not executable: try the next shell
+  // interactive-login FIRST: users add their PATH dirs in .bashrc/.zshrc,
+  // which plain `-lc` skips because of the common "non-interactive → return"
+  // guard at the top of the rc file. -lic loads profile AND rc.
+  const variants: string[][] = [
+    ["-lic"],
+    ["-ic"],
+    ["-lc"],
+  ];
+  for (const flags of variants) {
+    for (const shell of shells) {
+      try {
+        const { stdout } = await execFileAsync(shell, [...flags, "command -v pi"], {
+          timeout: 6000,
+        });
+        const p = stdout.trim().split(/\r?\n/)[0] ?? "";
+        if (p) {
+          try {
+            accessSync(p, constants.X_OK);
+            return { command: p, found: true, path: p };
+          } catch {
+            // reported but not executable: try the next variant
+          }
         }
+      } catch {
+        // shell missing / command failed: next variant
       }
-    } catch {
-      // shell missing / command failed: next shell
     }
   }
   return null;

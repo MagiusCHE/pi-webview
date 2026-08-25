@@ -10,6 +10,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { PiWebviewProvider } from "./provider.ts";
 import { PiPanelManager } from "./panels.ts";
+import { logLine } from "./host.ts";
 
 let provider: PiWebviewProvider | null = null;
 
@@ -48,6 +49,9 @@ function checkReloadSignal(context: vscode.ExtensionContext): void {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  // deterministic log (see host.ts logLine): confirms which companion version
+  // is actually loaded on a user machine → ~/.pi/pi-webview/companion.log
+  logLine(`activate version=${context.extension.packageJSON.version ?? "?"}`);
   provider = new PiWebviewProvider(context);
 
   context.subscriptions.push(

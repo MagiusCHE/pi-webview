@@ -5,11 +5,27 @@
 import * as vscode from "vscode";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { PiProcess } from "../../bridge/pi-process.ts";
 import { resolvePi, findPiFallback, checkBashOnWindows } from "../../bridge/spawn.ts";
 
 const execFileAsync = promisify(execFile);
+
+// Deterministic companion log: `console.*` of extensions may NOT land in the
+// VS Code exthost.log (it often goes only to the Developer Tools console /
+// window.log). This file is always written, independent of VS Code log
+// routing → on a user machine check ~/.pi/pi-webview/companion.log.
+export function logLine(msg: string): void {
+  try {
+    const dir = join(homedir(), ".pi", "pi-webview");
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, "companion.log"), `${new Date().toISOString()} ${msg}\n`);
+  } catch {
+    // best effort: never break the host because of logging
+  }
+}
 import { ConfigStore, readCompactionSettings } from "../../bridge/config.ts";
 import {
   listSessions,
@@ -153,7 +169,11 @@ export abstract class PiWebviewHost {
 
   /** spawns pi --mode rpc; with sessionPath resumes that session (--session) */
   protected startPi(sessionPath?: string): void {
+    logLine(`startPi session=${sessionPath ?? ""} pid=${process.pid}`);
     let piCmd = resolvePi();
+    logLine(
+      `resolvePi: found=${piCmd.found} command=${piCmd.command} path=${piCmd.path ?? ""} PATH=${(process.env.PATH ?? "").slice(0, 400)}`,
+    );
     // extension host PATH may miss the shell-only dirs (desktop-launched VS
     // Code): before declaring "not found", check the well-known locations
     // (~/.local/bin, npm global, pnpm, homebrew…). If found, spawn the
@@ -161,6 +181,7 @@ export abstract class PiWebviewHost {
     if (!piCmd.found) {
       const fallback = findPiFallback();
       if (fallback) {
+        logLine(`fallback found: ${fallback.path}`);
         console.warn(
           "[pi-webview] 'pi' not in the extension host PATH, using fallback:",
           fallback.path,
@@ -180,6 +201,7 @@ export abstract class PiWebviewHost {
         { command: piCmd.command, path: process.env.PATH ?? "" },
       );
       const install = "npm install -g @earendil-works/pi-coding-agent";
+      logLine(`'pi' NOT FOUND (PATH above) — fallback also missed`);
       const hint = `Se da terminale \`command -v pi\` funziona, il problema è il PATH: VS Code avviato da icona/desktop non eredita la shell. Avvialo dal terminale o aggiungi la cartella di pi al PATH. Altrimenti installalo con \`${install}\``;
       void vscode.window.showErrorMessage(
         `Comando '${piCmd.command}' non trovato nel PATH di VS Code. ${hint}`,
@@ -245,6 +267,7 @@ export abstract class PiWebviewHost {
         },
         onStderr: (line) => console.warn("[pi]", line),
         onExit: (_code, _signal, error) => {
+          logLine(`pi exited error=${error ?? "none"}`);
           if (this.restarting) return; // intentional restart: not a crash
           // asks the user to verify pi from a terminal with the SAME command
           // line used here, so the real error becomes visible
@@ -272,6 +295,7 @@ export abstract class PiWebviewHost {
       },
     );
     this.pi.start();
+    logLine(`spawning: ${this.piCommand}`);
   }
 
   protected post(frame: Frame): void {
@@ -279,6 +303,7 @@ export abstract class PiWebviewHost {
   }
 
   dispose(): void {
+    logLine("dispose");
     this.pi?.dispose();
     this.pi = null;
   }

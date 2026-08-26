@@ -13,8 +13,13 @@ export interface RuntimeInfo {
 }
 
 function detectMode(): RuntimeMode {
-  const win = window as unknown as { acquireVsCodeApi?: unknown };
+  const win = window as unknown as {
+    acquireVsCodeApi?: unknown;
+    chrome?: { webview?: unknown };
+  };
   if (typeof win.acquireVsCodeApi === "function") return "vscode";
+  // WebView2 (Visual Studio adapter, concept 0005): same "ide" channel
+  if (win.chrome?.webview) return "ide";
   // future IDEs: injected marker (global) or explicit query param
   const params = new URLSearchParams(location.search);
   if (params.get("ide")) return "ide";

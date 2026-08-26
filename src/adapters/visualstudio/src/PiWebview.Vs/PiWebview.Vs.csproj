@@ -1,0 +1,124 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- net472: classic VSIX extensions run in-proc inside devenv.exe
+         (.NET Framework). The BuildTools CreatePkgDef cannot load .NET Core
+         assemblies → the VSIX target requires net472. -->
+    <TargetFramework>net472</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>PiWebview.Vs</RootNamespace>
+    <AssemblyName>PiWebview.Vs</AssemblyName>
+    <GeneratePkgDefFile>false</GeneratePkgDefFile>
+    <IncludeAssemblyInVSIXContainer>true</IncludeAssemblyInVSIXContainer>
+    <IncludeDebugSymbolsInVSIXContainer>false</IncludeDebugSymbolsInVSIXContainer>
+    <IncludeDebugSymbolsInLocalVSIXDeployment>false</IncludeDebugSymbolsInLocalVSIXDeployment>
+    <CopyBuildOutputToOutputDirectory>true</CopyBuildOutputToOutputDirectory>
+    <CopyOutputSymbolsToOutputDirectory>false</CopyOutputSymbolsToOutputDirectory>
+    <DeployExtension>false</DeployExtension>
+    <!-- importa i targets VSSDK (GeneratePkgDef, VSCTCompile, CreateVsixContainer) -->
+    <VSSDKBuildToolsAutoSetup>true</VSSDKBuildToolsAutoSetup>
+    <!-- CodeBase in the pkgdef: without it VS cannot resolve the package
+         assembly from the extension folder and the package does not load -->
+    <RegisterWithCodebase>true</RegisterWithCodebase>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.VisualStudio.Sdk" Version="17.14.*" />
+    <!-- BuildTools 18.x: the build targets find VS 2026 via vswhere
+         (the 17.14 metapackage pulls BuildTools 17.x which looks for VS 2022) -->
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="18.4.33" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.*" />
+    <!-- net472 reference assemblies for builds with the dotnet SDK -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the VSSDK BuildTools shrinks the implicit usings set (System.IO
+         and System.Net.Http are missing) -->
+    <Using Include="System.IO" />
+    <Using Include="System.Net.Http" />
+    <!-- System.Design (MenuCommandService) is not in the net472 default set -->
+    <Reference Include="System.Design" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PiWebview.Vs.Core\PiWebview.Vs.Core.csproj" />
+  </ItemGroup>
+
+  <!-- UI buildata (vite): servita via virtual host WebView2. Path relativo
+       al repo: src/adapters/visualstudio/src/PiWebview.Vs → ../../../../../dist/web.
+       The UI is built with 'pnpm build' at the repo root (dist/ is gitignored). -->
+  <Target Name="CheckDistWeb" BeforeTargets="Build">
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\..\..\..\..\dist\web\index.html')"
+           Text="dist/web not found: run 'pnpm build' at the repo root before building the VS companion." />
+  </Target>
+
+  <ItemGroup>
+    <Content Include="$(MSBuildThisFileDirectory)..\..\..\..\..\dist\web\**\*" Exclude="$(MSBuildThisFileDirectory)..\..\..\..\..\dist\web\.vite\**\*">
+      <Link>dist\web\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <IncludeInVSIX>true</IncludeInVSIX>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <VSCTCompile Include="Commands\Commands.vsct">
+      <ResourceName>Menus.ctmenu</ResourceName>
+    </VSCTCompile>
+    <Content Include="zPiWebview.ToolWindowName.pkgdef">
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+    <!-- extension icon (32x32, generated from media/icon-mark-128.png):
+         referenced by source.extension.vsixmanifest (<Icon>) -->
+    <Content Include="icon.png">
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+  </ItemGroup>
+
+  <!-- Like the reference project (vsstudio_pidev/PiDev): the VSSDK
+       MergeCtoResource target does not run under the dotnet CLI → the
+       command table is never embedded and MENUS.CTMENU is missing at
+       activation (package not visible: failed load + skip list). Embed the
+       compiled .cto (obj/…/Commands.cto) as a Menus.ctmenu resource with
+       Mono.Cecil, AFTER CoreCompile and BEFORE the copy to bin (which goes
+       into the vsix). -->
+  <Target Name="EmbedCtoResource"
+          Condition="$([System.String]::Copy('$(MSBuildProjectName)').EndsWith('_wpftmp')) != true"
+          AfterTargets="CoreCompile">
+    <Exec Command="mono &quot;$(MSBuildProjectDirectory)/../../../../../tools/CtoEmbedder/bin/$(Configuration)/net472/CtoEmbedder.exe&quot; &quot;$(IntermediateOutputPath)$(TargetName).dll&quot; &quot;$(IntermediateOutputPath)Commands.cto&quot; Menus.ctmenu" />
+  </Target>
+
+  <!-- The VSSDK GeneratePkgDef target is disabled (GeneratePkgDefFile=false):
+       the CreatePkgDef task drops AssemblyToProcess from the command line
+       under the dotnet CLI (a .NET Framework task bug on .NET Core) → run
+       CreatePkgDef.exe directly through the wine wrapper (project-local
+       prefix, see tools/setup-vs-wine.mjs). The generated pkgdef goes into
+       the vsix. -->
+  <Target Name="GeneratePkgDefOverride" AfterTargets="CopyFilesToOutputDirectory" BeforeTargets="CreateVsixContainer" Condition="'$(Configuration)' != '_wpftmp'">
+    <!-- the bin dir is populated here (CopyFilesToOutputDirectory ran): the
+         assembly + all the referenced dlls it must resolve (Shell.Framework,
+         the Core project, …) are next to each other. The wine wrapper
+         translates the absolute paths to relative (wine maps the cwd to Z:). -->
+    <Exec Command="&quot;$(VSToolsPath)/VSSDK/bin/createpkgdef.exe&quot; &quot;$(TargetPath)&quot; /out=&quot;$(IntermediateOutputPath)$(TargetName).latest.pkgdef&quot; /i=&quot;$(TargetDir)PiWebview.Vs.Core.dll&quot; /codebase" />
+    <CopyIfChanged Condition="Exists('$(IntermediateOutputPath)$(TargetName).latest.pkgdef')"
+             SourceFile="$(IntermediateOutputPath)$(TargetName).latest.pkgdef"
+             DestinationFile="$(IntermediateOutputPath)$(TargetName).pkgdef" />
+    <ItemGroup>
+      <Content Include="$(IntermediateOutputPath)$(TargetName).pkgdef" Condition="Exists('$(IntermediateOutputPath)$(TargetName).pkgdef')">
+        <IncludeInVSIX>true</IncludeInVSIX>
+      </Content>
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\..\tools\CtoEmbedder\CtoEmbedder.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!-- InstallationTarget: Visual Studio 17.x (2022) and 18.x (2026) -->
+    <ExtensionInstallationFolder>PiWebview</ExtensionInstallationFolder>
+  </PropertyGroup>
+
+</Project>

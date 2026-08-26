@@ -1,0 +1,4 @@
+{
+  "channel": "ide",
+  "payload": { "type": "setConfig", "patch": { "theme": "dark", "historyLimit": 30 }, "id": "ide-2" }
+}

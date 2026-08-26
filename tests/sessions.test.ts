@@ -15,6 +15,7 @@ import {
   defaultSessionDir,
   forkSession,
   getSessionInfo,
+  encodeProjectFolder,
 } from "../src/bridge/sessions.ts";
 
 const header = (id: string, cwd: string) =>
@@ -248,4 +249,31 @@ test("listSessions: cartella mancante → lista vuota", () => {
 
 test("defaultSessionDir: percorso canonico di pi", () => {
   assert.ok(defaultSessionDir().endsWith(join(".pi", "agent", "sessions")));
+});
+
+// --- project folder encoding (parity with the C# SessionStore, concept 0005) ---
+
+test("encodeProjectFolder: windows separators and ':' become -", () => {
+  assert.equal(encodeProjectFolder("C:\\proj\\sub"), "--C--proj-sub--");
+  assert.equal(encodeProjectFolder("/home/user"), "--home-user--");
+});
+
+test("listSessions: workspace filter with a windows path", () => {
+  const dir = mkdtempSync(join(tmpdir(), "piw-sess-win-"));
+  try {
+    const projDir = join(dir, encodeProjectFolder("C:\\proj"));
+    mkdirSync(projDir, { recursive: true });
+    writeFileSync(
+      join(projDir, "sess.jsonl"),
+      header("id1", "C:\\proj") +
+        "\n" +
+        JSON.stringify({ type: "message", role: "user", content: "ciao" }) +
+        "\n",
+    );
+    const sessions = listSessions(dir, "C:\\proj");
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0]?.cwd, "C:\\proj");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

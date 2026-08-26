@@ -1,18 +1,29 @@
 // Assembles the pi package (installable with `pi install ./packages/pi-webview`):
 // 1) builds the pi-side extension → packages/pi-webview/dist/extension.js (ESM)
 // 2) builds bridge + standalone CLI → packages/pi-webview/dist/{bridge,piw}.js
-// 3) copies the built UI (dist/web) and the companion vsix into the package
+// 3) copies the built UI (dist/web) and the companion vsixes (VS Code + Visual
+//    Studio) into the package
 
 import { build } from "esbuild";
 import { cpSync, mkdirSync, existsSync } from "node:fs";
 
 if (!existsSync("dist/pi-webview-ide.vsix")) {
-  console.error("companion vsix missing: run `pnpm package:ide` first");
+  console.error("VS Code companion vsix missing: run `pnpm package:ide` first");
   process.exit(1);
 }
 if (!existsSync("dist/web/index.html")) {
   console.error("built UI missing: run `pnpm package:ide` first (vite build)");
   process.exit(1);
+}
+// the Visual Studio companion vsix is optional at assembly time (it needs the
+// wine toolchain on Linux, see tools/build-vs-vsix.mjs): the package works
+// for VS Code-only installs without it, and the VS auto-install is skipped
+// when the vsix is absent.
+const vsVsix = "dist/pi-webview-visualstudio.vsix";
+if (existsSync(vsVsix)) {
+  console.log("VS companion vsix present → included in the package");
+} else {
+  console.warn("VS companion vsix missing: run `pnpm package:vs` to include Visual Studio support");
 }
 
 mkdirSync("packages/pi-webview/dist", { recursive: true });
@@ -52,5 +63,8 @@ await build({
 cpSync("dist/web", "packages/pi-webview/dist/web", { recursive: true });
 cpSync("media/icon.png", "packages/pi-webview/dist/web/icon.png");
 cpSync("dist/pi-webview-ide.vsix", "packages/pi-webview/companion/pi-webview-ide.vsix");
+if (existsSync(vsVsix)) {
+  cpSync(vsVsix, "packages/pi-webview/companion/pi-webview-visualstudio.vsix");
+}
 
 console.log("✓ package pi assemblato → packages/pi-webview/");

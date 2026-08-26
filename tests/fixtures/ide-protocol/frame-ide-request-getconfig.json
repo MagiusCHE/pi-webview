@@ -1,0 +1,4 @@
+{
+  "channel": "ide",
+  "payload": { "type": "getConfig", "id": "ide-1" }
+}

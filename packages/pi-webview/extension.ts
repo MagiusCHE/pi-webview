@@ -23,6 +23,7 @@ const PKG_NAME = "@magiusche/pi-webview";
 const PKG_REF = `npm:${PKG_NAME}`;
 const AUTO_INSTALL_ENV = "PI_WEBVIEW_AUTO_INSTALL";
 const VSIX_REL = join("companion", "pi-webview-ide.vsix");
+const VSVSIX_REL = join("companion", "pi-webview-visualstudio.vsix");
 
 // Reload signal for the IDE (multi-IDE contract, docs/concept/0004):
 // when the companion is UPDATED while the IDE is open, the window stays on
@@ -123,6 +124,59 @@ async function installedCompanionVersion(cli: string): Promise<string | null> {
 
 async function installCompanion(cli: string, vsixPath: string): Promise<void> {
   await runCli(cli, ["--install-extension", vsixPath, "--force"], 60_000);
+}
+
+// --- Visual Studio companion (multi-IDE, Fase 3) ----------------------------
+// VS has no CLI like `code`: detection goes through vswhere.exe (shipped
+// with the VS Installer) and the vsix is installed with VSIXInstaller.exe
+// (quiet). Only runs on Windows; a missing vswhere/vsix → silent skip.
+
+// candidate paths of vswhere.exe, newest first
+function vswhereCandidates(): string[] {
+  const pf86 = process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)";
+  return [
+    join(pf86, "Microsoft Visual Studio", "Installer", "vswhere.exe"),
+    join(pf86, "Microsoft Visual Studio", "Installer", "vswhere.exe") + ".exe",
+  ];
+}
+
+/** VS install paths (VSIXInstaller.exe location per instance). Empty when
+ *  vswhere is missing (no VS) or fails. */
+async function visualStudioInstances(): Promise<string[]> {
+  if (process.platform !== "win32") return [];
+  const vswhere = vswhereCandidates().find((p) => existsSync(p));
+  if (!vswhere) return [];
+  try {
+    const { stdout } = await execFileAsync(
+      vswhere,
+      ["-products", "*", "-requires", "Microsoft.VisualStudio.Workload.ManagedDesktop", "-property", "installationPath", "-format", "text"],
+      { timeout: 15_000, windowsHide: true },
+    );
+    return stdout
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function installVsCompanion(vsixPath: string): Promise<string | null> {
+  if (!existsSync(vsixPath)) return null; // vsix not bundled (build without pnpm package:vs)
+  const instances = await visualStudioInstances();
+  if (instances.length === 0) return null; // no Visual Studio: silent skip
+  const vsixInstaller = join(instances[0]!, "Common7", "IDE", "VSIXInstaller.exe");
+  if (!existsSync(vsixInstaller)) return null;
+  try {
+    // /q = quiet, /a = admin (installs for all users, like code --install-extension)
+    await execFileAsync(vsixInstaller, ["/q", "/a", vsixPath], {
+      timeout: 120_000,
+      windowsHide: true,
+    });
+    return `Visual Studio: ${instances.length} instance(s) found, companion installed (VSIXInstaller).`;
+  } catch (err) {
+    return `pi-webview: Visual Studio companion install failed: ${err instanceof Error ? err.message : String(err)}`;
+  }
 }
 
 // Path of the `piw` bin on the user's PATH (ex scripts/link-bin.mjs, removed):
@@ -300,6 +354,7 @@ export default function (pi: PiApi): void {
   // dist/, the vsix at package ROOT level (companion/…) → go up one level
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const vsixPath = join(moduleDir, "..", VSIX_REL);
+  const vsVsixPath = join(moduleDir, "..", VSVSIX_REL);
 
   const autoInstall = (process.env[AUTO_INSTALL_ENV] ?? "1").trim().toLowerCase();
   const enabled = !["0", "false", "off", "none"].includes(autoInstall);
@@ -318,23 +373,31 @@ export default function (pi: PiApi): void {
       const vsixVersion = readVsixVersion(vsixPath);
       if (installed !== null && vsixVersion !== undefined && installed === vsixVersion) {
         clearReloadSignal(); // already updated: no pending signal
-        return; // already installed and updated
+      } else {
+        await installCompanion("code", vsixPath);
+        // update (not fresh install) → signal the open IDE to reload
+        if (installed !== null && vsixVersion !== undefined) {
+          writeReloadSignal(vsixVersion);
+        }
+        pendingNotify =
+          installed === null
+            ? "pi-webview: companion installed in VS Code. Reload the window to activate the webview."
+            : `pi-webview: companion updated to ${vsixVersion}. Reload the window to activate the webview.`;
       }
-      await installCompanion("code", vsixPath);
-      // update (not fresh install) → signal the open IDE to reload
-      if (installed !== null && vsixVersion !== undefined) {
-        writeReloadSignal(vsixVersion);
-      }
-      pendingNotify =
-        installed === null
-          ? "pi-webview: companion installed in VS Code. Reload the window to activate the webview."
-          : `pi-webview: companion updated to ${vsixVersion}. Reload the window to activate the webview.`;
     } catch (err) {
       // code CLI missing (ENOENT) → no VS Code: silent skip; other
       // errors must be notified
       if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
         pendingNotify = `pi-webview: companion install failed: ${err instanceof Error ? err.message : String(err)}`;
       }
+    }
+    // ensure 2/2 — Visual Studio companion: only when VS is present on the
+    // machine (vswhere probe), vsix bundled in the package, Windows only.
+    const vsNote = await installVsCompanion(vsVsixPath);
+    if (vsNote) {
+      pendingNotify = pendingNotify
+        ? `${pendingNotify} ${vsNote}`
+        : vsNote;
     }
   };
 
@@ -522,10 +585,11 @@ export default function (pi: PiApi): void {
         case "install":
         case "reinstall": {
           await installCompanion("code", vsixPath);
-          notify(
-            "pi-webview: companion installed. Reload the VS Code window.",
-            "info",
-          );
+          let note = "pi-webview: VS Code companion installed. Reload the VS Code window.";
+          // Visual Studio companion too (best effort, Windows + vswhere only)
+          const vsNote = await installVsCompanion(vsVsixPath);
+          if (vsNote) note += " " + vsNote;
+          notify(note, "info");
           return;
         }
         case "uninstall": {
@@ -544,6 +608,26 @@ export default function (pi: PiApi): void {
           } catch (err) {
             notify(
               `pi-webview: companion uninstall failed: ${err instanceof Error ? err.message : String(err)}`,
+              "error",
+            );
+          }
+          // 1b) Visual Studio companion (Windows only): remove the package
+          // by its id via VSIXInstaller /uninstall (best effort)
+          try {
+            const instances = await visualStudioInstances();
+            if (instances.length > 0) {
+              const vsixInstaller = join(instances[0]!, "Common7", "IDE", "VSIXInstaller.exe");
+              if (existsSync(vsixInstaller)) {
+                await execFileAsync(vsixInstaller, ["/q", "/a", "/uninstall:PiWebview.Vs.4d433864-8ac9-420a-bc57-700940833fc6"], {
+                  timeout: 120_000,
+                  windowsHide: true,
+                });
+                notify("pi-webview: Visual Studio companion removed.", "info");
+              }
+            }
+          } catch (err) {
+            notify(
+              `pi-webview: Visual Studio companion uninstall failed: ${err instanceof Error ? err.message : String(err)}`,
               "error",
             );
           }

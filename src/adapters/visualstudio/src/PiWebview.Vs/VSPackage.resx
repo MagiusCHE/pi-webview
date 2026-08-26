@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <data name="110" xml:space="preserve">
+    <value>pi</value>
+  </data>
+  <data name="112" xml:space="preserve">
+    <value>WebView UI for the pi coding agent — companion for Visual Studio</value>
+  </data>
+</root>

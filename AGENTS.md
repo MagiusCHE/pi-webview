@@ -26,8 +26,9 @@ webview è la UI.
 - `pnpm test:watch` — test in watch
 - `pnpm smoke` — smoke test del bridge contro pi reale (no LLM)
 - `pnpm compile` — build UI + adapter VS Code (per F5)
-- `pnpm package:ide` — vsix del companion (→ `dist/pi-webview-ide.vsix`)
-- `pnpm package:addon` — assembly del package pi (vsix + estensione pi-webview lato pi)
+- `pnpm package:ide` — vsix del companion VS Code (→ `dist/pi-webview-ide.vsix`)
+- `pnpm package:vs` — build UI + vsix del companion Visual Studio (→ `dist/pi-webview-visualstudio.vsix`; su Linux richiede `node tools/setup-vs-wine.mjs` una tantum: prefix wine dedicato nel progetto + patch al VSSDK nel nuget cache)
+- `pnpm package:addon` — assembly del package pi (vsix VS Code + vsix VS + estensione pi-webview lato pi)
 - `pnpm release -- --version 0.1.1 [--publish] [--tag <dist-tag>]` — prepara (bump versioni in entrambi i package.json, rebuild vsix+bundle+UI, `npm pack` di verifica); con `--publish` esegue anche `npm publish --access public` e crea in automatico il tag git `v<version>` + la GitHub release (idempotente: skip se già esistenti). Senza `--publish` non pubblica mai.
 - `pnpm format` / `pnpm format:check` — prettier
 - `pnpm typecheck` — `tsc --noEmit`
@@ -60,10 +61,13 @@ webview è la UI.
 - `docs/plans/` + `docs/plans/done/` — piani (in corso / implementati)
 - `src/` — codice sorgente (committato): `ide/` (IDE bridge protocol),
   `bridge/` (standalone, con `pi-process.ts` condiviso), `web/` (UI),
-  `adapters/vscode/` (companion VS Code)
+  `adapters/vscode/` (companion VS Code), `adapters/visualstudio/`
+  (companion Visual Studio, C# — build su Linux via wine,
+  `tools/setup-vs-wine.mjs`)
 - `packages/pi-webview/` — **package pi** distribuito via `pi install`:
-  estensione pi-webview lato pi (auto-install/auto-update del companion VS Code,
-  confronto di versione col vsix incluso) + vsix companion incluso + **standalone**
+  estensione pi-webview lato pi (auto-install/auto-update dei companion
+  VS Code + Visual Studio, confronto di versione coi vsix inclusi) + vsix
+  companion inclusi + **standalone**
   (UI buildata `dist/web`, bridge `dist/bridge.js` e bin npm `piw` per aprire la
   UI nel browser da shell — `src/bridge/piw.ts`)
 - `tests/` — test unitari (`pnpm test`, `node --test tests/`)

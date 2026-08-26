@@ -1,0 +1,4 @@
+{
+  "channel": "ide",
+  "payload": { "id": "ide-1", "ok": false, "error": "richiesta IDE non supportata: openFile" }
+}

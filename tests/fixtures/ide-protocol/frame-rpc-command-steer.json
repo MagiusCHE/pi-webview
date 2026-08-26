@@ -1,0 +1,4 @@
+{
+  "channel": "rpc",
+  "payload": { "type": "steer", "message": "continua così" }
+}

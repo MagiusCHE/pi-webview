@@ -109,18 +109,21 @@ pnpm dev          # then open http://localhost:5173/?demo=1&theme=dark&lang=en
 | `pnpm typecheck`                    | `tsc --noEmit`                                           |
 | `pnpm compile`                      | Build UI + VS Code adapter (for F5)                      |
 | `pnpm package:ide`                  | Build the VS Code companion → `dist/pi-webview-ide.vsix` |
-| `pnpm package:addon`                | Assemble the pi package (`packages/pi-webview/`)         |
+| `pnpm package:vs`                   | Build the Visual Studio companion → `dist/pi-webview-visualstudio.vsix` (Linux: requires `node tools/setup-vs-wine.mjs` once — project-local wine prefix + VSSDK cache patches) |
+| `pnpm package:addon`                | Assemble the pi package (`packages/pi-webview/`, both vsix included)         |
 | `pnpm release -- --version 0.1.1 [--publish] [--tag <dist-tag>]` | Release prep: bump versione in entrambi i package.json, rebuild vsix+bundle+UI, `npm pack` di verifica. Con `--publish` esegue anche `npm publish --access public` e crea automaticamente il tag git `v<version>` + la GitHub release (idempotente: skip se tag/release già esistenti). Senza `--publish` non pubblica mai. |
 
-## IDE integration (VS Code, first)
+## IDE integration (VS Code first, Visual Studio too)
 
 The IDE integration is distributed as a **pi package** (installed through pi's own
-extension system, not the VS Code marketplace). The companion extension is
-ensured **at every pi start**: the pi-side extension installs/updates it from the
-bundled VSIX if missing or outdated (idempotent, silent when `code` is not on
-`PATH`, disable with `PI_WEBVIEW_AUTO_INSTALL=0`), and `piw` repeats the same
-check at its startup. The same pi-side extension creates the `piw` link on the
-PATH (the package has no install scripts).
+extension system, not the VS Code marketplace). The companion extensions are
+ensured **at every pi start**: the pi-side extension installs/updates the **VS
+Code companion** from the bundled VSIX if missing or outdated (idempotent,
+silent when `code` is not on `PATH`, disable with `PI_WEBVIEW_AUTO_INSTALL=0`),
+and the **Visual Studio companion** (Windows only) via vswhere + VSIXInstaller
+when VS is present; `piw` repeats the VS Code check at its startup. The same
+pi-side extension creates the `piw` link on the PATH (the package has no install
+scripts).
 
 > For user-facing instructions (install, `/pi-webview` subcommands, uninstall)
 > see the [npm package page](https://www.npmjs.com/package/@magiusche/pi-webview).
@@ -129,9 +132,12 @@ PATH (the package has no install scripts).
 > `pnpm package:addon` is **required** before `pi install` from a fresh clone,
 > and after changing the companion or the pi-side extension code.
 
-The companion creates the webview, spawns `pi --mode rpc` and bridges the UI via
-`postMessage` (same UI and protocol as standalone; editor selection flows
-directly to the webview).
+The companions create the webview, spawn `pi --mode rpc` and bridge the UI via
+`postMessage` (VS Code) or `window.chrome.webview` (Visual Studio WebView2, same
+UI and protocol as standalone; editor selection flows directly to the webview).
+The Visual Studio adapter is a native C# VSIX (`src/adapters/visualstudio/`, see
+`docs/plans/0006-visual-studio-adapter.md`); on Linux it builds through a
+project-local wine toolchain (`tools/setup-vs-wine.mjs`).
 
 To develop the companion directly, use **F5** (`launch.json` runs the Extension
 Development Host after `pnpm compile`).

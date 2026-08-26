@@ -1,0 +1,6 @@
+// custom pkgdef applied AFTER the generated one (the "z…" name sorts after
+// "PiWebview.Vs.pkgdef"): readable name of the entry in View → Other Windows.
+// The generated one uses the full type name ("PiWebview.Vs.PiToolWindow").
+
+[$RootKey$\ToolWindows\{04a92261-434b-415f-8ff4-720139c56775}]
+"Name"="pi"

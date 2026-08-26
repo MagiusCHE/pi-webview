@@ -53,6 +53,54 @@ export function createWsTransport(url: string): Transport {
   };
 }
 
+// --- WebView2 (Visual Studio adapter, concept 0005) ---------------------------
+// window.chrome.webview: native WebView2 bridge. postMessage accepts objects
+// (serialized as JSON to the host); PostWebMessageAsJson delivers the
+// deserialized object in event.data (some hosts may still provide a string).
+
+interface WebView2Host {
+  postMessage(message: unknown): void;
+  addEventListener(type: "message", listener: (e: MessageEvent) => void): void;
+  removeEventListener(type: "message", listener: (e: MessageEvent) => void): void;
+}
+
+export function createWebView2Transport(): Transport | null {
+  const win = window as unknown as { chrome?: { webview?: WebView2Host } };
+  const webview = win.chrome?.webview;
+  if (!webview) return null;
+  const frameCbs: Array<(f: Frame) => void> = [];
+
+  const onMessage = (e: MessageEvent) => {
+    let frame: Frame;
+    try {
+      frame =
+        typeof e.data === "string"
+          ? (JSON.parse(e.data) as Frame)
+          : (e.data as Frame);
+      if (!frame || typeof frame !== "object") return;
+    } catch {
+      return;
+    }
+    frameCbs.forEach((cb) => cb(frame));
+  };
+  webview.addEventListener("message", onMessage);
+
+  return {
+    send(frame) {
+      webview.postMessage(frame);
+    },
+    onFrame(cb) {
+      frameCbs.push(cb);
+    },
+    onStatus(cb) {
+      cb({ state: "open", detail: "webview2 (Visual Studio)" });
+    },
+    close() {
+      webview.removeEventListener("message", onMessage);
+    },
+  };
+}
+
 // --- VS Code webview (postMessage) -------------------------------------------
 
 interface VsCodeApi {

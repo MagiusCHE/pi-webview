@@ -76,13 +76,17 @@ The bridge shuts down by itself after **1 minute with no open session** (no conn
 pi install npm:@magiusche/pi-webview
 ```
 
-> **⚠️ The VS Code companion is checked at every pi start** (the extension
-> installs/updates it from the bundled VSIX if missing or outdated — idempotent,
-> silent when `code` is not on `PATH`; disable with `PI_WEBVIEW_AUTO_INSTALL=0`).
-> `piw` repeats the same check at its startup. You can also do it explicitly with
-> **`/pi-webview install`** from a pi terminal, or manually
-> (`code --install-extension companion/pi-webview-ide.vsix` from the package dir),
-> then reload the window.
+> **⚠️ The companions are checked at every pi start** (the extension
+> installs/updates them from the bundled VSIXes if missing or outdated —
+> idempotent, silent when the target IDE is not installed):
+> - **VS Code** companion: checked always (silent when `code` is not on `PATH`);
+> - **Visual Studio** companion (Windows only): detected via `vswhere.exe`,
+>   installed with `VSIXInstaller.exe /quiet` when VS is present;
+> disable all auto-install with `PI_WEBVIEW_AUTO_INSTALL=0`.
+> You can also install explicitly with **`/pi-webview install`** from a pi
+> terminal, or manually (`code --install-extension companion/pi-webview-ide.vsix`
+> / `VSIXInstaller /q companion/pi-webview-visualstudio.vsix` from the package
+> dir), then reload the window / restart Visual Studio.
 
 Try it without installing permanently:
 
@@ -114,9 +118,9 @@ If `pi remove` fails, or you already removed the package manually, do it by hand
 
 ## How it works
 
-Two entry points, both ensuring the VS Code companion:
+Two entry points, both ensuring the IDE companions (VS Code + Visual Studio):
 
-- **`pi` start (the extension)**: (1) checks the **VS Code companion** against the bundled VSIX (installs/updates with `--force` if missing or outdated; idempotent; silent when `code` is not on `PATH`; disable with `PI_WEBVIEW_AUTO_INSTALL=0`) and (2) re-creates the **`piw` link** on your `PATH` if missing (the package has no install scripts — this is the only way the link is created; it never touches user files, only its own link).
+- **`pi` start (the extension)**: (1) checks the **VS Code companion** against the bundled VSIX (installs/updates with `--force` if missing or outdated; idempotent; silent when `code` is not on `PATH`; disable with `PI_WEBVIEW_AUTO_INSTALL=0`), (2) checks the **Visual Studio companion** on Windows (vswhere → VSIXInstaller, silent when no VS or no bundled vsix) and (3) re-creates the **`piw` link** on your `PATH` if missing (the package has no install scripts — this is the only way the link is created; it never touches user files, only its own link).
 - **`piw` start (standalone bridge)**: repeats the **VS Code companion** check (same logic, same silence when `code` is missing).
 
 The companion can also be installed explicitly:
@@ -130,12 +134,13 @@ The companion can also be installed explicitly:
 The companion spawns `pi --mode rpc` and bridges the UI via `postMessage` (same UI and protocol as standalone; editor selection flows directly to the webview).
 
 - **Standalone mode**: a Node bridge spawns `pi --mode rpc` and exposes it over a local WebSocket; open the UI in your browser.
-- **IDE mode**: the same UI runs inside a VS Code webview via `postMessage` (transport-agnostic).
+- **IDE mode**: the same UI runs inside a VS Code webview via `postMessage` or inside a Visual Studio WebView2 tool window "pi" (virtual host `piw.local`, `window.chrome.webview`) — transport-agnostic.
 
 ## Requirements
 
 - Node.js >= 22.6
-- VS Code ^1.90 (for the IDE companion)
+- VS Code ^1.90 (for the VS Code companion)
+- Visual Studio 2022/2026 (for the VS companion, Windows only — the vsix is included in the package)
 - pi installed on the same machine
 
 ## Features

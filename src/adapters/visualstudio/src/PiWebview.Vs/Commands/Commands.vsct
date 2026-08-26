@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable">
+
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+
+  <Symbols>
+    <GuidSymbol name="guidPiWebviewPkg" value="{7f2e5c1a-3b6d-4e8f-9a2c-1d4e5f6a7b8c}" />
+    <GuidSymbol name="guidPiWebviewCmdSet" value="{a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d}">
+      <IDSymbol name="PiMenuGroup" value="0x1020" />
+      <IDSymbol name="cmdidAttachSelection" value="0x0100" />
+      <IDSymbol name="cmdidFocus" value="0x0101" />
+    </GuidSymbol>
+  </Symbols>
+
+  <Commands package="guidPiWebviewPkg">
+    <Groups>
+      <Group guid="guidPiWebviewCmdSet" id="PiMenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS" />
+      </Group>
+    </Groups>
+
+    <Buttons>
+      <Button guid="guidPiWebviewCmdSet" id="cmdidAttachSelection" priority="0x0100" type="Button">
+        <Parent guid="guidPiWebviewCmdSet" id="PiMenuGroup" />
+        <Strings>
+          <ButtonText>pi: Attach Selection</ButtonText>
+          <CommandName>piWebview.AttachSelection</CommandName>
+        </Strings>
+      </Button>
+      <Button guid="guidPiWebviewCmdSet" id="cmdidFocus" priority="0x0101" type="Button">
+        <Parent guid="guidPiWebviewCmdSet" id="PiMenuGroup" />
+        <Strings>
+          <ButtonText>pi: Focus</ButtonText>
+          <CommandName>piWebview.Focus</CommandName>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+
+</CommandTable>

@@ -19,6 +19,7 @@ import { rpc } from "../ide/protocol.ts";
 import {
   createWsTransport,
   createVsCodeTransport,
+  createWebView2Transport,
   type Transport,
 } from "../ide/transport.ts";
 import {
@@ -612,11 +613,11 @@ function handleIdeResponse(res: IdeResponse): void {
 
 // --- settings (gear) → modal dialog -----------------------------------------
 
-// version row: the source depends on the runtime — in the VS Code webview it
-// is the addon, standalone it is the piw package (both answer getVersion)
+// version row: the source depends on the runtime — in the IDE webview it is
+// the addon, standalone it is the piw package (both answer getVersion)
 function refreshVersionInfo(): void {
   els.settingsVersionLabel.textContent =
-    runtime.mode === "vscode" ? t("settingsVersionAddon") : t("settingsVersionPiw");
+    runtime.isIDE ? t("settingsVersionAddon") : t("settingsVersionPiw");
   void ideRequest({ type: "getVersion" }).then((res) => {
     const v = res?.ok ? (res.data as { version?: string | null } | undefined)?.version : null;
     els.settingsVersion.textContent = v ?? "–";
@@ -1143,7 +1144,7 @@ function populateSessionMenu(): void {
   allBtn.classList.toggle("active", filterMode === "all");
   // standalone only: folder icon to change workspace (in IDE webviews
   // the workspace is decided by the host)
-  if (!runtime.isVsCode) {
+  if (!runtime.isVsCode && !runtime.isIDE) {
     const browseBtn = document.createElement("button");
     browseBtn.type = "button";
     browseBtn.className = "filter-btn folder-browse";
@@ -1259,7 +1260,7 @@ function currentSessionLabel(): string {
 
 // the browser title shows the session name, only outside the IDE
 function updateDocumentTitle(): void {
-  if (runtime.isVsCode) return; // in the IDE the title is managed by the host
+  if (runtime.isVsCode || runtime.isIDE) return; // in the IDE the title is managed by the host
   const label = currentSessionLabel();
   document.title =
     label && label !== t("noSessions") ? `${label} — pi-webview` : "pi-webview";
@@ -1645,9 +1646,9 @@ async function changeWorkspace(): Promise<void> {
 
 // saves the current session in the companion (VS Code globalState): on
 // window reloads pi is restarted with --session <path> and resumes the open
-// conversation (only in VS Code webview mode)
+// conversation (in the IDE webview modes)
 function persistSessionPath(): void {
-  if (!runtime.isVsCode || !currentSessionPath) return;
+  if (!runtime.isIDE || !currentSessionPath) return;
   void ideRequest({ type: "storeSession", path: currentSessionPath });
 }
 
@@ -5726,7 +5727,7 @@ els.attachBtn.addEventListener("click", () => {
 // new chat: in the IDE the companion handles it (new webview); standalone
 // opens a NEW BROWSER TAB with a new session (plan 0005)
 els.newChat.addEventListener("click", () => {
-  if (runtime.isVsCode) {
+  if (runtime.isIDE) {
     void ideRequest({ type: "openNewChat" });
   } else {
     window.open(location.origin + "/?new=1", "_blank");
@@ -6042,8 +6043,22 @@ async function boot(): Promise<void> {
   if (runtime.isVsCode) {
     const vscode = createVsCodeTransport();
     if (vscode) {
-      setupTransport(vscode);
+      // onStatus() is synchronous for IDE transports; assign first so the
+      // initial config/session requests are not sent while transport is null.
       transport = vscode;
+      setupTransport(vscode);
+      els.connectPanel.hidden = true;
+      return;
+    }
+  }
+  if (runtime.mode === "ide") {
+    // WebView2 (adapter Visual Studio, concept 0005)
+    const wv2 = createWebView2Transport();
+    if (wv2) {
+      // onStatus() is synchronous for IDE transports; assign first so the
+      // initial config/session requests are not sent while transport is null.
+      transport = wv2;
+      setupTransport(wv2);
       els.connectPanel.hidden = true;
       return;
     }

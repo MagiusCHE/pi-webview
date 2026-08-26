@@ -1,0 +1,4 @@
+{
+  "channel": "ide",
+  "payload": { "type": "selection_cleared", "reason": "empty-selection" }
+}

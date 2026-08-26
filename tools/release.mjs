@@ -68,8 +68,16 @@ if (version) {
 }
 
 // --- 2) rebuild (companion vsix + pi bundle) ---
-console.log("\n→ build companion (vsix)…");
+console.log("\n→ build companion VS Code (vsix)…");
 execSync("node tools/build-ide-vsix.mjs", { cwd: root, stdio: "inherit" });
+// Visual Studio companion (best effort: skipped on machines without the wine
+// toolchain — build-addon.mjs warns and packages without it)
+try {
+  console.log("\n→ build companion Visual Studio (vsix)…");
+  execSync("node tools/build-vs-vsix.mjs", { cwd: root, stdio: "inherit" });
+} catch {
+  console.warn("VS companion build skipped (wine toolchain missing? see tools/setup-vs-wine.mjs)");
+}
 console.log("→ build pacchetto pi (bundle + copia vsix)…");
 execSync("node tools/build-addon.mjs", { cwd: root, stdio: "inherit" });
 

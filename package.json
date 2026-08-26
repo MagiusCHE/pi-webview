@@ -85,8 +85,9 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "package:ide": "node tools/build-ide-vsix.mjs",
-    "package:addon": "pnpm package:ide && node tools/build-addon.mjs",
-    "release": "node tools/release.mjs"
+    "package:addon": "pnpm package:ide && pnpm package:vs && node tools/build-addon.mjs",
+    "release": "node tools/release.mjs",
+    "package:vs": "pnpm build && node tools/build-vs-vsix.mjs"
   },
   "dependencies": {
     "dompurify": "^3.4.14",

@@ -1,0 +1,4 @@
+{
+  "channel": "rpc",
+  "payload": { "type": "prompt", "message": "ciao", "id": "rpc-1" }
+}

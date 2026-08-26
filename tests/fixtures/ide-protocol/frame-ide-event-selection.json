@@ -1,0 +1,14 @@
+{
+  "channel": "ide",
+  "payload": {
+    "type": "selection_changed",
+    "filePath": "C:\\proj\\src\\main.cs",
+    "workspaceFolder": "C:\\proj",
+    "ranges": [
+      {
+        "text": "var x = 1;",
+        "selection": { "start": { "line": 10, "character": 4 }, "end": { "line": 10, "character": 14 } }
+      }
+    ]
+  }
+}

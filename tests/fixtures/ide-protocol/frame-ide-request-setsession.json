@@ -1,0 +1,4 @@
+{
+  "channel": "ide",
+  "payload": { "type": "storeSession", "path": "C:\\Users\\utente\\.pi\\agent\\sessions\\--C--proj--\\sess.jsonl", "id": "ide-4" }
+}

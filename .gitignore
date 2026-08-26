@@ -43,3 +43,11 @@ tmp/
 
 # Pi local state
 .pi/todos/
+
+# .NET (Visual Studio adapter, concept 0005)
+**/bin/
+**/.vs/
+**/obj/
+
+# Wine prefix for the VS adapter build (project-local, never committed)
+src/adapters/visualstudio/.wine/

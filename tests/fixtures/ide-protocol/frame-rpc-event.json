@@ -1,0 +1,4 @@
+{
+  "channel": "rpc",
+  "payload": { "type": "message_update", "contentIndex": 0, "delta": "hello" }
+}

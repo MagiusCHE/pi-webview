@@ -243,15 +243,19 @@ export function forkSession(
   return { path: newPath };
 }
 
-function decodeProjectFolder(name: string): string | null {
+export function decodeProjectFolder(name: string): string | null {
   if (!name.startsWith("--") || !name.endsWith("--")) return null;
   const inner = name.slice(2, -2);
   if (!inner) return null;
   return "/" + inner.replace(/-/g, "/");
 }
 
-function encodeProjectFolder(path: string): string {
-  const inner = path.replace(/^\//, "").replace(/\//g, "-");
+// The folder name encodes the workspace with - as separator (same convention
+// as pi): on Windows : and \ become - too (--C--proj--, like pi's real
+// folders); on Linux it is the same as replace('/', '-'). The round-trip is
+// not faithful (pi's limit): matching uses the exact target.
+export function encodeProjectFolder(path: string): string {
+  const inner = path.replace(/[/\\:]/g, "-").replace(/^-+/, "");
   return `--${inner}--`;
 }
 

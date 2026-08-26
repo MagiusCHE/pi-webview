@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PiWebview.Vs.Core/PiWebview.Vs.Core.csproj" />
+    <Project Path="src/PiWebview.Vs/PiWebview.Vs.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PiWebview.Vs.Core.Tests/PiWebview.Vs.Core.Tests.csproj" />
+  </Folder>
+</Solution>

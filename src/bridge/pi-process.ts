@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import type { ChildProcessByStdio } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { createJsonlParser, writeJsonl } from "./jsonl.ts";
+import { resolveDirectNode } from "./spawn.ts";
 
 export interface PiProcessOptions {
   env?: NodeJS.ProcessEnv;
@@ -30,7 +31,9 @@ export class PiProcess {
   private sending = false;
   private queue: unknown[] = [];
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null;
-  private spawnError = false; // spawn fallito: il successivo evento 'exit' va ignorato
+  private spawnError = false; // spawn failed: the following 'exit' event must be ignored
+  private bootWatchdog: ReturnType<typeof setTimeout> | null = null;
+  private booted = false; // first line from pi → boot ok, watchdog disarmed
   private command: string;
   private cb: PiProcessCallbacks;
   private opts: PiProcessOptions;
@@ -56,22 +59,40 @@ export class PiProcess {
   start(): void {
     this.spawnError = false;
     const args = ["--mode", "rpc", ...(this.opts.args ?? [])];
-    this.cb.log?.(`spawn: ${this.command} ${args.join(" ")}`);
-    // on Windows pi is a .cmd shim: run it through cmd /c
-    // (Node quotes arguments safely when shell is false)
-    const child =
-      process.platform === "win32"
-        ? spawn("cmd", ["/c", this.command, ...args], {
-            stdio: ["pipe", "pipe", "pipe"],
-            ...(this.opts.env ? { env: this.opts.env } : {}),
-            ...(this.opts.cwd ? { cwd: this.opts.cwd } : {}),
-          })
-        : spawn(this.command, args, {
-            stdio: ["pipe", "pipe", "pipe"],
-            ...(this.opts.env ? { env: this.opts.env } : {}),
-            ...(this.opts.cwd ? { cwd: this.opts.cwd } : {}),
-          });
+    const childOpts = {
+      stdio: ["pipe", "pipe", "pipe"] as ["pipe", "pipe", "pipe"],
+      ...(this.opts.env ? { env: this.opts.env } : {}),
+      ...(this.opts.cwd ? { cwd: this.opts.cwd } : {}),
+    };
+    // Windows: spawning the .cmd shim through `cmd /c` with piped stdio
+    // kills pi's RPC stdin (boot ok, no requests ever read, verified 0.84.3)
+    // → spawn node + cli.js directly (pi's own RpcClient pattern).
+    const direct = resolveDirectNode(this.command);
+    const child = direct
+      ? spawn(direct.node, [direct.script, ...args], childOpts)
+      : process.platform === "win32"
+        ? spawn("cmd", ["/c", this.command, ...args], childOpts)
+        : spawn(this.command, args, childOpts);
+    this.cb.log?.(`spawn: ${direct ? `${direct.node} ${direct.script}` : this.command} ${args.join(" ")}`);
     this.child = child;
+    this.booted = false;
+    // Boot watchdog: pi frozen (no output for 45s, e.g. stalled on missing
+    // networks at startup) → kill the tree; the restart follows the normal
+    // 'exit' flow (backoff 1s, cap 5) and each attempt gets a new watchdog.
+    this.bootWatchdog = setTimeout(() => {
+      if (this.stopping || this.booted || !this.child) return;
+      this.cb.log?.(`pi unresponsive: no output in the first 45s of boot — kill + restart`);
+      const pid = this.child.pid;
+      if (pid !== undefined) {
+        if (process.platform === "win32") {
+          // kill the whole tree (cmd → node → pi)
+          const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+          killer.on("error", () => {});
+        } else {
+          this.child.kill();
+        }
+      }
+    }, 45_000);
 
     child.stdin.on("error", (err) => {
       if (!this.stopping) this.cb.log?.(`stdin pi: ${err.message}`);
@@ -79,6 +100,14 @@ export class PiProcess {
 
     const parser = createJsonlParser((line) => {
       let payload: unknown;
+      if (!this.booted) {
+        // any line = pi alive: boot ok, watchdog disarmed
+        this.booted = true;
+        if (this.bootWatchdog) {
+          clearTimeout(this.bootWatchdog);
+          this.bootWatchdog = null;
+        }
+      }
       try {
         payload = JSON.parse(line);
       } catch {
@@ -141,6 +170,10 @@ export class PiProcess {
         clearTimeout(this.stabilityTimer);
         this.stabilityTimer = null;
       }
+      if (this.bootWatchdog) {
+        clearTimeout(this.bootWatchdog);
+        this.bootWatchdog = null;
+      }
       this.child = null;
       this.cb.log?.(`spawn pi fallito: ${err.message}`);
       this.cb.onExit?.(null, null, err.message);
@@ -156,6 +189,10 @@ export class PiProcess {
       if (this.stabilityTimer) {
         clearTimeout(this.stabilityTimer);
         this.stabilityTimer = null;
+      }
+      if (this.bootWatchdog) {
+        clearTimeout(this.bootWatchdog);
+        this.bootWatchdog = null;
       }
       this.child = null;
       if (this.stopping) return;
@@ -194,7 +231,19 @@ export class PiProcess {
 
   dispose(): void {
     this.stopping = true;
-    this.child?.kill();
+    if (this.bootWatchdog) {
+      clearTimeout(this.bootWatchdog);
+      this.bootWatchdog = null;
+    }
+    if (this.child) {
+      const pid = this.child.pid;
+      if (process.platform === "win32" && pid !== undefined) {
+        const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+        killer.on("error", () => {});
+      } else {
+        this.child.kill();
+      }
+    }
     this.child = null;
   }
 }

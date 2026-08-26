@@ -1,9 +1,9 @@
 // Resolution of the `pi` binary cross-platform (concept 0002 D6):
 // on Windows the npm shim is `pi.cmd`, elsewhere `pi`.
 
-import { accessSync, constants, readdirSync } from "node:fs";
+import { accessSync, constants, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -39,6 +39,82 @@ export interface PiResolution {
   command: string;
   found: boolean;
   path: string | null;
+}
+
+export interface DirectNodeInvocation {
+  node: string;
+  script: string;
+}
+
+/**
+ * Windows: `pi` is a .cmd npm shim. Running it through `cmd /c` with piped
+ * stdio breaks pi's RPC stdin (boot completes but no request is ever read;
+ * verified on pi 0.84.3). Resolve `node` + the real cli.js entry so the
+ * caller can spawn pi directly (the pattern pi's own RpcClient uses).
+ * Returns null on non-Windows or when resolution fails (caller falls back
+ * to the previous `cmd /c` behavior).
+ */
+export function resolveDirectNode(
+  piPath: string | null,
+  platform: NodeJS.Platform = process.platform,
+): DirectNodeInvocation | null {
+  if (platform !== "win32" || !piPath) return null;
+  // Current process is real node (standalone bridge/piw); in the VS Code
+  // extension host process.execPath is Code.exe → fall back to PATH/dirs.
+  const exe = process.execPath.toLowerCase();
+  const isNode =
+    /node(\.exe)?$/.test(exe) && !/(electron|code|code-insiders)(\.exe)?$/.test(exe);
+  const node = isNode
+    ? process.execPath
+    : (findOnPath("node.exe", platform) ?? fallbackNodePath());
+  if (!node) return null;
+  const script = parseShimScript(piPath);
+  return script ? { node, script } : null;
+}
+
+function fallbackNodePath(): string | null {
+  const pf = process.env.ProgramFiles;
+  const pfX86 = process.env["ProgramFiles(x86)"];
+  const candidates = [
+    pf ? join(pf, "nodejs", "node.exe") : null,
+    pfX86 ? join(pfX86, "nodejs", "node.exe") : null,
+  ].filter((p): p is string => p !== null);
+  for (const p of candidates) {
+    try {
+      accessSync(p, constants.X_OK);
+      return p;
+    } catch {
+      // next candidate
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract the real JS entry from the npm .cmd shim
+ * (`…\node_modules\@earendil-works\pi-coding-agent\dist\bundle\cli.js`).
+ */
+function parseShimScript(shim: string): string | null {
+  let text: string;
+  try {
+    text = readFileSync(shim, "utf8");
+  } catch {
+    return null;
+  }
+  const marker = "node_modules\\";
+  const i = text.indexOf(marker);
+  if (i < 0) return null;
+  let end = i + marker.length;
+  while (end < text.length && !/["'%\s]/.test(text[end] ?? "")) end++;
+  const rel = text.slice(i + marker.length, end).replace(/\//g, "\\");
+  if (!rel.toLowerCase().endsWith(".js") || rel.includes("..")) return null;
+  const script = join(dirname(shim), "node_modules", rel);
+  try {
+    accessSync(script, constants.X_OK);
+    return script;
+  } catch {
+    return null;
+  }
 }
 
 export function resolvePi(platform: NodeJS.Platform = process.platform): PiResolution {

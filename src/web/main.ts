@@ -1854,14 +1854,21 @@ function finishThinking(): void {
 // that gap shows NO output in the chat. A 3s timer arms at every model send
 // (user prompt, turn start, last tool of a batch finished, message ended,
 // provider retry re-issued) and — only when the response is late — shows
-// "Attesa risposta…" with a spinner and the seconds (starting from 3). The
-// first provider chunk (message_start) kills it.
+// "Attesa risposta…" with a spinner and the seconds (starting from 3).
+// The card is BUILT with the same structure as the thinking block (head +
+// collapsible content) so that, if the response turns out to be a THOUGHT,
+// it is promoted in place to the thinking block (label swapped, the timer
+// CONTINUES — not restarted). Any other content (text, tool call, empty
+// message) removes it.
 // Tool executions are NOT model waits (the cards already show them): when a
 // batch runs in parallel the wait arms only at the LAST tool_execution_end.
 
 const WAITING_DELAY_MS = 3000;
 let waitingWrapper: HTMLElement | null = null;
 let waitingTimerEl: HTMLElement | null = null;
+let waitingLabelEl: HTMLElement | null = null;
+let waitingSpinnerEl: HTMLElement | null = null;
+let waitingContentEl: HTMLElement | null = null;
 let waitingStartedAt = 0;
 let waitingClock: ReturnType<typeof setInterval> | null = null;
 let waitingTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1888,6 +1895,18 @@ function showWaitingBlock(): void {
   const wrapper = addMsg("status");
   wrapper.className = "msg status waiting-msg";
   waitingWrapper = wrapper;
+  // the waiting card counts as a THINKING block for the inter-block gap: it
+  // sticks (3px) to a previous thought/tool message, 15px from everything
+  // else. When promoted to a real thinking block the card moves inside the
+  // assistant bubble and applyToolChain re-evaluates the gap with the same
+  // rule (see promoteWaitingToThinking).
+  const prev = wrapper.previousElementSibling;
+  if (prev?.classList.contains("msg") && msgEndsWithThinkTool(prev)) {
+    setToolChain(wrapper);
+  }
+  // SAME structure as the thinking block (card + head + collapsible content):
+  // when the response turns out to be a thought, the card is PROMOTED in
+  // place (label swapped, timer continues) instead of being replaced
   const card = document.createElement("div");
   card.className = "thinking-card";
   const head = document.createElement("div");
@@ -1895,20 +1914,83 @@ function showWaitingBlock(): void {
   const label = document.createElement("span");
   label.className = "thinking-label";
   label.textContent = t("waitingResponse");
+  waitingLabelEl = label;
   const spinner = document.createElement("span");
   spinner.className = "spinner";
+  waitingSpinnerEl = spinner;
   waitingTimerEl = document.createElement("span");
   waitingTimerEl.className = "thinking-timer";
   // the wait is already 3s when it appears: the seconds start from there
   waitingTimerEl.textContent = `${Math.floor(WAITING_DELAY_MS / 1000)}s`;
   head.append(label, spinner, waitingTimerEl);
   card.appendChild(head);
+  const content = document.createElement("div");
+  content.className = "thinking-content";
+  content.hidden = true; // collapsed by default (same as the thought)
+  waitingContentEl = content;
+  // local capture: each block toggles its OWN content (same as the thought)
+  head.addEventListener("click", () => {
+    content.hidden = !content.hidden;
+  });
+  card.appendChild(content);
   wrapper.appendChild(card);
   waitingClock = setInterval(() => {
     if (!waitingTimerEl) return;
     const secs = Math.floor((performance.now() - waitingStartedAt) / 1000);
     waitingTimerEl.textContent = `${secs}s`;
   }, 500);
+  scrollToBottom();
+}
+
+// the model answered with a THOUGHT while the waiting card was visible: the
+// card is promoted to the thinking block — label → "Pensiero", same spinner,
+// the timer CONTINUES from the waiting start (never restarted) — and moved
+// inside the assistant bubble thinking slot (a real thinking block lives
+// there, before the text). The empty status wrapper is removed.
+function promoteWaitingToThinking(): void {
+  if (!waitingWrapper) return;
+  const wrapper = waitingWrapper;
+  const card = wrapper.querySelector<HTMLElement>(".thinking-card");
+  if (!card) {
+    disarmWaitingResponse();
+    return;
+  }
+  // stop the waiting clock: the thinking timer takes over from the SAME start
+  if (waitingClock) {
+    clearInterval(waitingClock);
+    waitingClock = null;
+  }
+  if (waitingTimeout) {
+    clearTimeout(waitingTimeout);
+    waitingTimeout = null;
+  }
+  if (waitingLabelEl) waitingLabelEl.textContent = t("thought");
+  // adopt the waiting card as the thinking block (same DOM, no flicker)
+  thinkingEl = card;
+  thinkingSpinnerEl = waitingSpinnerEl;
+  thinkingTimerEl = waitingTimerEl;
+  thinkingContentEl = waitingContentEl;
+  thinkingStartedAt = waitingStartedAt;
+  if (thinkingTimer) clearInterval(thinkingTimer);
+  thinkingTimer = setInterval(() => {
+    if (!thinkingTimerEl) return;
+    const secs = Math.round((performance.now() - thinkingStartedAt) / 1000);
+    thinkingTimerEl.textContent = `${secs}s`;
+  }, 500);
+  // move the card into the bubble thinking slot (before the streaming text);
+  // defensive: without a bubble yet, keep it in the thread at the same spot
+  if (thinkingSlot) {
+    thinkingSlot.appendChild(card);
+  } else {
+    wrapper.before(card);
+  }
+  wrapper.remove();
+  waitingWrapper = null;
+  waitingTimerEl = null;
+  waitingSpinnerEl = null;
+  waitingLabelEl = null;
+  waitingContentEl = null;
+  applyToolChain();
   scrollToBottom();
 }
 
@@ -1924,8 +2006,11 @@ function disarmWaitingResponse(): void {
   if (waitingWrapper) {
     waitingWrapper.remove();
     waitingWrapper = null;
-    waitingTimerEl = null;
   }
+  waitingTimerEl = null;
+  waitingSpinnerEl = null;
+  waitingLabelEl = null;
+  waitingContentEl = null;
 }
 
 // --- footer slots filled by the pi EXTENSIONS (ctx.ui.setStatus) -----------
@@ -3290,8 +3375,9 @@ function renderRpcEvent(evt: RpcEvent): void {
   switch (action.kind) {
     case "stream_start":
       // NOTE: message_start arrives as soon as the provider stream opens, NOT
-      // at the first token: the provider answered — the wait is over
-      disarmWaitingResponse();
+      // at the first token. The waiting card STAYS: the first real content
+      // decides — a thinking promotes it (timer continues), anything else
+      // (text/tool) removes it.
       openAssistantBubble();
       break;
     case "text_delta":
@@ -3301,8 +3387,11 @@ function renderRpcEvent(evt: RpcEvent): void {
       scrollToBottom();
       break;
     case "thinking_delta":
-      disarmWaitingResponse();
-      ensureThinkingLoader();
+      // a thought follows the waiting card: PROMOTE it in place (label
+      // swapped, timer continues); without a waiting card a fresh thinking
+      // block is created
+      if (waitingWrapper) promoteWaitingToThinking();
+      else ensureThinkingLoader();
       thinkingAccum += action.delta;
       if (thinkingContentEl) thinkingContentEl.textContent = thinkingAccum;
       scrollToBottom();
@@ -3420,6 +3509,9 @@ function renderRpcEvent(evt: RpcEvent): void {
       break;
     case "message_end":
       finalizeMessage(action.message);
+      // a message that produced NO content (empty/error) left the waiting
+      // card hanging: remove it (if it was promoted, the wrapper is gone)
+      disarmWaitingResponse();
       // if the agent continues (another model call, a follow-up) the request
       // is already in flight: arm the wait, the next message_start kills it
       armWaitingResponse();

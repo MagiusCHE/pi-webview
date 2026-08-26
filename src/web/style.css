@@ -845,9 +845,11 @@ header {
   }
 }
 
-/* --- "Waiting for response" indicator: a thinking-card style row in the
-       chat (label + spinner + seconds) shown only when a model response is
-       late (delay > 3s), removed at the first provider chunk --- */
+/* --- "Waiting for response" indicator: the SAME card structure as the
+       thinking block (head + spinner + timer + collapsible content). Shown
+       only when a model response is late (delay > 3s); when the first
+       content is a THOUGHT the card is promoted to the thinking block (label
+       swapped, timer continues), any other content removes it. --- */
 
 /* --- tool cards with uniform copy --- */
 .tool-card {

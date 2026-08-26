@@ -1717,6 +1717,11 @@ function scrollToBottom(force = false): void {
 }
 
 function openAssistantBubble(): void {
+  // a SECOND stream_start for the same message (e.g. provider retry that
+  // re-issues message_start without a message_end in between): REUSE the
+  // live bubble — never create a second one and never reset the thinking
+  // state (the promoted waiting card must stay the only thinking block)
+  if (currentMsg) return;
   currentMsg = addMsg("assistant");
   // the thinking goes ALWAYS before the streaming text (and in the final result)
   thinkingSlot = document.createElement("div");
@@ -1978,12 +1983,11 @@ function promoteWaitingToThinking(): void {
     thinkingTimerEl.textContent = `${secs}s`;
   }, 500);
   // move the card into the bubble thinking slot (before the streaming text);
-  // defensive: without a bubble yet, keep it in the thread at the same spot
-  if (thinkingSlot) {
-    thinkingSlot.appendChild(card);
-  } else {
-    wrapper.before(card);
-  }
+  // defensive: without a bubble yet (stream_start not processed), open it
+  // NOW — leaving the card in the thread would orphan it and the later
+  // stream_start would create a SECOND thinking block
+  if (!thinkingSlot) openAssistantBubble();
+  if (thinkingSlot) thinkingSlot.appendChild(card);
   wrapper.remove();
   waitingWrapper = null;
   waitingTimerEl = null;
@@ -3390,8 +3394,15 @@ function renderRpcEvent(evt: RpcEvent): void {
       // a thought follows the waiting card: PROMOTE it in place (label
       // swapped, timer continues); without a waiting card a fresh thinking
       // block is created
-      if (waitingWrapper) promoteWaitingToThinking();
-      else ensureThinkingLoader();
+      if (waitingWrapper) {
+        promoteWaitingToThinking();
+      } else {
+        // a thought is already streaming: there is no model wait anymore —
+        // cancel the pending waiting timer, otherwise it fires at 3s and a
+        // GHOST "waiting" card appears next to the real thinking block
+        disarmWaitingResponse();
+        ensureThinkingLoader();
+      }
       thinkingAccum += action.delta;
       if (thinkingContentEl) thinkingContentEl.textContent = thinkingAccum;
       scrollToBottom();

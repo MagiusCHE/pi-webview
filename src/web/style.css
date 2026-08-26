@@ -1189,7 +1189,7 @@ footer {
 .attach-btn {
   font-size: 14px;
   line-height: 1;
-  padding: 4px 3px;
+  padding: 4px 2px;
 }
 .trust-indicator[data-status="untrusted"] {
   color: var(--warn);
@@ -1990,7 +1990,7 @@ footer {
 .stats-badge {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 7px;
   width: 100%;
   max-width: var(--thread-max-width);
   margin-inline: auto;
@@ -2001,9 +2001,9 @@ footer {
   border: 1px solid var(--border-strong); /* stesso colore del bordo della box di input */
   border-bottom: none;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0; /* angoli bassi squadrati: saldato alla box */
-  padding: 0 8px;
+  padding: 3px 12px;
   color: var(--fg-secondary);
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
 }
@@ -2017,15 +2017,15 @@ footer {
 .stats-ctx {
   cursor: pointer;
   border-radius: 999px;
-  padding: 0 2px;
-  margin-left: -2px;
+  padding: 1px 4px;
+  margin-left: -4px;
 }
 .stats-ctx:hover {
   background: var(--hover);
 }
 .ctx-gauge {
-  width: 14px;
-  height: 14px;
+  width: 20px;
+  height: 20px;
   flex: 0 0 auto;
   transform: rotate(-90deg);
 }

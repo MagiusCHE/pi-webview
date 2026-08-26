@@ -5642,6 +5642,7 @@ window.addEventListener(
 
 els.send.addEventListener("click", sendOrStop);
 els.attachBtn.title = t("attachBtn");
+els.attachBtn.innerHTML = attachFileIcon(); // graffetta SVG del set icone (niente emoji)
 els.attachBtn.hidden = !runtime.isVsCode; // native file dialog only in the IDE
 els.attachBtn.addEventListener("click", () => {
   if (els.attachBtn.disabled) return;

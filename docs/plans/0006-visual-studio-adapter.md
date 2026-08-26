@@ -1,7 +1,9 @@
 # Piano 0006 — Adapter Visual Studio (C# nativo, concept 0005)
 
-> Stato: **in corso** — nucleo implementato e buildato; restano distribuzione e
-> smoke test nell'IDE. Branch: `adapter-visual-studio`.
+> Stato: **quasi completo** — adapter implementato, buildato su Linux (wine),
+> incluso nel package pi e auto-installato su Windows; resta lo smoke test
+> manuale in Visual Studio. Branch: `feat/vs-adapter` (in attesa di merge in
+> `main`).
 
 ## Fatto
 
@@ -82,7 +84,8 @@
 - [ ] **Persistenza sessione corrente** al riavvio dell'IDE (oggi il resume è
       solo via dropdown: il companion VS Code usa workspaceState, in VS serve
       un equivalente — file per-soluzione o soluzione+toolwindow id).
-- [ ] **CI**: eseguire `dotnet test` della solution in aggiunta a `pnpm test`.
+- [ ] **CI**: eseguire `dotnet test` della solution in aggiunta a `pnpm test`
+      (`dotnet test src/adapters/visualstudio/PiWebview.Vs.slnx`).
 
 ## Note di build (Linux)
 
@@ -92,6 +95,5 @@ pnpm build                                     # UI → dist/web (prerequisito d
 node tools/setup-vs-wine.mjs                   # una tantum: prefix wine + patch VSSDK
 pnpm package:vs                               # dotnet build → dist/pi-webview-visualstudio.vsix
 pnpm package:addon                            # tutto: UI + vsix VS Code + vsix VS + bundle pi
-```
-dotnet test tests/PiWebview.Vs.Core.Tests    # 33 test
+dotnet test src/adapters/visualstudio/PiWebview.Vs.slnx   # 33 test C#
 ```

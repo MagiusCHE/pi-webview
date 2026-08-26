@@ -137,11 +137,17 @@ webview è la UI.
 ## Integrazione IDE (distribuzione)
 
 L'addon si installa con **`pi install ./packages/pi-webview`** (o da git/npm).
-L'estensione pi-webview (lato pi) rileva l'IDE (VS Code) e **auto-installa il companion**
-(`code --install-extension` sul vsix incluso) — modello pi-x-ide. Il companion
-crea la webview della sidebar, spawna `pi --mode rpc` (env `PI_WEBVIEW_COMPANION=1`)
-e parla l'IDE bridge protocol via postMessage. Sviluppo dell'adapter: F5 con
-`launch.json` (Extension Development Host) dopo `pnpm compile`.
+L'estensione pi-webview (lato pi) rileva gli IDE installati e **auto-installa i
+companion** — modello pi-x-ide, ognuno solo se l'IDE è presente:
+- **VS Code**: `code --install-extension` sul vsix incluso
+  (`companion/pi-webview-ide.vsix`); il companion crea la webview della sidebar,
+  spawna `pi --mode rpc` (env `PI_WEBVIEW_COMPANION=1`) e parla l'IDE bridge
+  protocol via postMessage. Sviluppo dell'adapter: F5 con `launch.json`
+  (Extension Development Host) dopo `pnpm compile`.
+- **Visual Studio** (solo Windows): rilevamento istanze con `vswhere.exe` +
+  installazione `VSIXInstaller.exe /q /a` sul vsix incluso
+  (`companion/pi-webview-visualstudio.vsix`, build su Linux via wine —
+  `tools/setup-vs-wine.mjs`); skip silenzioso senza Visual Studio.
 
 ## Aggiornamento automatico
 

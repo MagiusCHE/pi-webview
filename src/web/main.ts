@@ -29,7 +29,7 @@ import {
   type UiAction,
 } from "../ide/events.ts";
 import { applyTheme, watchThemeChanges } from "./theme.ts";
-import type { ThemePreference } from "../ide/protocol.ts";
+import type { StatsBarPosition, ThemePreference } from "../ide/protocol.ts";
 import { currentLocale, setLocale, t, tpl, isLocaleId, type LocaleId } from "./i18n.ts";
 import { runtime } from "./environment.ts";
 import { renderMarkdown } from "./markdown.ts";
@@ -69,6 +69,8 @@ const els = {
   notifications: document.getElementById("notifications") as HTMLSelectElement,
   notificationsSessionLabel: document.getElementById("settings-notifications-session-label") as HTMLLabelElement,
   notificationsSession: document.getElementById("notifications-session") as HTMLSelectElement,
+  statsBarPosLabel: document.getElementById("settings-stats-bar-label") as HTMLLabelElement,
+  statsBarPos: document.getElementById("stats-bar-pos") as HTMLSelectElement,
   themeLabel: document.getElementById("settings-theme-label") as HTMLLabelElement,
   settingsVersionLabel: document.getElementById("settings-version-label") as HTMLLabelElement,
   settingsVersion: document.getElementById("settings-version") as HTMLSpanElement,
@@ -91,6 +93,7 @@ const els = {
   statsSlots: document.getElementById("stats-slots") as HTMLSpanElement,
   statsStop: document.getElementById("btn-stop") as HTMLButtonElement,
   inputBox: document.querySelector(".input-box") as HTMLElement,
+  header: document.querySelector("header") as HTMLElement,
   scrollBottom: document.getElementById("scroll-bottom") as HTMLButtonElement,
   connectPanel: document.getElementById("connect-panel") as HTMLDivElement,
   connectUrl: document.getElementById("connect-url") as HTMLInputElement,
@@ -389,6 +392,8 @@ let historyLimit = DEFAULT_HISTORY_LIMIT;
 // (global config); the CURRENT session can override it — the override lives
 // INSIDE the session jsonl file (SessionSettings), not in the global config.
 let notificationsDefault: "desktop" | "vscode" | "off" = "desktop";
+/** where the stats bar lives (global config statsBarPosition, default above) */
+let statsBarPosition: StatsBarPosition = "above";
 let sessionNotificationsOverride: "desktop" | "vscode" | "off" | undefined;
 
 function effectiveNotifications(): "desktop" | "vscode" | "off" {
@@ -508,6 +513,23 @@ function applyUiStrings(): void {
     }
   }
   updateNotificationsSessionUi();
+  // stats bar position (global setting): where the context bar lives.
+  // The select starts EMPTY in the HTML: always repopulated here (options
+  // are localized, no hardcoded text).
+  els.statsBarPosLabel.textContent = t("settingsStatsBar");
+  const barOptions: Array<{ value: StatsBarPosition; label: string }> = [
+    { value: "above", label: t("statsBarAbove") },
+    { value: "below", label: t("statsBarBelow") },
+    { value: "topbar", label: t("statsBarTopbar") },
+  ];
+  els.statsBarPos.textContent = "";
+  for (const o of barOptions) {
+    const opt = document.createElement("option");
+    opt.value = o.value;
+    opt.textContent = o.label;
+    els.statsBarPos.appendChild(opt);
+  }
+  els.statsBarPos.value = statsBarPosition;
   updateStatus();
   updateThemeButtons();
   populateSessionMenu();
@@ -516,6 +538,20 @@ function applyUiStrings(): void {
     const row = els.themeRow.closest(".settings-row") as HTMLElement | null;
     if (row) row.hidden = true;
   }
+}
+
+/** Move the stats bar (context gauge + extension slots) to the chosen
+ *  placement (global setting, applied immediately): above/below the
+ *  composer, or as a second row inside the header (topbar). */
+function applyStatsBarPosition(pos: StatsBarPosition): void {
+  statsBarPosition = pos;
+  document.body.classList.remove("stats-bar-above", "stats-bar-below", "stats-bar-topbar");
+  document.body.classList.add(`stats-bar-${pos}`);
+  // DOM placement: above/below the composer, or as the last header row
+  if (pos === "topbar") els.header.appendChild(els.statsBadge);
+  else if (pos === "below") els.inputBox.after(els.statsBadge);
+  else els.inputBox.before(els.statsBadge);
+  els.statsBarPos.value = pos;
 }
 
 function requestConfig(): void {
@@ -537,6 +573,10 @@ function requestConfig(): void {
         cfg.notifications === "off"
       ) {
         notificationsDefault = cfg.notifications;
+      }
+      const sbp = cfg.statsBarPosition;
+      if (sbp === "above" || sbp === "below" || sbp === "topbar") {
+        applyStatsBarPosition(sbp);
       }
       applyUiStrings();
     }
@@ -561,6 +601,10 @@ function handleIdeResponse(res: IdeResponse): void {
       cfg.notifications === "off"
     ) {
       notificationsDefault = cfg.notifications;
+    }
+    const sbp = cfg.statsBarPosition;
+    if (sbp === "above" || sbp === "below" || sbp === "topbar") {
+      applyStatsBarPosition(sbp);
     }
     applyUiStrings();
   }
@@ -948,6 +992,23 @@ els.lang.addEventListener("change", () => {
       payload: {
         type: "setConfig",
         patch: { locale: currentLocale },
+        id: `cfg-${++configId}`,
+      },
+    });
+  }
+});
+
+// stats bar position: applied IMMEDIATELY (the bar moves right away), then
+// persisted in the global config for the next boot
+els.statsBarPos.addEventListener("change", () => {
+  const v = els.statsBarPos.value as StatsBarPosition;
+  if (v === "above" || v === "below" || v === "topbar") {
+    applyStatsBarPosition(v);
+    transport?.send({
+      channel: "ide",
+      payload: {
+        type: "setConfig",
+        patch: { statsBarPosition: v },
         id: `cfg-${++configId}`,
       },
     });

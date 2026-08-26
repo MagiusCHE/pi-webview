@@ -204,6 +204,9 @@ export interface IdeResponse {
 
 export type ThemePreference = "light" | "dark" | "system";
 
+/** where the stats bar (context gauge + extension slots) lives */
+export type StatsBarPosition = "above" | "below" | "topbar";
+
 // --- pi launch CLI flags (settings block 3) ---------------------------------
 // Available dynamically: they are the flags registered by pi and its
 // extensions (e.g. --session-control of the pi-agent-extensions package): if
@@ -255,6 +258,10 @@ export interface UserConfig {
    *  file (SessionSettings), not here. The "vscode" value only makes sense
    *  in the VS Code companion; in the browser only desktop/off are offered. */
   notifications?: "desktop" | "vscode" | "off";
+  /** where the stats bar (context gauge + extension slots) lives:
+   *  "above" (default) | "below" the composer, or "topbar" (second row of
+   *  the header, under the sessions/gear row). Global, not per-session. */
+  statsBarPosition?: StatsBarPosition;
 }
 
 export type IdeEvent =

@@ -133,6 +133,7 @@ export type IdeRequest =
       settings: SessionSettings;
       id?: string;
     }
+  | { type: "getStartupInfo"; id?: string }
   | { type: "listDir"; path: string; id?: string }
   | {
       type: "setWorkspace";
@@ -215,6 +216,15 @@ export type CliFlags = Record<string, CliFlagValue>;
 export interface SessionSettings {
   /** notifications mode for THIS session only (absent → global default) */
   notifications?: "desktop" | "vscode" | "off";
+}
+
+/** loaded resources for the new-session welcome banner (Context/Skills/
+ *  Extensions). NON-persistent: read from a per-process file (startup-info.ts),
+ *  never part of the session jsonl. */
+export interface StartupInfo {
+  contextFiles: string[];
+  skills: string[];
+  extensions: string[];
 }
 
 /** description of a registered flag (from `pi --help` → Extension CLI Flags) */

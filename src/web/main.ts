@@ -13,6 +13,7 @@ import type {
   SessionListResult,
   CliFlags,
   CliFlagInfo,
+  StartupInfo,
 } from "../ide/protocol.ts";
 import { rpc } from "../ide/protocol.ts";
 import {
@@ -871,7 +872,11 @@ async function startNewSession(): Promise<void> {
     const res = await rpcRequest({ type: "new_session" });
     if (res.success) {
       els.thread.textContent = "";
+      sessionHasMessages = false;
       els.sessionMenu.hidden = true;
+      // refreshSessions → loadHistory renders the welcome banner (Context/
+      // Skills/Extensions) while the new session chat is still empty — an
+      // explicit maybeShowStartupBanner here would render it a SECOND time
       await refreshSessions();
       // pi may assign the name late: update box and title when it arrives
       pollSessionTitle();
@@ -1323,6 +1328,9 @@ async function refreshSessions(): Promise<void> {
 }
 
 async function loadHistory(): Promise<void> {
+  // a session switch/restart: no stale "waiting" state from the previous session
+  disarmWaitingResponse();
+  activeToolExecutions = 0;
   try {
     const res = await rpcRequest(rpc.getMessages());
     const messages = (res.data as { messages?: unknown[] } | undefined)?.messages;
@@ -1332,6 +1340,13 @@ async function loadHistory(): Promise<void> {
       renderHistory(messages.slice(-historyLimit));
       seedMessageHistory(messages.slice(-historyLimit));
     }
+    // welcome banner: only while the session has no real messages yet (new/
+    // empty session) — checked on the DATA, not the DOM (loading logs are
+    // flushed into the thread just below and would look like content)
+    sessionHasMessages = (messages ?? []).some((m) => {
+      const role = (m as { role?: string }).role;
+      return role === "user" || role === "assistant" || role === "custom";
+    });
   } catch {
     // no history available
   }
@@ -1344,6 +1359,7 @@ async function loadHistory(): Promise<void> {
   loadingHistoryLoaded = true;
   flushLoadingLogs();
   if (sessionLoading) armLoadingQuiet();
+  if (!sessionHasMessages) void maybeShowStartupBanner();
 }
 
 // pi auto-compaction thresholds (config ~/.pi/config.json): for the tooltip
@@ -1632,8 +1648,8 @@ function stopWorking(): void {
   dequeueSteering(); // the queued messages return to the textarea (if any)
   transport.send({ channel: "rpc", payload: rpc.abort() });
   working = false;
-  hideSentLoader();
-  hideExtensionsBlock();
+  disarmWaitingResponse();
+  activeToolExecutions = 0;
   updateSendButton();
   updateSteerPlaceholder();
   updateThinkingStopBtn(false);
@@ -1831,189 +1847,84 @@ function finishThinking(): void {
   }
 }
 
-// --- "Extensions" block (pre-stream wait > 3s) -------------------------------
-// After a send, if the extensions (e.g. heavy hooks like vision-handoff at
-// resume) keep pi busy for more than 3s without the first output arriving,
-// we show a block with loader + timer like the Thinking one, so the user
-// understands something is working. It disappears at the first real output
-// (or at turn end).
+// --- "Waiting for response" indicator (model requests are serial) -----------
+// The pi agent loop awaits ONE provider stream at a time (pi-agent-core
+// agent-loop.js): a model request is in flight from the moment pi calls the
+// provider until the first chunk arrives (message_start). With a slow provider
+// that gap shows NO output in the chat. A 3s timer arms at every model send
+// (user prompt, turn start, last tool of a batch finished, message ended,
+// provider retry re-issued) and — only when the response is late — shows
+// "Attesa risposta…" with a spinner and the seconds (starting from 3). The
+// first provider chunk (message_start) kills it.
+// Tool executions are NOT model waits (the cards already show them): when a
+// batch runs in parallel the wait arms only at the LAST tool_execution_end.
 
-const EXTENSIONS_DELAY_MS = 3000;
-let extensionsWrapper: HTMLElement | null = null;
-let extensionsTimerEl: HTMLElement | null = null;
-let extensionsStartedAt = 0;
-let extensionsClock: ReturnType<typeof setInterval> | null = null;
-let extensionsTimeout: ReturnType<typeof setTimeout> | null = null;
+const WAITING_DELAY_MS = 3000;
+let waitingWrapper: HTMLElement | null = null;
+let waitingTimerEl: HTMLElement | null = null;
+let waitingStartedAt = 0;
+let waitingClock: ReturnType<typeof setInterval> | null = null;
+let waitingTimeout: ReturnType<typeof setTimeout> | null = null;
+// tool_execution_start/end of a parallel batch interleave: arm only when the
+// LAST execution ended (counter hits 0)
+let activeToolExecutions = 0;
 
-function showExtensionsBlock(): void {
-  if (extensionsWrapper) return;
+function armWaitingResponse(): void {
+  if (waitingTimeout) {
+    clearTimeout(waitingTimeout);
+    waitingTimeout = null;
+  }
+  waitingStartedAt = performance.now();
+  waitingTimeout = setTimeout(() => {
+    waitingTimeout = null;
+    // an agent run must be active: without it (rejected prompt, extension
+    // command without a turn) there is no model request — nothing to wait for
+    if (working) showWaitingBlock();
+  }, WAITING_DELAY_MS);
+}
+
+function showWaitingBlock(): void {
+  if (waitingWrapper) return;
   const wrapper = addMsg("status");
-  wrapper.className = "msg status extensions-msg";
-  extensionsWrapper = wrapper;
+  wrapper.className = "msg status waiting-msg";
+  waitingWrapper = wrapper;
   const card = document.createElement("div");
   card.className = "thinking-card";
   const head = document.createElement("div");
-  head.className = "thinking-head extensions-head";
+  head.className = "thinking-head";
   const label = document.createElement("span");
   label.className = "thinking-label";
-  label.textContent = t("extensions");
+  label.textContent = t("waitingResponse");
   const spinner = document.createElement("span");
   spinner.className = "spinner";
-  extensionsTimerEl = document.createElement("span");
-  extensionsTimerEl.className = "thinking-timer";
-  extensionsTimerEl.textContent = "0s";
-  head.append(label, spinner, extensionsTimerEl);
+  waitingTimerEl = document.createElement("span");
+  waitingTimerEl.className = "thinking-timer";
+  // the wait is already 3s when it appears: the seconds start from there
+  waitingTimerEl.textContent = `${Math.floor(WAITING_DELAY_MS / 1000)}s`;
+  head.append(label, spinner, waitingTimerEl);
   card.appendChild(head);
-  // click → panel with what we CAN know about extensions at this moment
-  // (pi does not expose which extension is executing): status signals
-  // received via setStatus + available extension commands
-  const panel = document.createElement("div");
-  panel.className = "extensions-panel";
-  panel.hidden = true;
-  const note = document.createElement("div");
-  note.className = "extensions-note";
-  note.textContent = t("extPanelNoInfo");
-  panel.appendChild(note);
-  const statusList = document.createElement("div");
-  statusList.className = "extensions-status";
-  const statusLabel = document.createElement("div");
-  statusLabel.className = "extensions-label";
-  statusLabel.textContent = t("extPanelStatus");
-  statusList.append(statusLabel);
-  for (const text of statusSlots.values()) {
-    const item = document.createElement("div");
-    item.className = "extensions-item";
-    item.textContent = stripAnsi(text);
-    statusList.appendChild(item);
-  }
-  if (statusSlots.size === 0) {
-    const none = document.createElement("div");
-    none.className = "extensions-item muted";
-    none.textContent = t("extPanelNone");
-    statusList.appendChild(none);
-  }
-  panel.appendChild(statusList);
-  const cmdList = document.createElement("div");
-  cmdList.className = "extensions-status";
-  const cmdLabel = document.createElement("div");
-  cmdLabel.className = "extensions-label";
-  cmdLabel.textContent = t("extPanelCommands");
-  cmdList.append(cmdLabel);
-  const cmds = slashCommands.slice(0, 12);
-  if (cmds.length === 0) {
-    const none = document.createElement("div");
-    none.className = "extensions-item muted";
-    none.textContent = t("extPanelNone");
-    cmdList.appendChild(none);
-  }
-  for (const c of cmds) {
-    const item = document.createElement("div");
-    item.className = "extensions-item";
-    item.textContent = `/${c.name}`;
-    if (c.description) item.title = c.description;
-    cmdList.appendChild(item);
-  }
-  panel.appendChild(cmdList);
-  card.appendChild(panel);
-  head.addEventListener("click", () => {
-    panel.hidden = !panel.hidden;
-  });
   wrapper.appendChild(card);
-  extensionsStartedAt = performance.now();
-  extensionsClock = setInterval(() => {
-    if (!extensionsTimerEl) return;
-    extensionsTimerEl.textContent = `${Math.round((performance.now() - extensionsStartedAt) / 1000)}s`;
+  waitingClock = setInterval(() => {
+    if (!waitingTimerEl) return;
+    const secs = Math.floor((performance.now() - waitingStartedAt) / 1000);
+    waitingTimerEl.textContent = `${secs}s`;
   }, 500);
   scrollToBottom();
 }
 
-function hideExtensionsBlock(): void {
-  if (extensionsTimeout) {
-    clearTimeout(extensionsTimeout);
-    extensionsTimeout = null;
+function disarmWaitingResponse(): void {
+  if (waitingTimeout) {
+    clearTimeout(waitingTimeout);
+    waitingTimeout = null;
   }
-  if (extensionsClock) {
-    clearInterval(extensionsClock);
-    extensionsClock = null;
+  if (waitingClock) {
+    clearInterval(waitingClock);
+    waitingClock = null;
   }
-  if (extensionsWrapper) {
-    extensionsWrapper.remove();
-    extensionsWrapper = null;
-    extensionsTimerEl = null;
-  }
-}
-
-// armed at every send: if the first output does not arrive within 3s, shows the block
-function armExtensionsBlock(): void {
-  hideExtensionsBlock();
-  extensionsTimeout = setTimeout(() => {
-    extensionsTimeout = null;
-    if (working) showExtensionsBlock();
-  }, EXTENSIONS_DELAY_MS);
-}
-
-// --- send loader on the user message -----------------------------------------
-// As soon as the user sends, his message shows a spinner + timer counting
-// the seconds from the send to the first model response (thinking, text or tool).
-// Independent from the "Extensions" block (which signals pre-stream work):
-// this gives immediate feedback that the message was delivered and is awaited.
-
-let sentLoaderEl: HTMLElement | null = null;
-let sentLoaderSpinnerEl: HTMLElement | null = null;
-let sentLoaderTimerEl: HTMLElement | null = null;
-let sentLoaderStartedAt = 0;
-let sentLoaderClock: ReturnType<typeof setInterval> | null = null;
-
-function showSentLoader(wrapper: HTMLElement): void {
-  hideSentLoader();
-  const row = document.createElement("div");
-  row.className = "sent-loader";
-  const spinner = document.createElement("span");
-  spinner.className = "spinner";
-  sentLoaderTimerEl = document.createElement("span");
-  sentLoaderTimerEl.className = "thinking-timer";
-  sentLoaderTimerEl.textContent = "0s";
-  row.append(spinner, sentLoaderTimerEl);
-  wrapper.appendChild(row);
-  sentLoaderEl = row;
-  sentLoaderSpinnerEl = spinner;
-  sentLoaderStartedAt = performance.now();
-  sentLoaderClock = setInterval(() => {
-    if (!sentLoaderTimerEl) return;
-    const secs = Math.round((performance.now() - sentLoaderStartedAt) / 1000);
-    sentLoaderTimerEl.textContent = `${secs}s`;
-  }, 500);
-}
-
-// at the first real model content: spinner removed, the timer stays
-// frozen on the message as a memory of how long it took to answer
-function settleSentLoader(): void {
-  if (sentLoaderClock) {
-    clearInterval(sentLoaderClock);
-    sentLoaderClock = null;
-  }
-  if (!sentLoaderEl) return;
-  // already frozen: the later deltas (e.g. every thinking_delta) must NOT
-  // rewrite the timer — the value stays that of the first response
-  if (sentLoaderEl.classList.contains("settled")) return;
-  const secs = Math.max(1, Math.round((performance.now() - sentLoaderStartedAt) / 1000));
-  if (sentLoaderTimerEl) sentLoaderTimerEl.textContent = `${secs}s`;
-  sentLoaderEl.classList.add("settled");
-  sentLoaderSpinnerEl?.remove();
-  sentLoaderSpinnerEl = null;
-}
-
-// fully removed (only on abort): spinner and timer gone
-function hideSentLoader(): void {
-  if (sentLoaderClock) {
-    clearInterval(sentLoaderClock);
-    sentLoaderClock = null;
-  }
-  if (sentLoaderEl) {
-    sentLoaderEl.remove();
-    sentLoaderEl = null;
-    sentLoaderTimerEl = null;
-    sentLoaderSpinnerEl = null;
+  if (waitingWrapper) {
+    waitingWrapper.remove();
+    waitingWrapper = null;
+    waitingTimerEl = null;
   }
 }
 
@@ -2158,9 +2069,8 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       return;
     }
     case "select": {
-      // the command answered (dialog): stop the sent loader timer
-      settleSentLoader();
-      hideExtensionsBlock();
+      // the command answered (dialog): a dialog is visible activity
+      disarmWaitingResponse();
       const title = (evt.title as string | undefined) ?? "";
       const options = (evt.options as string[] | undefined) ?? [];
       // ask_user: the first question splits the card into N cards (header =
@@ -2176,15 +2086,13 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       return;
     }
     case "confirm": {
-      settleSentLoader();
-      hideExtensionsBlock();
+      disarmWaitingResponse();
       const msg = (evt.message as string | undefined) ?? (evt.title as string) ?? "";
       void inlineConfirm(msg).then((ok) => respond({ confirmed: ok }));
       return;
     }
     case "input": {
-      settleSentLoader();
-      hideExtensionsBlock();
+      disarmWaitingResponse();
       const title = (evt.title as string | undefined) ?? "";
       const prefill = (evt.prefill as string | undefined) ?? "";
       void inlinePrompt(prefill, title).then((v) =>
@@ -2194,8 +2102,7 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
     }
     case "editor": {
       // prefilled text (e.g. edit): same input block
-      settleSentLoader();
-      hideExtensionsBlock();
+      disarmWaitingResponse();
       const title = (evt.title as string | undefined) ?? "";
       const prefill = (evt.prefill as string | undefined) ?? "";
       void inlinePrompt(prefill, title).then((v) =>
@@ -2204,10 +2111,9 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       return;
     }
     case "notify": {
-      // extension command response: stop the sent loader timer
-      // (commands do not emit agent_start/delta) and show the notification in chat
-      settleSentLoader();
-      hideExtensionsBlock();
+      // extension command response (commands do not emit agent_start/delta):
+      // the notification in chat is the feedback — nothing is being awaited
+      disarmWaitingResponse();
       const msg = (evt.message as string | undefined) ?? (evt.title as string) ?? "";
       if (msg) addStatusLine(msg);
       return;
@@ -3241,10 +3147,10 @@ function renderRpcEvent(evt: RpcEvent): void {
       return;
     }
     if (msg && role === "custom" && msg.display !== false) {
-      // new-session banner (pi-webview extension): the TUI startup banner
-      // (Context/Skills/Extensions) pushed as a card — renderStartupBanner
+      // legacy "pi-webview-startup" custom messages (older extension versions
+      // wrote them into the session): the welcome banner is pure UI now
+      // (getStartupInfo), never part of the session — skip silently
       if ((msg as { customType?: string }).customType === "pi-webview-startup") {
-        renderStartupBanner(msg);
         return;
       }
       // message injected from ANOTHER session (e.g. session-control
@@ -3255,12 +3161,17 @@ function renderRpcEvent(evt: RpcEvent): void {
   }
   // compaction: show the block even if started by pi (auto-compaction)
   if (evt.type === "compaction_start") {
+    // the compaction block is the feedback: nothing is being awaited
+    disarmWaitingResponse();
+    activeToolExecutions = 0;
     showCompactionBlock();
   } else if (evt.type === "compaction_end") {
     // REAL outcome from pi: errorMessage present → failed (the client cannot
     // trust the response alone: it arrives after the event)
     const errMsg = evt.errorMessage as string | undefined;
     finishCompaction(!!errMsg, errMsg);
+    // the run resumes right after a success: another model request is in flight
+    if (!errMsg) armWaitingResponse();
     // steering: after the compaction the queue delivery restarts
     deliverSteering();
   } else if (evt.type === "connection_closed") {
@@ -3279,8 +3190,8 @@ function renderRpcEvent(evt: RpcEvent): void {
     endSessionLoading(); // also clears the loading timers
     hideBootLoader();
     if (compacting) finishCompaction(true, (evt.errorMessage as string) ?? undefined);
-    hideSentLoader();
-    hideExtensionsBlock();
+    disarmWaitingResponse();
+    activeToolExecutions = 0;
     working = false;
     updateSendButton();
     const cmd = evt.command as string | undefined;
@@ -3360,28 +3271,37 @@ function renderRpcEvent(evt: RpcEvent): void {
     evt.type === "tool_execution_end"
   ) {
     handleToolExecution(evt);
-    if (evt.type === "tool_execution_start") settleSentLoader(); // first real output
-    if (evt.type === "tool_execution_start") hideExtensionsBlock(); // first real output
+    if (evt.type === "tool_execution_start") {
+      // a tool runs: visible activity in the chat — no model wait
+      activeToolExecutions++;
+      disarmWaitingResponse();
+    } else if (evt.type === "tool_execution_end") {
+      // LAST tool of the batch finished → the agent calls the model again
+      activeToolExecutions = Math.max(0, activeToolExecutions - 1);
+      if (activeToolExecutions === 0) armWaitingResponse();
+    }
     return;
+  }
+  // provider retry re-issued: the new attempt is another model request
+  if (evt.type === "auto_retry_end" && (evt as { success?: unknown }).success === true) {
+    armWaitingResponse();
   }
   const action: UiAction = handleRpcEvent(stream, evt);
   switch (action.kind) {
     case "stream_start":
       // NOTE: message_start arrives as soon as the provider stream opens, NOT
-      // at the first token: here the send loader must stay (the deltas remove it)
-      hideExtensionsBlock();
+      // at the first token: the provider answered — the wait is over
+      disarmWaitingResponse();
       openAssistantBubble();
       break;
     case "text_delta":
-      settleSentLoader();
-      hideExtensionsBlock();
+      disarmWaitingResponse();
       markdownAccum += action.delta;
       scheduleMarkdownRender();
       scrollToBottom();
       break;
     case "thinking_delta":
-      settleSentLoader();
-      hideExtensionsBlock();
+      disarmWaitingResponse();
       ensureThinkingLoader();
       thinkingAccum += action.delta;
       if (thinkingContentEl) thinkingContentEl.textContent = thinkingAccum;
@@ -3393,8 +3313,7 @@ function renderRpcEvent(evt: RpcEvent): void {
     case "tool_call_start":
       // the name arrives with toolcall_start (partial.content[index].name):
       // the card is born ALREADY with the real name, no "tool" placeholder
-      settleSentLoader();
-      hideExtensionsBlock();
+      disarmWaitingResponse();
       {
         const tc = action.toolCall;
         if (tc.name) {
@@ -3436,8 +3355,7 @@ function renderRpcEvent(evt: RpcEvent): void {
       }
       break;
     case "tool_args_delta":
-      settleSentLoader();
-      hideExtensionsBlock();
+      disarmWaitingResponse();
       ensureToolCard();
       toolsText += action.delta;
       if (toolsPre) toolsPre.textContent = toolsText;
@@ -3468,8 +3386,7 @@ function renderRpcEvent(evt: RpcEvent): void {
       scrollToBottom();
       break;
     case "tool_call":
-      settleSentLoader();
-      hideExtensionsBlock();
+      disarmWaitingResponse();
       if (toolsEl) {
         const tcName = action.toolCall.name;
         // ask_user: the row shows the question/answer (split cards or answer
@@ -3503,6 +3420,9 @@ function renderRpcEvent(evt: RpcEvent): void {
       break;
     case "message_end":
       finalizeMessage(action.message);
+      // if the agent continues (another model call, a follow-up) the request
+      // is already in flight: arm the wait, the next message_start kills it
+      armWaitingResponse();
       break;
     case "system_note":
       // one box per level (error/warn/info), like the terminal console
@@ -3694,31 +3614,18 @@ function renderCustomMessageBubble(msg: {
   scrollToBottom();
 }
 
-// --- new-session banner (pi-webview extension) -------------------------------
-// The pi-side extension pushes the loaded resources (Context files / Skills /
-// Extensions — the TUI startup banner, Themes excluded) as a custom message
-// "pi-webview-startup" with JSON content when a NEW session starts. Rendered
-// here as a banner card at the top of the new session chat; also rendered by
-// the history (the custom message is part of the session file).
-function parseStartupInfo(content: unknown): {
-  contextFiles?: string[];
-  skills?: string[];
-  extensions?: string[];
-} | null {
-  try {
-    const data: unknown = JSON.parse(extractTextContent(content));
-    if (typeof data !== "object" || data === null) return null;
-    return data as { contextFiles?: string[]; skills?: string[]; extensions?: string[] };
-  } catch {
-    return null;
-  }
-}
+// --- new-session welcome banner (pure UI, never persisted) -------------------
+// The pi-side extension writes the loaded resources (Context files / Skills /
+// Extensions — the TUI startup banner, Themes excluded) to a per-process file
+// at session_start; the host serves it via the getStartupInfo IDE request.
+// The webview renders ONE banner card in the chat, ONLY while the session is
+// still empty (new session / fresh boot): it is never part of the session
+// jsonl and never re-rendered from history.
+// set by loadHistory from the get_messages DATA (the DOM alone cannot tell
+// real messages from boot/loading log boxes)
+let sessionHasMessages = false;
 
-function buildStartupBanner(data: {
-  contextFiles?: string[];
-  skills?: string[];
-  extensions?: string[];
-}): HTMLElement {
+function buildStartupBanner(data: StartupInfo): HTMLElement {
   const card = document.createElement("div");
   card.className = "startup-card";
   const section = (label: string, items: string[] | undefined): void => {
@@ -3741,15 +3648,26 @@ function buildStartupBanner(data: {
   return card;
 }
 
-function renderStartupBanner(msg: { content?: unknown }): void {
-  const data = parseStartupInfo(msg.content);
-  if (!data) {
-    // not our JSON format: fall back to the generic custom-message card
-    renderCustomMessageBubble(msg);
+async function maybeShowStartupBanner(): Promise<void> {
+  const res = await ideRequest({ type: "getStartupInfo" });
+  if (!res?.ok) return;
+  const info = (res.data as { info?: StartupInfo | null } | undefined)?.info;
+  if (!info) return;
+  if (
+    info.contextFiles.length === 0 &&
+    info.skills.length === 0 &&
+    info.extensions.length === 0
+  ) {
     return;
   }
+  // only while the chat has no real messages yet (new/empty session): the
+  // check is on the DATA (set by loadHistory), not the DOM — boot/loading
+  // log boxes may already sit in the thread
+  if (sessionHasMessages) return;
   const wrapper = addMsg("status");
-  wrapper.appendChild(buildStartupBanner(data));
+  wrapper.appendChild(buildStartupBanner(info));
+  // above any boot/loading log boxes flushed at the end of the resume
+  els.thread.prepend(wrapper);
   scrollToBottom();
 }
 
@@ -3835,12 +3753,10 @@ function renderHistory(messages: unknown[]): void {
       bubble.textContent = contentToText(msg.content);
       wrapper.appendChild(bubble);
     } else if (msg.role === "custom" && (msg as { display?: unknown }).display !== false) {
-      // new-session banner (pi-webview extension): the custom message is part
-      // of the session file → rendered again in history (same card as live)
-      const bannerData = parseStartupInfo(msg.content);
-      if (bannerData) {
-        const wrapper = addMsg("status");
-        wrapper.appendChild(buildStartupBanner(bannerData));
+      // legacy "pi-webview-startup" custom messages (older extension versions
+      // wrote them into the session): the banner is pure UI now, never
+      // persisted — skip silently
+      if ((msg as { customType?: string }).customType === "pi-webview-startup") {
         continue;
       }
       // message injected from another session (session-control send):
@@ -4735,8 +4651,8 @@ function sendOrStop(): void {
       inlineImages.length > 0 ? { images: inlineImages } : undefined,
     ),
   });
-  // send loader: spinner + timer until the first response arrives
-  showSentLoader(wrapper);
+  // the model request is in flight: "Attesa risposta…" if it takes > 3s
+  armWaitingResponse();
   // slash command sent: after the user bubble is in chat, signal that
   // the extension commands need a pi.dev core change
   if (message.trim().startsWith("/")) notifyCmdNotImplemented();
@@ -4745,7 +4661,6 @@ function sendOrStop(): void {
   // added after left it above, and the "smart" follow then believed the
   // user had scrolled (dist > margin) and did not move anymore
   scrollToBottom(true);
-  armExtensionsBlock(); // "Extensions" block if the first output takes > 3s
   els.input.value = "";
   resetInputHeight();
   clearAttachments();
@@ -5741,6 +5656,10 @@ document.addEventListener("keydown", (e) => {
 function trackWorking(evt: RpcEvent): void {
   if (evt.type === "agent_start") {
     working = true;
+    // a fresh turn: no tool of the previous one is still executing
+    activeToolExecutions = 0;
+    // the first model request of the turn is in flight
+    armWaitingResponse();
     // an agent run is part of the extension work at resume: the loading
     // overlay must not end while it is active
     loadingAgentActive = true;
@@ -5752,8 +5671,8 @@ function trackWorking(evt: RpcEvent): void {
     loadingAgentActive = false;
     // extension run finished: re-evaluate the loading end (quiet + idle)
     if (sessionLoading) armLoadingQuiet();
-    settleSentLoader(); // without a response: freeze the waited time anyway
-    hideExtensionsBlock();
+    disarmWaitingResponse();
+    activeToolExecutions = 0;
     // stops the tool timers left active (e.g. tool ABORTED by STOP:
     // no tool_execution_end → the timer would run forever)
     clearToolTimers();

@@ -29,6 +29,7 @@ import {
   writeSessionSettings,
 } from "./sessions.ts";
 import { getTrust, setTrust } from "./trust.ts";
+import { readStartupInfo } from "./startup-info.ts";
 import { saveAttachment, pathExists } from "./attachments.ts";
 import { fetchProviderBalance } from "./balance.ts";
 import { clearLock } from "./lock.ts";
@@ -341,6 +342,12 @@ function stderrAllowed(): boolean {
         const path = req.sessionPath ?? "";
         writeSessionSettings(path, req.settings ?? {});
         respond(req.id ?? "", { ok: true, data: readSessionSettings(path) });
+        return;
+      }
+      if (req.type === "getStartupInfo") {
+        // new-session welcome banner: NON-persistent (per-process file written
+        // by the pi-side extension at session_start — never in the session jsonl)
+        respond(req.id ?? "", { ok: true, data: { info: readStartupInfo(pi.pid) } });
         return;
       }
       if (req.type === "getWorkspace") {

@@ -12,7 +12,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join, posix, relative } from "node:path";
 import { homedir } from "node:os";
-import { existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { readVsixVersion } from "./lib/vsix-version.ts";
 
 const execFileAsync = promisify(execFile);
@@ -57,8 +57,6 @@ interface PiApi {
   getCommands(): { name: string; source?: string; sourceInfo?: SourceInfoLike }[];
   // all registered tools with their source metadata (extension path/package)
   getAllTools(): { name: string; sourceInfo?: SourceInfoLike }[];
-  // append a custom message entry to the session (the webview renders it)
-  sendMessage(msg: { customType: string; content: string; display: boolean }): void;
 }
 
 // Source metadata attached by pi to tools/commands (source-info.ts): `source`
@@ -225,10 +223,11 @@ function unlinkPiwBin(): void {
 
 // --- new-session banner (webview) ------------------------------------------
 // The TUI shows the loaded-resources banner (Context/Skills/Extensions) at
-// startup; in RPC mode (webview) that banner never renders, so we push the
-// same data as a custom message the webview renders as a banner card in the
-// chat of a NEW session. Themes are TUI-only and skipped.
-const STARTUP_CUSTOM_TYPE = "pi-webview-startup";
+// startup; in RPC mode (webview) that banner never renders, so we collect the
+// same data and write it to a NON-session file (~/.pi/pi-webview/startup-info-
+// <pid>.json) that the webview host reads on demand (getStartupInfo). The
+// welcome banner is pure UI: it must NEVER be written to the session jsonl.
+// Themes are TUI-only and skipped.
 
 // Same candidates and order as pi's loadProjectContextFiles (resource-loader.js)
 const CONTEXT_CANDIDATES = [
@@ -354,10 +353,11 @@ export default function (pi: PiApi): void {
 
   // --- new-session banner ----------------------------------------------------
   // Loaded resources (Context/Skills/Extensions, same data as the TUI startup
-  // banner, Themes excluded) pushed to the webview as a custom message when a
-  // NEW session starts (or at startup when the session is still empty). The
-  // webview renders it as a banner card; the TUI shows its own banner and
-  // must NOT receive ours (mode "tui" → skip).
+  // banner, Themes excluded) collected when a NEW session starts (or at startup
+  // when the session is still empty) and written to a per-process file that the
+  // webview host serves via getStartupInfo. NOT persisted in the session: the
+  // banner is ephemeral UI, shown only while the chat is empty. The TUI shows
+  // its own banner and must NOT receive ours (mode "tui" → skip).
   const collectStartupInfo = (cwd: string): {
     contextFiles: string[];
     skills: string[];
@@ -446,11 +446,14 @@ export default function (pi: PiApi): void {
       return;
     }
     try {
-      pi.sendMessage({
-        customType: STARTUP_CUSTOM_TYPE,
-        content: JSON.stringify(info),
-        display: true,
-      });
+      // NON-session file (one per pi process): the webview host reads it via
+      // the getStartupInfo IDE request — never written to the session jsonl
+      const dir = join(homedir(), ".pi", "pi-webview");
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, `startup-info-${process.pid}.json`);
+      const tmp = `${file}.tmp`;
+      writeFileSync(tmp, JSON.stringify(info));
+      renameSync(tmp, file);
     } catch {
       // never break the session start because of the banner
     }

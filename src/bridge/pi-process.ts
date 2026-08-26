@@ -47,6 +47,12 @@ export class PiProcess {
     return this.child !== null;
   }
 
+  /** current pi child pid (undefined while not running) — used to address
+   *  the per-process startup-info file of the pi-webview extension */
+  get pid(): number | undefined {
+    return this.child?.pid;
+  }
+
   start(): void {
     this.spawnError = false;
     const args = ["--mode", "rpc", ...(this.opts.args ?? [])];

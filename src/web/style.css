@@ -816,36 +816,6 @@ header {
 }
 /* thinking timer: same mono as the tool timers + right padding to
    align with the right border of the tool cards (summary 10px) */
-/* extensions box: clickable header (toggles the panel), timer on the right */
-.extensions-head {
-  cursor: pointer;
-  user-select: none;
-}
-.extensions-panel {
-  padding: 6px 10px 10px;
-  border-top: 1px solid var(--border);
-  font-size: 12.5px;
-  color: var(--fg-secondary);
-}
-.extensions-note {
-  color: var(--fg-tertiary);
-  font-style: italic;
-  margin-bottom: 8px;
-}
-.extensions-label {
-  font-weight: 600;
-  color: var(--fg);
-  margin: 6px 0 2px;
-}
-.extensions-item {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 1px 0;
-}
-.extensions-item.muted {
-  color: var(--fg-tertiary);
-}
 .thinking-head .thinking-timer {
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -875,30 +845,9 @@ header {
   }
 }
 
-/* --- send loader on the user message: badge overlapping the bottom-right
-       border of the bubble (spinner + timer until the first response) --- */
-.sent-loader {
-  position: absolute;
-  right: 8px;
-  bottom: -7px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0px 3px;
-  background: var(--user-bubble);
-  border-radius: 999px;
-  z-index: 2;
-}
-.sent-loader .spinner {
-  width: 11px;
-  height: 11px;
-  border-width: 2px;
-}
-.sent-loader .thinking-timer {
-  margin-left: 0;
-  font-size: 12px;
-}
-/* first content arrived: spinner removed, timer stays frozen as memory */
+/* --- "Waiting for response" indicator: a thinking-card style row in the
+       chat (label + spinner + seconds) shown only when a model response is
+       late (delay > 3s), removed at the first provider chunk --- */
 
 /* --- tool cards with uniform copy --- */
 .tool-card {

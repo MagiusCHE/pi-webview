@@ -139,6 +139,7 @@ import {
   writeSessionSettings,
 } from "../../bridge/sessions.ts";
 import { getTrust, setTrust } from "../../bridge/trust.ts";
+import { readStartupInfo } from "../../bridge/startup-info.ts";
 import { saveAttachment, pathExists } from "../../bridge/attachments.ts";
 import { fetchProviderBalance } from "../../bridge/balance.ts";
 import type {
@@ -590,6 +591,11 @@ export abstract class PiWebviewHost {
         this.respond(req.id, true, readSessionSettings(path));
         return;
       }
+      case "getStartupInfo":
+        // new-session welcome banner: NON-persistent (per-process file written
+        // by the pi-side extension at session_start — never in the session jsonl)
+        this.respond(req.id, true, { info: readStartupInfo(this.pi?.pid) });
+        return;
       case "forkSession":
         try {
           const ws = this.workspace();

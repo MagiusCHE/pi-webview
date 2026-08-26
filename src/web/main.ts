@@ -66,6 +66,8 @@ const els = {
   historyLabel: document.getElementById("settings-history-label") as HTMLLabelElement,
   notificationsLabel: document.getElementById("settings-notifications-label") as HTMLLabelElement,
   notifications: document.getElementById("notifications") as HTMLSelectElement,
+  notificationsSessionLabel: document.getElementById("settings-notifications-session-label") as HTMLLabelElement,
+  notificationsSession: document.getElementById("notifications-session") as HTMLSelectElement,
   themeLabel: document.getElementById("settings-theme-label") as HTMLLabelElement,
   settingsVersionLabel: document.getElementById("settings-version-label") as HTMLLabelElement,
   settingsVersion: document.getElementById("settings-version") as HTMLSpanElement,
@@ -83,6 +85,7 @@ const els = {
   balanceChip: document.getElementById("balance-chip") as HTMLSpanElement,
   statsCtx: document.querySelector(".stats-ctx") as HTMLSpanElement,
   ctxFill: document.getElementById("ctx-fill") as unknown as SVGCircleElement,
+  ctxGauge: document.querySelector(".ctx-gauge") as unknown as SVGSVGElement,
   ctxLabel: document.getElementById("ctx-label") as HTMLSpanElement,
   statsSlots: document.getElementById("stats-slots") as HTMLSpanElement,
   statsStop: document.getElementById("btn-stop") as HTMLButtonElement,
@@ -100,6 +103,7 @@ const els = {
   attachmentRow: document.getElementById("attachment-row") as HTMLDivElement,
   bootLoader: document.getElementById("boot-loader") as HTMLDivElement,
   bootLoaderText: document.getElementById("boot-loader-text") as HTMLSpanElement,
+  bootLoaderLogs: document.getElementById("boot-loader-logs") as HTMLDivElement,
   dropOverlay: document.getElementById("drop-overlay") as HTMLDivElement,
   dropOverlayIcon: document.getElementById("drop-overlay-icon") as HTMLSpanElement,
   dropOverlayText: document.getElementById("drop-overlay-text") as HTMLSpanElement,
@@ -167,6 +171,108 @@ function hideBootLoader(): void {
   els.bootLoader.hidden = true;
 }
 
+// --- session loading (boot / session switch / pi restart) -------------------
+// An extension may keep working (and logging to stderr) for a long time after
+// the session file is loaded. While loading: the loader STAYS UP and the log
+// lines collect in a box UNDER the spinner (never in the chat). Loading ends
+// when the logs have been quiet for a while AND no agent run is active —
+// pi exposes no "extensions done" event, the quiet period is the only
+// reliable signal. A max wait is the safety net against endless loading.
+let sessionLoading = false;
+let loadingHistoryLoaded = false; // the chat history has been rendered
+let loadingQuietTimer: ReturnType<typeof setTimeout> | null = null;
+let loadingMaxTimer: ReturnType<typeof setTimeout> | null = null;
+let loadingAgentActive = false;
+// logs collected while loading: flushed into the chat (at the END of the
+// resumed history) when the loading ends — never lost, never at the top
+const loadingLogs: { level: "error" | "warn" | "info"; text: string }[] = [];
+const LOADING_QUIET_MS = 1500; // logs silence that ends the loading
+const LOADING_MAX_MS = 30000; // never load longer than this
+const LOADING_LOG_CAP = 200; // lines kept in the box
+
+function beginSessionLoading(): void {
+  sessionLoading = true;
+  loadingAgentActive = false;
+  loadingHistoryLoaded = false;
+  loadingLogs.length = 0;
+  els.bootLoader.hidden = false;
+  els.bootLoaderText.textContent = t("loading");
+  els.bootLoaderLogs.hidden = true;
+  els.bootLoaderLogs.textContent = "";
+  // the quiet timer is NOT armed here: loading cannot end before the history
+  // has been rendered (loadHistory arms it) — get_state retries at boot can
+  // take much longer than the quiet window
+  clearTimeout(loadingMaxTimer ?? undefined);
+  loadingMaxTimer = setTimeout(loadingMaxTick, LOADING_MAX_MS);
+}
+
+// safety net against endless loading: while the history is not rendered yet
+// pi is still booting (get_state retries ≈ 27s) → keep waiting
+function loadingMaxTick(): void {
+  if (!sessionLoading) return;
+  if (!loadingHistoryLoaded) {
+    loadingMaxTimer = setTimeout(loadingMaxTick, LOADING_MAX_MS);
+    return;
+  }
+  endSessionLoading();
+}
+
+function armLoadingQuiet(): void {
+  clearTimeout(loadingQuietTimer ?? undefined);
+  loadingQuietTimer = setTimeout(() => {
+    if (sessionLoading && loadingHistoryLoaded && !loadingAgentActive) {
+      endSessionLoading();
+    }
+  }, LOADING_QUIET_MS);
+}
+
+function endSessionLoading(): void {
+  if (!sessionLoading) return;
+  sessionLoading = false;
+  clearTimeout(loadingQuietTimer ?? undefined);
+  clearTimeout(loadingMaxTimer ?? undefined);
+  loadingQuietTimer = null;
+  loadingMaxTimer = null;
+  els.bootLoaderLogs.hidden = true;
+  els.bootLoaderLogs.textContent = "";
+  els.bootLoader.hidden = true;
+}
+
+/** routes an extension/pi log line DURING the loading: into the box under
+ *  the spinner (every line re-arms the quiet timer) and into the collected
+ *  list (flushed at the end of the resumed chat) */
+function pushLoadingLog(level: "error" | "warn" | "info", line: string): void {
+  if (!sessionLoading) return;
+  loadingLogs.push({ level, text: line });
+  while (loadingLogs.length > LOADING_LOG_CAP) loadingLogs.shift();
+  const box = els.bootLoaderLogs;
+  const div = document.createElement("div");
+  div.className = `boot-loader-log level-${level}`;
+  div.textContent = line;
+  box.appendChild(div);
+  while (box.childElementCount > LOADING_LOG_CAP) box.firstElementChild?.remove();
+  box.hidden = false;
+  box.scrollTop = box.scrollHeight;
+  armLoadingQuiet();
+}
+
+/** copies the loading-collected logs into the chat at the END of the resumed
+ *  history (called by loadHistory AFTER the render: the boxes survive the
+ *  thread reset and land at the bottom, never at the top) */
+function flushLoadingLogs(): void {
+  if (loadingLogs.length === 0) return;
+  const lines = loadingLogs.splice(0, loadingLogs.length);
+  for (const l of lines) {
+    const wrapper = addMsg("status");
+    const line = document.createElement("div");
+    line.className = `status-line level-${l.level}`;
+    line.textContent = l.text;
+    line.title = l.text;
+    wrapper.appendChild(line);
+  }
+  scrollToBottom();
+}
+
 async function connect(url: string): Promise<void> {
   transport?.close();
   transport = createWsTransport(url);
@@ -185,11 +291,14 @@ function setupTransport(tr: Transport): void {
       requestConfig();
       if (!demoMode) {
         void (async () => {
+          // loading begins NOW (before get_state): slow extensions logging
+          // during the resume must land in the loader box, not in the chat
+          beginSessionLoading();
           await refreshSessions();
-          hideBootLoader(); // initial data loaded (or retries exhausted)
         })();
       }
     } else if (s.state === "closed") {
+      endSessionLoading();
       hideBootLoader();
     }
   });
@@ -274,9 +383,43 @@ let themePref: ThemePreference = "system";
 // config (historyLimit), default 120 — the user changes it in the settings
 const DEFAULT_HISTORY_LIMIT = 120;
 let historyLimit = DEFAULT_HISTORY_LIMIT;
-// where turn-complete notifications go (config "notifications"):
-// "desktop" (default) | "vscode" (VS Code toast) | "off"
-let notificationsPref: "desktop" | "vscode" | "off" = "desktop";
+// notifications: `notificationsDefault` is the DEFAULT for NEW sessions
+// (global config); the CURRENT session can override it — the override lives
+// INSIDE the session jsonl file (SessionSettings), not in the global config.
+let notificationsDefault: "desktop" | "vscode" | "off" = "desktop";
+let sessionNotificationsOverride: "desktop" | "vscode" | "off" | undefined;
+
+function effectiveNotifications(): "desktop" | "vscode" | "off" {
+  return sessionNotificationsOverride ?? notificationsDefault;
+}
+
+// reads the current session's settings (override) from the host/bridge
+function refreshSessionNotificationOverride(): void {
+  sessionNotificationsOverride = undefined;
+  updateNotificationsSessionUi();
+  if (!currentSessionPath) return;
+  void ideRequest({
+    type: "getSessionSettings",
+    sessionPath: currentSessionPath,
+  }).then((res) => {
+    const v = res?.ok
+      ? (res.data as { notifications?: "desktop" | "vscode" | "off" } | null)
+          ?.notifications
+      : undefined;
+    if (v === "desktop" || v === "vscode" || v === "off") {
+      sessionNotificationsOverride = v;
+    }
+    updateNotificationsSessionUi();
+  });
+}
+
+// syncs the per-session select with the override of the CURRENT session
+// (called on locale changes AND on session switches)
+function updateNotificationsSessionUi(): void {
+  els.notificationsSession.value = sessionNotificationsOverride ?? "";
+  // without a known session there is nothing to customize
+  els.notificationsSession.disabled = !currentSessionPath;
+}
 let configId = 0;
 
 // dev params ?theme= / ?lang= (to check without config)
@@ -325,9 +468,10 @@ function applyUiStrings(): void {
   els.historyInput.value = String(historyLimit);
   els.themeLabel.textContent = t("theme");
   els.lang.value = currentLocale;
-  // notifications setting: options depend on the runtime — VS Code offers the
-  // in-app toast as well, the browser only desktop/off
-  els.notificationsLabel.textContent = t("settingsNotifications");
+  // notifications settings: the default (for NEW sessions) and the override
+  // for the CURRENT session. Options depend on the runtime — VS Code offers
+  // the in-app toast as well, the browser only desktop/off
+  els.notificationsLabel.textContent = t("settingsNotificationsDefault");
   const notifyOptions: Array<{ value: "desktop" | "vscode" | "off"; label: string }> = [
     { value: "desktop", label: t("notifyDesktop") },
     ...(runtime.isVsCode ? [{ value: "vscode" as const, label: t("notifyVscode") }] : []),
@@ -342,7 +486,26 @@ function applyUiStrings(): void {
       els.notifications.appendChild(opt);
     }
   }
-  els.notifications.value = notificationsPref;
+  els.notifications.value = notificationsDefault;
+  // per-session select: first option = follow the default (value "")
+  els.notificationsSessionLabel.textContent = t("settingsNotificationsSession");
+  if (
+    els.notificationsSession.options.length !==
+    notifyOptions.length + 1
+  ) {
+    els.notificationsSession.textContent = "";
+    const inherit = document.createElement("option");
+    inherit.value = "";
+    inherit.textContent = t("notifyUseDefault");
+    els.notificationsSession.appendChild(inherit);
+    for (const o of notifyOptions) {
+      const opt = document.createElement("option");
+      opt.value = o.value;
+      opt.textContent = o.label;
+      els.notificationsSession.appendChild(opt);
+    }
+  }
+  updateNotificationsSessionUi();
   updateStatus();
   updateThemeButtons();
   populateSessionMenu();
@@ -366,8 +529,12 @@ function requestConfig(): void {
       if (typeof cfg.historyLimit === "number" && cfg.historyLimit >= 1) {
         historyLimit = Math.floor(cfg.historyLimit);
       }
-      if (cfg.notifications === "desktop" || cfg.notifications === "vscode" || cfg.notifications === "off") {
-        notificationsPref = cfg.notifications;
+      if (
+        cfg.notifications === "desktop" ||
+        cfg.notifications === "vscode" ||
+        cfg.notifications === "off"
+      ) {
+        notificationsDefault = cfg.notifications;
       }
       applyUiStrings();
     }
@@ -386,8 +553,12 @@ function handleIdeResponse(res: IdeResponse): void {
     if (typeof cfg.historyLimit === "number" && cfg.historyLimit >= 1) {
       historyLimit = Math.floor(cfg.historyLimit);
     }
-    if (cfg.notifications === "desktop" || cfg.notifications === "vscode" || cfg.notifications === "off") {
-      notificationsPref = cfg.notifications;
+    if (
+      cfg.notifications === "desktop" ||
+      cfg.notifications === "vscode" ||
+      cfg.notifications === "off"
+    ) {
+      notificationsDefault = cfg.notifications;
     }
     applyUiStrings();
   }
@@ -799,12 +970,37 @@ els.historyInput.addEventListener("change", () => {
 els.notifications.addEventListener("change", () => {
   const v = els.notifications.value;
   if (v !== "desktop" && v !== "vscode" && v !== "off") return;
-  notificationsPref = v;
+  notificationsDefault = v; // default for NEW sessions
   transport?.send({
     channel: "ide",
     payload: {
       type: "setConfig",
       patch: { notifications: v },
+      id: `cfg-${++configId}`,
+    },
+  });
+});
+
+els.notificationsSession.addEventListener("change", () => {
+  const v = els.notificationsSession.value;
+  if (!currentSessionPath) return;
+  if (v === "") {
+    sessionNotificationsOverride = undefined; // follow the default again
+  } else if (v === "desktop" || v === "vscode" || v === "off") {
+    sessionNotificationsOverride = v;
+  } else {
+    return;
+  }
+  // the override lives INSIDE the session jsonl (custom entry), never in the
+  // global config: one key per session would grow it forever
+  transport?.send({
+    channel: "ide",
+    payload: {
+      type: "setSessionSettings",
+      sessionPath: currentSessionPath,
+      settings: sessionNotificationsOverride
+        ? { notifications: sessionNotificationsOverride }
+        : {},
       id: `cfg-${++configId}`,
     },
   });
@@ -1061,6 +1257,7 @@ async function refreshSessions(): Promise<void> {
         if (data?.sessionFile) {
           currentSessionPath = data.sessionFile;
           persistSessionPath(); // resume the same session on VS Code reloads
+          refreshSessionNotificationOverride(); // per-session select follows it
         }
         if (data?.model) {
           const m = data.model as {
@@ -1141,6 +1338,12 @@ async function loadHistory(): Promise<void> {
   void fetchSessionStats(); // context gauge after every session change
   void fetchBalance(); // real provider balance (after currentModel is known)
   void fetchCompactionSettings(); // pi auto-compaction threshold for the tooltip
+  // a session load (boot/switch/restart) cannot finish before the history is
+  // rendered: only now may the loader close (quiet timer). The logs collected
+  // under the spinner are appended at the END of the resumed chat.
+  loadingHistoryLoaded = true;
+  flushLoadingLogs();
+  if (sessionLoading) armLoadingQuiet();
 }
 
 // pi auto-compaction thresholds (config ~/.pi/config.json): for the tooltip
@@ -1380,8 +1583,12 @@ function switchSession(path: string): void {
       if (res.success) {
         currentSessionPath = path;
         persistSessionPath(); // resume this session on VS Code reloads
+        // loading overlay: slow extensions keep logging after the session
+        // file is ready — the chat must stay clean until they settle
+        beginSessionLoading();
         els.thread.textContent = "";
         await loadHistory();
+        refreshSessionNotificationOverride(); // the override follows the new session
       }
     } catch {
       // switch failed: the current session stays
@@ -3063,6 +3270,7 @@ function renderRpcEvent(evt: RpcEvent): void {
     // from a terminal (the real pi error is only visible by launching it by hand).
     // hideBootLoader: without it the loader stays until refreshSessions gives
     // up (get_state retries ≈ up to 27s) — the error must appear right away.
+    endSessionLoading(); // also clears the loading timers
     hideBootLoader();
     if (compacting) finishCompaction(true, (evt.errorMessage as string) ?? undefined);
     hideSentLoader();
@@ -3090,7 +3298,12 @@ function renderRpcEvent(evt: RpcEvent): void {
     savedCliValues = currentCliValues();
     if (compacting) finishCompaction(true, "restart");
     requestConfig();
-    if (!demoMode) void refreshSessions();
+    if (!demoMode) {
+      // same loading semantics as the boot: extensions logging during the
+      // re-init go under the spinner, the loader ends when they settle
+      beginSessionLoading();
+      void refreshSessions();
+    }
   }
   // UI requests of the pi extensions (ctx.ui.*) → webview modals (standalone)
   if (evt.type === "extension_ui_request") {
@@ -3102,7 +3315,8 @@ function renderRpcEvent(evt: RpcEvent): void {
     const path = String(evt.extensionPath ?? "");
     const err = evt.error as { message?: unknown } | undefined;
     const msg = String(err?.message ?? evt.error ?? "Extension error");
-    addSystemBox("error", path ? `${path}: ${msg}` : msg);
+    const line = path ? `${path}: ${msg}` : msg;
+    addSystemBox("error", line);
     return;
   }
   // raw pi stderr lines (terminal parity): forwarded by the host/bridge.
@@ -3308,20 +3522,36 @@ function cleanConsoleText(text: string): string {
 // "503 Server error: …" — parse the provider error JSON and render it
 // readable: <code> <type with spaces and capitalized>: <message>
 function formatProviderError(text: string): string {
-  const m = /^(?:Error:\s*(\d{3})\s*:)?\s*(\{.*\})$/s.exec(text);
-  if (!m) return text;
+  // the JSON blob can be anywhere: `500: {…}`, `Error: 500: {…}` or embedded
+  // in a longer line like `Retrying (1/3) in 2.0s — 500: {…}` → take the
+  // first {...} span and try to parse it
+  const start = text.indexOf("{");
+  if (start < 0) return text;
+  const end = text.lastIndexOf("}");
+  if (end <= start) return text;
+  let data: { type?: unknown; message?: unknown };
   try {
-    const data = JSON.parse(m[2] ?? "") as { type?: unknown; message?: unknown };
-    const type =
-      typeof data.type === "string"
-        ? data.type.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())
-        : "";
-    const msg = typeof data.message === "string" ? data.message : text;
-    const code = m[1] ? `${m[1]} ` : "";
-    return type ? `${code}${type}: ${msg}` : `${code}${msg}`;
+    data = JSON.parse(text.slice(start, end + 1)) as {
+      type?: unknown;
+      message?: unknown;
+    };
   } catch {
     return text;
   }
+  if (typeof data.message !== "string" || data.message === "") return text;
+  // type: capitalized, underscores → spaces ("rate_limit" → "Rate limit")
+  const type =
+    typeof data.type === "string"
+      ? data.type.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())
+      : "";
+  const formatted = type ? `${type}: ${data.message}` : data.message;
+  // keep what comes before the JSON (code and/or retry info): `500`,
+  // `Retrying (1/3) in 2.0s — 500`, … → `… . <Type>: <message>`
+  const prefix = text
+    .slice(0, start)
+    .replace(/[\s:—–-]+$/, "") // trailing separators before the JSON
+    .replace(/^Error:\s*/, ""); // avoid a doubled "Error:"
+  return prefix ? `${prefix}. ${formatted}` : formatted;
 }
 
 // system box with a level: one per error/warn/info, styled by class
@@ -3329,6 +3559,13 @@ function formatProviderError(text: string): string {
 function addSystemBox(level: "error" | "warn" | "info", text: string): void {
   const clean = formatProviderError(cleanConsoleText(text));
   if (!clean) return;
+  // during a session load every log line goes UNDER the spinner (collected
+  // and flushed at the END of the resumed chat) — never into the thread that
+  // the history render will reset anyway
+  if (sessionLoading) {
+    pushLoadingLog(level, clean);
+    return;
+  }
   const wrapper = addMsg("status");
   const line = document.createElement("div");
   line.className = `status-line level-${level}`;
@@ -3368,8 +3605,9 @@ document.addEventListener("pointerdown", requestNotifyPermission, { once: true }
 document.addEventListener("keydown", requestNotifyPermission, { once: true });
 
 function handlePiNotify(title: string, body: string): void {
-  // the notifications setting decides (browser offers desktop/off only)
-  if (notificationsPref === "off") return;
+  // the EFFECTIVE notifications setting decides (per-session override first,
+  // then the default; browser offers desktop/off only)
+  if (effectiveNotifications() === "off") return;
   if (document.visibilityState !== "hidden" && document.hasFocus()) return;
   const showBox = () => addSystemBox("info", title ? `${title} — ${body}` : body);
   if (!("Notification" in window)) {
@@ -3747,7 +3985,7 @@ function showCompactionBlock(): void {
   updateSendButton();
   updateSteerPlaceholder();
   updateThinkingStopBtn(false);
-  els.statsCtx.classList.add("loading");
+  els.ctxGauge.classList.add("loading");
   const wrapper = addMsg("status");
   wrapper.className = "msg status compact-msg";
   compactWrapper = wrapper;
@@ -3800,7 +4038,7 @@ function finishCompaction(error: boolean, errMsg?: string): void {
   updateSendButton();
   updateSteerPlaceholder();
   updateThinkingStopBtn(false);
-  els.statsCtx.classList.remove("loading");
+  els.ctxGauge.classList.remove("loading");
   void fetchSessionStats(); // the gauge updates (reset after compact)
 }
 
@@ -5430,11 +5668,17 @@ document.addEventListener("keydown", (e) => {
 function trackWorking(evt: RpcEvent): void {
   if (evt.type === "agent_start") {
     working = true;
+    // an agent run is part of the extension work at resume: the loading
+    // overlay must not end while it is active
+    loadingAgentActive = true;
     updateSendButton();
     updateSteerPlaceholder();
     updateThinkingStopBtn(true);
   } else if (evt.type === "agent_settled") {
     working = false;
+    loadingAgentActive = false;
+    // extension run finished: re-evaluate the loading end (quiet + idle)
+    if (sessionLoading) armLoadingQuiet();
     settleSentLoader(); // without a response: freeze the waited time anyway
     hideExtensionsBlock();
     // stops the tool timers left active (e.g. tool ABORTED by STOP:

@@ -135,6 +135,8 @@ import {
   deleteSessionFile,
   readSessionCliFlags,
   writeSessionCliFlags,
+  readSessionSettings,
+  writeSessionSettings,
 } from "../../bridge/sessions.ts";
 import { getTrust, setTrust } from "../../bridge/trust.ts";
 import { saveAttachment, pathExists } from "../../bridge/attachments.ts";
@@ -242,6 +244,15 @@ export abstract class PiWebviewHost {
    *  custom entry in the session jsonl file (per-session, not global) */
   protected cliFlagValues(): CliFlags {
     return readSessionCliFlags(this.currentSessionPath ?? "");
+  }
+
+  /** EFFECTIVE notifications mode for the CURRENT session: the per-session
+   *  override first (saved inside the session jsonl), then the default
+   *  (`notifications`, for NEW sessions) */
+  protected effectiveNotifications(): "desktop" | "vscode" | "off" {
+    const override = readSessionSettings(this.currentSessionPath ?? "")
+      .notifications;
+    return override ?? this.config.get().notifications ?? "desktop";
   }
 
   /** CLI arguments for the active flags (e.g. --session-control, --preset <v>) */
@@ -382,7 +393,7 @@ export abstract class PiWebviewHost {
             logLine(`notify ignored (noise) title=${title}`);
             return;
           }
-          const setting = this.config.get().notifications ?? "desktop";
+          const setting = this.effectiveNotifications();
           if (setting === "off") {
             logLine(`notify off (setting) title=${title}`);
             return;
@@ -565,6 +576,20 @@ export abstract class PiWebviewHost {
         this.restartPi();
         return;
       }
+      case "getSessionSettings":
+        this.respond(
+          req.id,
+          true,
+          readSessionSettings(req.sessionPath ?? this.currentSessionPath ?? ""),
+        );
+        return;
+      case "setSessionSettings": {
+        // write INSIDE the session file (custom entry): no global config keys
+        const path = req.sessionPath ?? this.currentSessionPath ?? "";
+        writeSessionSettings(path, req.settings ?? {});
+        this.respond(req.id, true, readSessionSettings(path));
+        return;
+      }
       case "forkSession":
         try {
           const ws = this.workspace();
@@ -654,7 +679,7 @@ export abstract class PiWebviewHost {
           nativeNotify(
             req.title,
             req.body,
-            this.config.get().notifications ?? "desktop",
+            this.effectiveNotifications(),
             this.config.get().locale,
             vscode.Uri.joinPath(this.context.extensionUri, "media", "icon.png").fsPath,
           ),

@@ -2039,9 +2039,19 @@ footer {
   flex: 0 0 auto;
   transform: rotate(-90deg);
 }
-/* compaction in progress: the gauge spins like a loader */
+/* compaction in progress: the gauge turns into a spinning loader.
+   A full ring rotating would look static → hide the track and keep only
+   a partial arc (dasharray < circumference) that rotates like a spinner. */
 .ctx-gauge.loading {
   animation: ctx-spin 1.1s linear infinite;
+}
+.ctx-gauge.loading .ctx-track {
+  opacity: 0.25;
+}
+.ctx-gauge.loading .ctx-fill {
+  stroke-dasharray: 42; /* partial arc: visible rotation */
+  stroke-dashoffset: 0;
+  transition: none;
 }
 @keyframes ctx-spin {
   from {
@@ -2161,6 +2171,37 @@ footer {
   gap: 12px;
   font-size: 14px;
   color: var(--fg-secondary);
+}
+.boot-loader-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: min(640px, 92vw);
+}
+/* extension logs collected while a session loads: under the spinner,
+   scrollable, monospace — the chat stays clean until loading ends */
+.boot-loader-logs {
+  align-self: stretch;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* level colors inside the loading log box (same AA tokens as the chat) */
+.boot-loader-log.level-error {
+  color: var(--level-err-text);
+}
+.boot-loader-log.level-warn {
+  color: var(--level-warn-text);
 }
 
 .tool-output {

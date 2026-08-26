@@ -25,6 +25,8 @@ import {
   getSessionInfo,
   renameSessionFile,
   deleteSessionFile,
+  readSessionSettings,
+  writeSessionSettings,
 } from "./sessions.ts";
 import { getTrust, setTrust } from "./trust.ts";
 import { saveAttachment, pathExists } from "./attachments.ts";
@@ -325,6 +327,20 @@ function stderrAllowed(): boolean {
         configStore.patch(req.patch);
         log(`config updated: ${JSON.stringify(req.patch)}`);
         respond(req.id ?? "", { ok: true, data: configStore.get() });
+        return;
+      }
+      if (req.type === "getSessionSettings") {
+        respond(req.id ?? "", {
+          ok: true,
+          data: readSessionSettings(req.sessionPath ?? ""),
+        });
+        return;
+      }
+      if (req.type === "setSessionSettings") {
+        // write INSIDE the session file (custom entry): no global config keys
+        const path = req.sessionPath ?? "";
+        writeSessionSettings(path, req.settings ?? {});
+        respond(req.id ?? "", { ok: true, data: readSessionSettings(path) });
         return;
       }
       if (req.type === "getWorkspace") {

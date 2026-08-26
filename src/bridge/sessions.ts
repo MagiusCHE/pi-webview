@@ -255,20 +255,21 @@ function encodeProjectFolder(path: string): string {
   return `--${inner}--`;
 }
 
-// --- per-session CLI flags (settings block 3) --------------------------------
+// --- per-session custom entries (settings block 3 + session settings) -------
 // Saved as a CUSTOM ENTRY in the session jsonl file (NOT in settings, which
 // would grow for every session): same format as pi.appendCustomEntry
-// ({type:"custom", customType:"pi-webview-cli-flags", data:{...}}). Custom
-// entries have no role → history ignores them. The LAST entry wins.
+// ({type:"custom", customType:"...", data:{...}}). Custom entries have no
+// role → history ignores them. The LAST entry wins.
 
 const CLI_FLAGS_CUSTOM_TYPE = "pi-webview-cli-flags";
+const SESSION_SETTINGS_CUSTOM_TYPE = "pi-webview-session-settings";
 
-/** reads the session's active CLI flags (the last custom entry wins) */
-export function readSessionCliFlags(path: string): CliFlags {
-  if (!existsSync(path)) return {};
+/** reads the LAST custom entry of the given type (undefined = never set) */
+function readSessionCustomEntry<T>(path: string, customType: string): T | undefined {
+  if (!existsSync(path)) return undefined;
   try {
     const content = readFileSync(path, "utf-8");
-    let flags: CliFlags = {};
+    let data: T | undefined;
     for (const raw of content.split("\n")) {
       if (!raw.trim()) continue;
       let e: { type?: string; customType?: string; data?: unknown };
@@ -277,23 +278,23 @@ export function readSessionCliFlags(path: string): CliFlags {
       } catch {
         continue;
       }
-      if (
-        e.type === "custom" &&
-        e.customType === CLI_FLAGS_CUSTOM_TYPE &&
-        e.data &&
-        typeof e.data === "object"
-      ) {
-        flags = e.data as CliFlags;
+      if (e.type === "custom" && e.customType === customType) {
+        data = e.data as T;
       }
     }
-    return flags;
+    return data;
   } catch {
-    return {};
+    return undefined;
   }
 }
 
-/** writes the session's active CLI flags (append of a custom entry) */
-export function writeSessionCliFlags(path: string, flags: CliFlags): void {
+/** appends a custom entry (parentId = id of the last entry, like pi does
+ *  with appendCustomEntry) */
+function appendSessionCustomEntry(
+  path: string,
+  customType: string,
+  data: unknown,
+): void {
   if (!existsSync(path)) return;
   try {
     // parentId = id of the last entry (the current leaf), like pi does with
@@ -312,8 +313,8 @@ export function writeSessionCliFlags(path: string, flags: CliFlags): void {
     }
     const entry = {
       type: "custom",
-      customType: CLI_FLAGS_CUSTOM_TYPE,
-      data: flags,
+      customType,
+      data,
       id: randomUUID().slice(0, 8),
       ...(parentId ? { parentId } : {}),
       timestamp: new Date().toISOString(),
@@ -322,4 +323,37 @@ export function writeSessionCliFlags(path: string, flags: CliFlags): void {
   } catch {
     // best effort: never break Apply because of a failed write
   }
+}
+
+/** reads the session's active CLI flags (the last custom entry wins) */
+export function readSessionCliFlags(path: string): CliFlags {
+  return readSessionCustomEntry<CliFlags>(path, CLI_FLAGS_CUSTOM_TYPE) ?? {};
+}
+
+/** writes the session's active CLI flags (append of a custom entry) */
+export function writeSessionCliFlags(path: string, flags: CliFlags): void {
+  appendSessionCustomEntry(path, CLI_FLAGS_CUSTOM_TYPE, flags);
+}
+
+// --- per-session webview settings (notifications override) -------------------
+
+/** per-session overrides saved INSIDE the session file (never in the global
+ *  config, which would grow one key per session). Missing field → follow
+ *  the global default. */
+export interface SessionSettings {
+  /** notifications mode for THIS session only */
+  notifications?: "desktop" | "vscode" | "off";
+}
+
+export function readSessionSettings(path: string): SessionSettings {
+  return (
+    readSessionCustomEntry<SessionSettings>(path, SESSION_SETTINGS_CUSTOM_TYPE) ??
+    {}
+  );
+}
+
+/** replaces the session's settings (full replace: last entry wins; an empty
+ *  object removes every override → back to the defaults) */
+export function writeSessionSettings(path: string, settings: SessionSettings): void {
+  appendSessionCustomEntry(path, SESSION_SETTINGS_CUSTOM_TYPE, settings);
 }

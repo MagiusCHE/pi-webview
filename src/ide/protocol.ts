@@ -126,6 +126,13 @@ export type IdeRequest =
   | { type: "getVersion"; id?: string }
   | { type: "getCliFlags"; id?: string }
   | { type: "setCliFlags"; flags: CliFlags; id?: string }
+  | { type: "getSessionSettings"; sessionPath?: string; id?: string }
+  | {
+      type: "setSessionSettings";
+      sessionPath?: string;
+      settings: SessionSettings;
+      id?: string;
+    }
   | { type: "listDir"; path: string; id?: string }
   | {
       type: "setWorkspace";
@@ -204,6 +211,12 @@ export type CliFlagValue = boolean | string;
 /** active values (flag → value), persisted per workspace */
 export type CliFlags = Record<string, CliFlagValue>;
 
+/** per-session overrides saved inside the session jsonl (see sessions.ts) */
+export interface SessionSettings {
+  /** notifications mode for THIS session only (absent → global default) */
+  notifications?: "desktop" | "vscode" | "off";
+}
+
 /** description of a registered flag (from `pi --help` → Extension CLI Flags) */
 export interface CliFlagInfo {
   name: string;
@@ -225,9 +238,10 @@ export interface UserConfig {
   locale?: LocaleId;
   /** max number of messages shown in history (resume and runtime) */
   historyLimit?: number;
-  /** where turn-complete notifications go: desktop (default) | vscode | off.
-   *  The "vscode" value only makes sense in the VS Code companion; in the
-   *  browser only desktop/off are offered. */
+  /** DEFAULT for NEW sessions: where turn-complete notifications go:
+   *  desktop | vscode | off. Per-session overrides live INSIDE the session
+   *  file (SessionSettings), not here. The "vscode" value only makes sense
+   *  in the VS Code companion; in the browser only desktop/off are offered. */
   notifications?: "desktop" | "vscode" | "off";
 }
 

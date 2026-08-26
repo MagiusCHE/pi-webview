@@ -9,9 +9,15 @@
   <body>
     <!-- boot loader: covers the UI until there is data -->
     <div id="boot-loader" class="boot-loader">
-      <div class="boot-loader-content">
-        <span class="spinner"></span>
-        <span id="boot-loader-text">Caricamento…</span>
+      <div class="boot-loader-stack">
+        <div class="boot-loader-content">
+          <span class="spinner"></span>
+          <span id="boot-loader-text">Caricamento…</span>
+        </div>
+        <!-- extension logs while a session loads (slow extensions keep
+             logging after the session file is ready): shown UNDER the
+             spinner, the loader stays up until they go quiet -->
+        <div id="boot-loader-logs" class="boot-loader-logs" hidden></div>
       </div>
     </div>
 
@@ -92,6 +98,10 @@
         <div class="settings-row">
           <label id="settings-notifications-label" for="notifications">Notifiche</label>
           <select id="notifications" class="field-select" title="Notifications"></select>
+        </div>
+        <div class="settings-row">
+          <label id="settings-notifications-session-label" for="notifications-session">Questa sessione</label>
+          <select id="notifications-session" class="field-select" title="Notifications (this session)"></select>
         </div>
         <!-- pi.dev settings: block 2 (via /settings, from pi.dev) → placeholder;
              block 3 (launch CLI flags) → dynamic rows from the flags

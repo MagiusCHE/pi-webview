@@ -87,7 +87,12 @@
   <Target Name="EmbedCtoResource"
           Condition="$([System.String]::Copy('$(MSBuildProjectName)').EndsWith('_wpftmp')) != true"
           AfterTargets="CoreCompile">
-    <Exec Command="mono &quot;$(MSBuildProjectDirectory)/../../../../../tools/CtoEmbedder/bin/$(Configuration)/net472/CtoEmbedder.exe&quot; &quot;$(IntermediateOutputPath)$(TargetName).dll&quot; &quot;$(IntermediateOutputPath)Commands.cto&quot; Menus.ctmenu" />
+    <!-- CtoEmbedder is a net472 exe: runs natively on Windows (.NET
+         Framework present), via mono on Linux (see tools/setup-vs-wine.mjs) -->
+    <Exec Condition="$([MSBuild]::IsOsPlatform('Windows'))"
+          Command="&quot;$(MSBuildProjectDirectory)/../../../../../tools/CtoEmbedder/bin/$(Configuration)/net472/CtoEmbedder.exe&quot; &quot;$(IntermediateOutputPath)$(TargetName).dll&quot; &quot;$(IntermediateOutputPath)Commands.cto&quot; Menus.ctmenu" />
+    <Exec Condition="!$([MSBuild]::IsOsPlatform('Windows'))"
+          Command="mono &quot;$(MSBuildProjectDirectory)/../../../../../tools/CtoEmbedder/bin/$(Configuration)/net472/CtoEmbedder.exe&quot; &quot;$(IntermediateOutputPath)$(TargetName).dll&quot; &quot;$(IntermediateOutputPath)Commands.cto&quot; Menus.ctmenu" />
   </Target>
 
   <!-- The VSSDK GeneratePkgDef target is disabled (GeneratePkgDefFile=false):
@@ -119,6 +124,18 @@
   <PropertyGroup>
     <!-- InstallationTarget: Visual Studio 17.x (2022) and 18.x (2026) -->
     <ExtensionInstallationFolder>PiWebview</ExtensionInstallationFolder>
+    <!-- fallback for plain `dotnet build`; the canonical build passes
+         -p:VsixVersion=<package.json version> (tools/build-vs-vsix.mjs) -->
+    <VsixVersion Condition="'$(VsixVersion)' == ''">0.1.3</VsixVersion>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- $(version) token in source.extension.vsixmanifest: replaced by the
+         VSSDK DetokenizeVsixManifestSource task at build time (the task
+         supports MSBuild-style $(name) tokens, not $name$ ones) -->
+    <VsixReplacement Include="version">
+      <Value>$(VsixVersion)</Value>
+    </VsixReplacement>
+  </ItemGroup>
 
 </Project>

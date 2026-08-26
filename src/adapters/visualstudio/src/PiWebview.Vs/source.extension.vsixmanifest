@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="PiWebview.Vs.4d433864-8ac9-420a-bc57-700940833fc6" Version="0.1.3" Language="en-US" Publisher="pi-webview" />
+    <!-- $version$ is detokenized at build by the VSSDK DetokenizeVsixManifestSource
+         task (VsixReplacement item in the csproj): canonical builds pass
+         -p:VsixVersion=<package.json version> (tools/build-vs-vsix.mjs) -->
+    <Identity Id="PiWebview.Vs.4d433864-8ac9-420a-bc57-700940833fc6" Version="$(version)" Language="en-US" Publisher="pi-webview" />
     <DisplayName>pi</DisplayName>
     <Description xml:space="preserve">Companion Visual Studio di pi-webview: webview dell'agente pi (headless, --mode rpc) integrata nell'IDE. Adapter C# nativo del concept 0005. Nome e icona allineati al companion VS Code.</Description>
     <Icon>icon.png</Icon>

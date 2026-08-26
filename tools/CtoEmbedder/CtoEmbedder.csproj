@@ -11,6 +11,9 @@
 
   <ItemGroup>
     <PackageReference Include="Mono.Cecil" Version="0.11.5" />
+    <!-- net472 reference assemblies: builds with a plain .NET SDK on any OS
+         (no Visual Studio targeting pack / mono required) -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
   </ItemGroup>
 
 </Project>

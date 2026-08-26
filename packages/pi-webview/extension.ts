@@ -12,12 +12,13 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join, posix, relative } from "node:path";
 import { homedir } from "node:os";
-import { existsSync, lstatSync, mkdirSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync, type Dirent } from "node:fs";
 import { readVsixVersion } from "./lib/vsix-version.ts";
 
 const execFileAsync = promisify(execFile);
 
 const COMPANION_ID = "magiusche.pi-webview-ide";
+const VSIX_ID = "PiWebview.Vs.4d433864-8ac9-420a-bc57-700940833fc6";
 const PKG_NAME = "@magiusche/pi-webview";
 // `pi remove` wants the name WITH the npm: source prefix (like `pi install npm:…`)
 const PKG_REF = `npm:${PKG_NAME}`;
@@ -161,19 +162,83 @@ async function visualStudioInstances(): Promise<string[]> {
   }
 }
 
+// Installed VS companion version: the admin install (/a) goes into each
+// instance's Common7\IDE\Extensions, per-user installs into
+// %LocalAppData%\Microsoft\VisualStudio\<version>_<sku>\Extensions. Scan both
+// (bounded walk) for an extension.vsixmanifest whose Identity Id matches
+// VSIX_ID. Returns null when not installed, "" when present without version.
+export function findVsixManifestVersion(root: string, id: string, maxDepth: number): string | null {
+  const walk = (dir: string, depth: number): string | null => {
+    if (depth > maxDepth) return null;
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return null; // unreadable dir (permissions): skip
+    }
+    for (const entry of entries) {
+      const p = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === ".cache") continue; // VS cache dirs
+        const found = walk(p, depth + 1);
+        if (found !== null) return found;
+      } else if (entry.isFile() && entry.name.toLowerCase() === "extension.vsixmanifest") {
+        try {
+          const xml = readFileSync(p, "utf-8");
+          const at = xml.indexOf(`Id="${id}"`);
+          if (at >= 0) return /Version="([^"]+)"/.exec(xml.slice(at, at + 200))?.[1] ?? "";
+        } catch {
+          // unreadable manifest: keep scanning
+        }
+      }
+    }
+    return null;
+  };
+  return walk(root, 0);
+}
+
+async function installedVsCompanionVersion(instances: string[]): Promise<string | null> {
+  const roots = instances.map((inst) => join(inst, "Common7", "IDE", "Extensions"));
+  const localVs = process.env.LOCALAPPDATA
+    ? join(process.env.LOCALAPPDATA, "Microsoft", "VisualStudio")
+    : "";
+  if (localVs) roots.push(localVs);
+  const seen = new Set<string>();
+  for (const root of roots) {
+    if (seen.has(root) || !existsSync(root)) continue;
+    seen.add(root);
+    const found = findVsixManifestVersion(root, VSIX_ID, 6);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
 async function installVsCompanion(vsixPath: string): Promise<string | null> {
   if (!existsSync(vsixPath)) return null; // vsix not bundled (build without pnpm package:vs)
   const instances = await visualStudioInstances();
   if (instances.length === 0) return null; // no Visual Studio: silent skip
   const vsixInstaller = join(instances[0]!, "Common7", "IDE", "VSIXInstaller.exe");
   if (!existsSync(vsixInstaller)) return null;
+  // skip when the installed version already matches the bundled vsix
+  // (mirror of the VS Code companion check)
+  const vsixVersion = readVsixVersion(vsixPath);
+  const installed = await installedVsCompanionVersion(instances);
+  if (installed !== null && vsixVersion !== undefined && installed === vsixVersion) {
+    return null;
+  }
   try {
     // /q = quiet, /a = admin (installs for all users, like code --install-extension)
     await execFileAsync(vsixInstaller, ["/q", "/a", vsixPath], {
       timeout: 120_000,
       windowsHide: true,
     });
-    return `Visual Studio: ${instances.length} instance(s) found, companion installed (VSIXInstaller).`;
+    // update (not fresh install) → signal the open IDE to reload
+    if (installed !== null && vsixVersion !== undefined) {
+      writeReloadSignal(vsixVersion);
+    }
+    return installed === null
+      ? "Visual Studio: companion installed (VSIXInstaller). Reload Visual Studio to activate the webview."
+      : `Visual Studio: companion updated to ${vsixVersion}. Reload Visual Studio to activate the webview.`;
   } catch (err) {
     return `pi-webview: Visual Studio companion install failed: ${err instanceof Error ? err.message : String(err)}`;
   }

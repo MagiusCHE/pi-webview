@@ -152,6 +152,8 @@ export type IdeRequest =
       dataBase64: string;
       id?: string;
     }
+  | { type: "attachPath"; path: string; id?: string }
+  | { type: "pickFile"; id?: string }
   | { type: "pathExists"; path: string; id?: string }
   | { type: "getSessionInfo"; path: string; id?: string }
   | { type: "getCompactionSettings"; id?: string }

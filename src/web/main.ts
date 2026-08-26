@@ -109,6 +109,7 @@ const els = {
   dropOverlayIcon: document.getElementById("drop-overlay-icon") as HTMLSpanElement,
   dropOverlayText: document.getElementById("drop-overlay-text") as HTMLSpanElement,
   send: document.getElementById("btn-send") as HTMLButtonElement,
+  attachBtn: document.getElementById("btn-attach") as HTMLButtonElement,
   trust: document.getElementById("trust") as HTMLButtonElement,
   trustIcon: document.getElementById("trust-icon") as HTMLSpanElement,
   trustLabel: document.getElementById("trust-label") as HTMLSpanElement,
@@ -5458,7 +5459,7 @@ function renameForMime(name: string, mimeType: string): string {
   return name.replace(/\.[a-z0-9]+$/i, ext) || name + ext;
 }
 
-async function handlePastedFile(file: File): Promise<void> {
+async function handlePastedFile(file: File): Promise<boolean> {
   const isImage = file.type.startsWith("image/");
   let base64 = "";
   let mimeType = file.type;
@@ -5467,7 +5468,11 @@ async function handlePastedFile(file: File): Promise<void> {
     base64 = compressed.base64;
     mimeType = compressed.mimeType;
   } catch {
-    return;
+    // unreadable File (sandboxed VS Code webview): visible feedback instead
+    // of a silent no-op — the drop falls back to URIs only when no File
+    // objects were handed over at all
+    addStatusLine(tpl(t("dropFailed"), { name: file.name || "?" }));
+    return false;
   }
   const name =
     mimeType === file.type
@@ -5488,7 +5493,9 @@ async function handlePastedFile(file: File): Promise<void> {
       // we keep the base64 only for the images (preview + inline send if vision)
       dataBase64: isImage ? base64 : undefined,
     });
+    return true;
   }
+  return false;
 }
 
 els.input.addEventListener("paste", (e) => {
@@ -5515,42 +5522,143 @@ els.dropOverlayText.textContent = t("dropToAttach");
 let dragDepth = 0;
 
 function hasFiles(e: DragEvent): boolean {
-  return Array.from(e.dataTransfer?.types ?? []).includes("Files");
+  const types = Array.from(e.dataTransfer?.types ?? []);
+  // "Files" = real files (OS file manager / browser). VS Code-internal drags
+  // (file explorer, editor tabs) arrive as text/uri-list with vscode-file://
+  // URIs instead — treated as files too.
+  return (
+    types.includes("Files") ||
+    types.some((t) => t.toLowerCase() === "text/uri-list")
+  );
+}
+
+/** vscode-file:///home/u/f.txt → /home/u/f.txt; Windows /c:/Users/… → c:/Users/… */
+function uriPathFromDrop(uri: string): string | undefined {
+  const m = uri.match(/^vscode-file:\/\/(.+)$/i) ?? uri.match(/^file:\/\/(.+)$/i);
+  if (!m) return undefined;
+  const p = decodeURIComponent(m[1]!);
+  return p.replace(/^\/([a-zA-Z]:[\\/].*)$/, "$1");
+}
+
+/** IDE-internal dropped file: the host adapter reads it from disk. */
+async function attachPathFromDrop(path: string): Promise<void> {
+  const res = await ideRequest({ type: "attachPath", path });
+  const data = res?.ok
+    ? (res.data as
+        | { path?: string; name?: string; mimeType?: string; dataBase64?: string }
+        | undefined)
+    : undefined;
+  if (!data?.path || !data.name) {
+    addStatusLine(
+      tpl(t("dropFailed"), { name: path.split(/[\\/]/).pop() ?? path }),
+    );
+    return;
+  }
+  addAttachment({
+    path: data.path,
+    name: data.name,
+    mimeType: data.mimeType ?? "application/octet-stream",
+    dataBase64: data.dataBase64,
+  });
 }
 
 function hideDropOverlay(): void {
   if (dragDepth <= 0) els.dropOverlay.hidden = true;
 }
 
-document.addEventListener("dragenter", (e) => {
-  if (!hasFiles(e)) return;
-  e.preventDefault();
-  dragDepth++;
-  els.dropOverlay.hidden = false;
-});
+// drag & drop handlers on `window` (CAPTURE phase). NOTE: inside the VS Code
+// webview these events NEVER fire for file drags — the workbench intercepts
+// drag & drop before it reaches the webview iframe (microsoft/vscode#139111,
+// #182449): file drag & drop works only in the standalone browser. In the IDE
+// the reliable path is the 📎 attach button (pickFile → showOpenDialog).
+window.addEventListener(
+  "dragenter",
+  (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth++;
+    els.dropOverlay.hidden = false;
+  },
+  true,
+);
 
-document.addEventListener("dragover", (e) => {
-  if (!hasFiles(e)) return;
-  e.preventDefault();
-  if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
-});
+window.addEventListener(
+  "dragover",
+  (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  },
+  true,
+);
 
-document.addEventListener("dragleave", (e) => {
-  if (!hasFiles(e)) return;
-  dragDepth = Math.max(0, dragDepth - 1);
-  if (dragDepth === 0) hideDropOverlay();
-});
+window.addEventListener(
+  "dragleave",
+  (e) => {
+    if (!hasFiles(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) hideDropOverlay();
+  },
+  true,
+);
 
-document.addEventListener("drop", (e) => {
-  dragDepth = 0;
-  hideDropOverlay();
-  if (!hasFiles(e)) return;
-  e.preventDefault();
-  const files = Array.from(e.dataTransfer?.files ?? []);
-  for (const f of files) void handlePastedFile(f);
-});
+window.addEventListener(
+  "drop",
+  (e) => {
+    dragDepth = 0;
+    hideDropOverlay();
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    const dt = e.dataTransfer;
+    const files = dt ? Array.from(dt.files ?? []) : [];
+    let uris: string[] = [];
+    if (dt) {
+      try {
+        // sandboxed webviews may throw on getData — never let the drop die
+        uris = (dt.getData("text/uri-list") ?? "")
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter((l) => l && !l.startsWith("#"));
+      } catch {
+        uris = [];
+      }
+    }
+    // VS Code sandbox: File objects from the OS drag are usually unreadable
+    // (and internal explorer drags have no File objects at all) → prefer the
+    // vscode-file:// URIs, read by the host adapter; real File objects are
+    // the path in the standalone browser instead
+    const useUris = runtime.isVsCode && uris.length > 0;
+    if (files.length > 0 && !useUris) {
+      for (const f of files) void handlePastedFile(f);
+      return;
+    }
+    for (const uri of uris) {
+      const path = uriPathFromDrop(uri);
+      if (path) void attachPathFromDrop(path);
+    }
+  },
+  true,
+);
 
 els.send.addEventListener("click", sendOrStop);
+els.attachBtn.title = t("attachBtn");
+els.attachBtn.hidden = !runtime.isVsCode; // native file dialog only in the IDE
+els.attachBtn.addEventListener("click", () => {
+  if (els.attachBtn.disabled) return;
+  void (async () => {
+    els.attachBtn.disabled = true;
+    try {
+      const res = await ideRequest({ type: "pickFile" });
+      const paths =
+        res?.ok && Array.isArray((res.data as { paths?: string[] } | undefined)?.paths)
+          ? ((res.data as { paths: string[] }).paths)
+          : [];
+      for (const p of paths) void attachPathFromDrop(p);
+    } finally {
+      els.attachBtn.disabled = false;
+    }
+  })();
+});
 // new chat in another panel: handled by the companion (only in the IDE;
 // standalone the request falls into the void and the UI stays as is)
 // new chat: in the IDE the companion handles it (new webview); standalone

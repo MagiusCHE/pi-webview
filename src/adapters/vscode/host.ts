@@ -140,7 +140,11 @@ import {
 } from "../../bridge/sessions.ts";
 import { getTrust, setTrust } from "../../bridge/trust.ts";
 import { readStartupInfo } from "../../bridge/startup-info.ts";
-import { saveAttachment, pathExists } from "../../bridge/attachments.ts";
+import {
+  saveAttachment,
+  pathExists,
+  attachFromPath,
+} from "../../bridge/attachments.ts";
 import { fetchProviderBalance } from "../../bridge/balance.ts";
 import type {
   Frame,
@@ -709,6 +713,51 @@ export abstract class PiWebviewHost {
             true,
             saveAttachment(req.name, req.mimeType, req.dataBase64),
           );
+        } catch (err) {
+          this.respond(
+            req.id,
+            false,
+            undefined,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+        return;
+      case "pickFile":
+        // attach via the native VS Code file dialog: reliable fallback when
+        // the drag & drop into the webview is swallowed by the workbench
+        {
+          const locale = this.config.get().locale;
+          void vscode.window
+            .showOpenDialog({
+              canSelectFiles: true,
+              canSelectFolders: false,
+              canSelectMany: true,
+              openLabel: hostT(locale, "Allega", "Attach"),
+              title: hostT(
+                locale,
+                "Allega file alla sessione",
+                "Attach files to the session",
+              ),
+            })
+            .then(
+              (uris) => {
+                this.respond(req.id, true, {
+                  paths: (uris ?? []).map((u) => u.fsPath),
+                });
+              },
+              (err) =>
+                this.respond(
+                  req.id,
+                  false,
+                  undefined,
+                  err instanceof Error ? err.message : String(err),
+                ),
+            );
+        }
+        return;
+      case "attachPath":
+        try {
+          this.respond(req.id, true, attachFromPath(req.path));
         } catch (err) {
           this.respond(
             req.id,

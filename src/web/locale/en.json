@@ -58,6 +58,8 @@
     "attachmentsShort": "attachment",
     "scrollToBottom": "Go to bottom",
     "dropToAttach": "Drop to attach the file",
+    "dropFailed": "Attachment failed: {name}",
+    "attachBtn": "Attach file",
     "loading": "Loading…",
     "result": "result",
     "waitingResponse": "Waiting for response…",

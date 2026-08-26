@@ -30,7 +30,11 @@ import {
 } from "./sessions.ts";
 import { getTrust, setTrust } from "./trust.ts";
 import { readStartupInfo } from "./startup-info.ts";
-import { saveAttachment, pathExists } from "./attachments.ts";
+import {
+  saveAttachment,
+  pathExists,
+  attachFromPath,
+} from "./attachments.ts";
 import { fetchProviderBalance } from "./balance.ts";
 import { clearLock } from "./lock.ts";
 
@@ -440,6 +444,26 @@ function stderrAllowed(): boolean {
             error: `attachment save failed: ${err instanceof Error ? err.message : String(err)}`,
           });
         }
+        return;
+      }
+      if (req.type === "attachPath") {
+        try {
+          respond(req.id ?? "", { ok: true, data: attachFromPath(req.path) });
+        } catch (err) {
+          respond(req.id ?? "", {
+            ok: false,
+            error: `attach failed: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
+        return;
+      }
+      if (req.type === "pickFile") {
+        // standalone: the browser cannot open the VS Code dialog — the attach
+        // button is hidden outside the IDE; answer an error just in case
+        respond(req.id ?? "", {
+          ok: false,
+          error: "pickFile: solo nell'IDE (VS Code)",
+        });
         return;
       }
       if (req.type === "pathExists") {

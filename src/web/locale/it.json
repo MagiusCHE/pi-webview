@@ -58,6 +58,8 @@
     "attachmentsShort": "allegato",
     "scrollToBottom": "Vai in fondo",
     "dropToAttach": "Rilascia per allegare il file",
+    "dropFailed": "Allegato non riuscito: {name}",
+    "attachBtn": "Allega file",
     "loading": "Caricamento…",
     "result": "risultato",
     "waitingResponse": "Attesa risposta…",

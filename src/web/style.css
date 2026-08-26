@@ -1086,7 +1086,7 @@ footer {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 3px 8px 3px 5px;
+  padding: 3px 6px 3px 4px;
   font-size: 12px;
   color: var(--fg-secondary);
 }
@@ -1157,7 +1157,7 @@ footer {
   container-type: inline-size; /* per le query responsive della toolbar */
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 5px;
   padding: 6px 10px 8px;
 }
 .toolbar-chip {
@@ -1185,6 +1185,11 @@ footer {
 }
 .trust-indicator[data-status="ask"] {
   color: var(--ok);
+}
+.attach-btn {
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 3px;
 }
 .trust-indicator[data-status="untrusted"] {
   color: var(--warn);
@@ -1985,7 +1990,7 @@ footer {
 .stats-badge {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 5px;
   width: 100%;
   max-width: var(--thread-max-width);
   margin-inline: auto;
@@ -1996,9 +2001,9 @@ footer {
   border: 1px solid var(--border-strong); /* stesso colore del bordo della box di input */
   border-bottom: none;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0; /* angoli bassi squadrati: saldato alla box */
-  padding: 3px 12px;
+  padding: 0 8px;
   color: var(--fg-secondary);
-  font-size: 12px;
+  font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
 }
@@ -2012,15 +2017,15 @@ footer {
 .stats-ctx {
   cursor: pointer;
   border-radius: 999px;
-  padding: 1px 4px;
-  margin-left: -4px;
+  padding: 0 2px;
+  margin-left: -2px;
 }
 .stats-ctx:hover {
   background: var(--hover);
 }
 .ctx-gauge {
-  width: 20px;
-  height: 20px;
+  width: 14px;
+  height: 14px;
   flex: 0 0 auto;
   transform: rotate(-90deg);
 }

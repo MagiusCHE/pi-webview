@@ -1,50 +1,53 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { saveAttachment, pathExists } from "../src/bridge/attachments.ts";
+import { attachFromPath, mimeFromPath } from "../src/bridge/attachments.ts";
 
-test("saveAttachment: salva i byte e restituisce il path", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-webview-att-"));
+test("attachFromPath copia il file e indovina il mime dall'estensione", () => {
+  const dir = mkdtempSync(join(tmpdir(), "piw-att-test-"));
   try {
-    const b64 = Buffer.from("hello").toString("base64");
-    const res = saveAttachment("test.txt", "text/plain", b64, dir);
-    assert.ok(res.path.startsWith(dir));
-    assert.equal(readFileSync(res.path, "utf-8"), "hello");
+    const src = join(dir, "foto.png");
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    writeFileSync(src, png);
+    const res = attachFromPath(src, join(dir, "out"));
+    assert.equal(res.name, "foto.png");
+    assert.equal(res.mimeType, "image/png");
+    assert.ok(res.dataBase64, "small image gets inline base64");
+    assert.ok(existsSync(res.path));
+    assert.deepEqual(readFileSync(res.path), png);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("saveAttachment: sanifica il nome (niente traversal)", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-webview-att-"));
+test("attachFromPath: file non-immagine senza base64", () => {
+  const dir = mkdtempSync(join(tmpdir(), "piw-att-test-"));
   try {
-    const res = saveAttachment(
-      "../../etc/passwd",
-      "text/plain",
-      Buffer.from("x").toString("base64"),
-      dir,
-    );
-    assert.ok(res.path.startsWith(dir), res.path);
-    assert.ok(!res.path.includes(".."));
+    const src = join(dir, "note.md");
+    writeFileSync(src, "# ciao");
+    const res = attachFromPath(src, join(dir, "out"));
+    assert.equal(res.mimeType, "text/markdown");
+    assert.equal(res.dataBase64, undefined);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("pathExists: vero per file esistenti, falso altrimenti", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-webview-att-"));
+test("attachFromPath fallisce su path inesistente o directory", () => {
+  const dir = mkdtempSync(join(tmpdir(), "piw-att-test-"));
   try {
-    const res = saveAttachment(
-      "esiste.txt",
-      "text/plain",
-      Buffer.from("x").toString("base64"),
-      dir,
-    );
-    assert.equal(pathExists(res.path), true);
-    assert.equal(pathExists(join(dir, "non-esiste.txt")), false);
+    assert.throws(() => attachFromPath(join(dir, "manca.txt")));
+    assert.throws(() => attachFromPath(dir));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("mimeFromPath: estensione nota e sconosciuta", () => {
+  assert.equal(mimeFromPath("/a/b/logo.JPG"), "image/jpeg");
+  assert.equal(mimeFromPath("/a/b/dati.csv"), "text/csv");
+  assert.equal(mimeFromPath("/a/b/file.sconosciuto"), "application/octet-stream");
+  assert.equal(mimeFromPath("/a/b/noext"), "application/octet-stream");
 });

@@ -1,9 +1,8 @@
 # Piano 0006 — Adapter Visual Studio (C# nativo, concept 0005)
 
-> Stato: **quasi completo** — adapter implementato, buildato su Linux (wine),
-> incluso nel package pi e auto-installato su Windows; resta lo smoke test
-> manuale in Visual Studio. Branch: `feat/vs-adapter` (in attesa di merge in
-> `main`).
+> Stato: **IMPLEMENTATO** (2026-08-26) — vedi i mark ✅ nei passi e nei commit
+> `988c3cb` (import dal fork) e `27acb46` (build versionata + auto-install).
+> Branch: `feat/vs-adapter` (in attesa di merge in `main`).
 
 ## Fatto
 
@@ -52,12 +51,16 @@
       invalidi e il filtro workspace non matchava le cartelle reali di pi:
       `--C--proj--`). Test in `tests/sessions.test.ts`.
 
-## Da fare
+## Verifiche manuali pendenti
 
-- [ ] **Smoke test in Visual Studio** (manuale): installare il vsix con
-      `VSIXInstaller.exe` (VS chiuso), aprire la tool window "pi", verificare
-      spawn di pi, chat, selezione editor, tema, reload signal. Richiede
-      `PI_WEBVIEW_COMPANION=1` non impostato manualmente (lo fa l'host).
+- [ ] **Smoke test in Visual Studio** (manuale, su Windows): installare il
+      vsix con `VSIXInstaller.exe` (VS chiuso), aprire la tool window "pi",
+      verificare spawn di pi, chat, selezione editor, tema, reload signal.
+      Richiede `PI_WEBVIEW_COMPANION=1` non impostato manualmente (lo fa
+      l'host).
+
+## Fatto (aggiunte dopo la stesura)
+
 - [x] **Auto-install lato estensione pi** (`packages/pi-webview/`): rileva
       Visual Studio con `vswhere.exe` (solo Windows), installa il vsix con
       `VSIXInstaller.exe /quiet` — come avviene con
@@ -79,13 +82,15 @@
       icona 32x32 generata da `media/icon-mark-128.png` nel vsix
       (`<Icon>icon.png</Icon>`), strings utente localizzate via
       `HostText.T(it, en)` con locale dalla config condivisa.
-- [ ] **Tema v2** (concept 0005 D6, opzionale): mappare `VSColorTheme.ThemeChanged`
-      → variabili CSS `--vscode-*` sul body della webview.
-- [ ] **Persistenza sessione corrente** al riavvio dell'IDE (oggi il resume è
-      solo via dropdown: il companion VS Code usa workspaceState, in VS serve
-      un equivalente — file per-soluzione o soluzione+toolwindow id).
-- [ ] **CI**: eseguire `dotnet test` della solution in aggiunta a `pnpm test`
-      (`dotnet test src/adapters/visualstudio/PiWebview.Vs.slnx`).
+## Futuro (opzionale, NON in questo piano)
+
+- **Tema v2** (concept 0005 D6): mappare `VSColorTheme.ThemeChanged` →
+  variabili CSS `--vscode-*` sul body della webview.
+- **Persistenza sessione corrente** al riavvio dell'IDE: oggi il resume è solo
+  via dropdown (il companion VS Code usa workspaceState; in VS serve un
+  equivalente — file per-soluzione o soluzione+toolwindow id).
+- **CI**: eseguire `dotnet test` della solution in aggiunta a `pnpm test`
+  (`dotnet test src/adapters/visualstudio/PiWebview.Vs.slnx`).
 
 ## Note di build (Linux)
 

@@ -3241,6 +3241,12 @@ function renderRpcEvent(evt: RpcEvent): void {
       return;
     }
     if (msg && role === "custom" && msg.display !== false) {
+      // new-session banner (pi-webview extension): the TUI startup banner
+      // (Context/Skills/Extensions) pushed as a card — renderStartupBanner
+      if ((msg as { customType?: string }).customType === "pi-webview-startup") {
+        renderStartupBanner(msg);
+        return;
+      }
       // message injected from ANOTHER session (e.g. session-control
       // `send`): incoming bubble — the chat must show it
       renderCustomMessageBubble(msg);
@@ -3688,6 +3694,65 @@ function renderCustomMessageBubble(msg: {
   scrollToBottom();
 }
 
+// --- new-session banner (pi-webview extension) -------------------------------
+// The pi-side extension pushes the loaded resources (Context files / Skills /
+// Extensions — the TUI startup banner, Themes excluded) as a custom message
+// "pi-webview-startup" with JSON content when a NEW session starts. Rendered
+// here as a banner card at the top of the new session chat; also rendered by
+// the history (the custom message is part of the session file).
+function parseStartupInfo(content: unknown): {
+  contextFiles?: string[];
+  skills?: string[];
+  extensions?: string[];
+} | null {
+  try {
+    const data: unknown = JSON.parse(extractTextContent(content));
+    if (typeof data !== "object" || data === null) return null;
+    return data as { contextFiles?: string[]; skills?: string[]; extensions?: string[] };
+  } catch {
+    return null;
+  }
+}
+
+function buildStartupBanner(data: {
+  contextFiles?: string[];
+  skills?: string[];
+  extensions?: string[];
+}): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "startup-card";
+  const section = (label: string, items: string[] | undefined): void => {
+    if (!items || items.length === 0) return;
+    const row = document.createElement("div");
+    row.className = "startup-section";
+    const tag = document.createElement("span");
+    tag.className = "startup-label";
+    tag.textContent = label;
+    row.appendChild(tag);
+    const text = document.createElement("span");
+    text.className = "startup-items";
+    text.textContent = items.join(", ");
+    row.appendChild(text);
+    card.appendChild(row);
+  };
+  section(t("startupContext"), data.contextFiles);
+  section(t("startupSkills"), data.skills);
+  section(t("startupExtensions"), data.extensions);
+  return card;
+}
+
+function renderStartupBanner(msg: { content?: unknown }): void {
+  const data = parseStartupInfo(msg.content);
+  if (!data) {
+    // not our JSON format: fall back to the generic custom-message card
+    renderCustomMessageBubble(msg);
+    return;
+  }
+  const wrapper = addMsg("status");
+  wrapper.appendChild(buildStartupBanner(data));
+  scrollToBottom();
+}
+
 function renderIdeEvent(evt: IdeEvent): void {
   if (evt.type === "selection_changed" || evt.type === "selection_cleared") {
     // editor panel: selection block DISABLED (panel focus clears the
@@ -3770,6 +3835,14 @@ function renderHistory(messages: unknown[]): void {
       bubble.textContent = contentToText(msg.content);
       wrapper.appendChild(bubble);
     } else if (msg.role === "custom" && (msg as { display?: unknown }).display !== false) {
+      // new-session banner (pi-webview extension): the custom message is part
+      // of the session file → rendered again in history (same card as live)
+      const bannerData = parseStartupInfo(msg.content);
+      if (bannerData) {
+        const wrapper = addMsg("status");
+        wrapper.appendChild(buildStartupBanner(bannerData));
+        continue;
+      }
       // message injected from another session (session-control send):
       // collapsible card like the tools, also in history (otherwise it
       // would disappear on reload)

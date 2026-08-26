@@ -10,9 +10,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, posix, relative } from "node:path";
 import { homedir } from "node:os";
-import { existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { readVsixVersion } from "./lib/vsix-version.ts";
 
 const execFileAsync = promisify(execFile);
@@ -54,7 +54,19 @@ interface PiApi {
   // slash commands available (for the registration dedupe — the check must
   // happen at session_start: during load getCommands is a stub that throws
   // "Extension runtime not initialized")
-  getCommands(): { name: string }[];
+  getCommands(): { name: string; source?: string; sourceInfo?: SourceInfoLike }[];
+  // all registered tools with their source metadata (extension path/package)
+  getAllTools(): { name: string; sourceInfo?: SourceInfoLike }[];
+  // append a custom message entry to the session (the webview renders it)
+  sendMessage(msg: { customType: string; content: string; display: boolean }): void;
+}
+
+// Source metadata attached by pi to tools/commands (source-info.ts): `source`
+// is the package ("npm:…"/"git:…") or "local", baseDir the package root.
+interface SourceInfoLike {
+  path: string;
+  source: string;
+  baseDir?: string;
 }
 
 function detectIde(env: NodeJS.ProcessEnv = process.env): string | undefined {
@@ -211,6 +223,79 @@ function unlinkPiwBin(): void {
   }
 }
 
+// --- new-session banner (webview) ------------------------------------------
+// The TUI shows the loaded-resources banner (Context/Skills/Extensions) at
+// startup; in RPC mode (webview) that banner never renders, so we push the
+// same data as a custom message the webview renders as a banner card in the
+// chat of a NEW session. Themes are TUI-only and skipped.
+const STARTUP_CUSTOM_TYPE = "pi-webview-startup";
+
+// Same candidates and order as pi's loadProjectContextFiles (resource-loader.js)
+const CONTEXT_CANDIDATES = [
+  "AGENTS.override.md",
+  "AGENTS.md",
+  "AGENTS.MD",
+  "CLAUDE.md",
+  "CLAUDE.MD",
+];
+
+function loadContextFileFromDir(dir: string): string | null {
+  for (const name of CONTEXT_CANDIDATES) {
+    const p = join(dir, name);
+    try {
+      if (existsSync(p) && statSync(p).isFile()) return p;
+    } catch {
+      // unreadable entry: skip
+    }
+  }
+  return null;
+}
+
+// Display path relative to the session cwd (like the TUI's formatContextPath):
+// inside cwd → relative path; outside → home-relative with ~ (formatDisplayPath)
+function displayPath(p: string, cwd: string): string {
+  const rel = relative(cwd, p).replace(/\\/g, "/");
+  if (rel && rel !== "." && !rel.startsWith("..") && !isAbsolute(rel)) return rel;
+  const home = homedir().replace(/\\/g, "/");
+  const abs = p.replace(/\\/g, "/");
+  return abs.startsWith(home) ? `~${abs.slice(home.length)}` : abs;
+}
+
+// Path of the extension file relative to its package root (TUI getShortPath)
+function shortPathWithinPackage(si: SourceInfoLike): string {
+  const full = si.path.replace(/\\/g, "/");
+  if (si.baseDir) {
+    const rel = relative(si.baseDir, si.path).replace(/\\/g, "/");
+    if (rel && rel !== "." && !rel.startsWith("..") && !isAbsolute(rel)) return rel;
+  }
+  const m = full.match(/node_modules\/(@?[^/]+(?:\/[^/]+)?)\/(.*)/);
+  if (m && m[2]) return m[2];
+  return full;
+}
+
+// Compact extension label replicating the TUI (getCompactExtensionLabel):
+// package source → "<package>[:<path within the package>]" (index files →
+// just the package, or "package:dir"); local files → last path segment.
+function compactExtensionLabel(si: SourceInfoLike): string {
+  const source = si.source ?? "";
+  const isPackage = source.startsWith("npm:") || source.startsWith("git:");
+  const lastSegment = (p: string): string => {
+    const segs = p.replace(/\\/g, "/").split("/").filter(Boolean);
+    return segs[segs.length - 1] ?? p;
+  };
+  if (!isPackage) return lastSegment(si.path);
+  const sourceLabel = source.startsWith("npm:") ? source.slice("npm:".length) : source;
+  const shortPath = shortPathWithinPackage(si);
+  const packagePath = shortPath.startsWith("extensions/")
+    ? shortPath.slice("extensions/".length)
+    : shortPath;
+  const parsed = posix.parse(packagePath);
+  if (parsed.name === "index") {
+    return parsed.dir ? `${sourceLabel}:${parsed.dir}` : sourceLabel;
+  }
+  return `${sourceLabel}:${packagePath}`;
+}
+
 export default function (pi: PiApi): void {
   // path of the bundled companion vsix in the package: extension.js lives in
   // dist/, the vsix at package ROOT level (companion/…) → go up one level
@@ -264,6 +349,110 @@ export default function (pi: PiApi): void {
     if (ui && pendingNotify) {
       ui.notify(pendingNotify, "info");
       pendingNotify = null;
+    }
+  });
+
+  // --- new-session banner ----------------------------------------------------
+  // Loaded resources (Context/Skills/Extensions, same data as the TUI startup
+  // banner, Themes excluded) pushed to the webview as a custom message when a
+  // NEW session starts (or at startup when the session is still empty). The
+  // webview renders it as a banner card; the TUI shows its own banner and
+  // must NOT receive ours (mode "tui" → skip).
+  const collectStartupInfo = (cwd: string): {
+    contextFiles: string[];
+    skills: string[];
+    extensions: string[];
+  } => {
+    // Context: global agent dir + AGENTS.md/CLAUDE.md from cwd up to the root
+    const contextFiles: string[] = [];
+    const seen = new Set<string>();
+    const push = (p: string) => {
+      if (seen.has(p)) return;
+      seen.add(p);
+      contextFiles.push(displayPath(p, cwd));
+    };
+    const globalFile = loadContextFileFromDir(join(homedir(), ".pi", "agent"));
+    if (globalFile) push(globalFile);
+    const ancestors: string[] = [];
+    let dir = cwd;
+    while (true) {
+      const cf = loadContextFileFromDir(dir);
+      if (cf && !seen.has(cf)) ancestors.push(cf);
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    for (const p of ancestors.reverse()) push(p);
+    // Skills: slash commands with source "skill", names without the prefix
+    let skills: string[] = [];
+    try {
+      skills = pi
+        .getCommands()
+        .filter((c) => c.source === "skill")
+        .map((c) => c.name.replace(/^skill:/, ""))
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b));
+    } catch {
+      // runtime not ready yet: the banner simply lacks the skills
+    }
+    // Extensions: tool + command source metadata, deduped by path, labeled
+    // like the TUI startup list (package → "name:path", local → last segment)
+    const extByPath = new Map<string, SourceInfoLike>();
+    try {
+      for (const t of pi.getAllTools()) {
+        const si = t.sourceInfo;
+        // "<builtin:…>"/"<inline:…>" are markers, not real extension files
+        if (si?.path && !si.path.startsWith("<")) extByPath.set(si.path, si);
+      }
+      for (const c of pi.getCommands()) {
+        const si = c.sourceInfo;
+        if (c.source === "extension" && si?.path && !si.path.startsWith("<"))
+          extByPath.set(si.path, si);
+      }
+    } catch {
+      // runtime not ready yet: the banner simply lacks the extensions
+    }
+    const extensions = [...extByPath.values()]
+      .map(compactExtensionLabel)
+      .sort((a, b) => a.localeCompare(b));
+    return { contextFiles, skills, extensions };
+  };
+
+  pi.on("session_start", (event, ctx) => {
+    const e = event as { reason?: string };
+    const c = ctx as {
+      mode?: string;
+      cwd?: string;
+      sessionManager?: { getEntries?: () => { type?: string }[] };
+    };
+    // the webview is the only consumer: the TUI renders its own banner
+    if (c.mode && c.mode !== "rpc") return;
+    let hasMessages = false;
+    try {
+      hasMessages = (c.sessionManager?.getEntries?.() ?? []).some(
+        (en) => en.type === "message",
+      );
+    } catch {
+      // entries not ready yet: fall through to the empty check below
+    }
+    const isNew = e.reason === "new" || (e.reason === "startup" && !hasMessages);
+    if (!isNew) return;
+    const info = collectStartupInfo(c.cwd ?? process.cwd());
+    if (
+      info.contextFiles.length === 0 &&
+      info.skills.length === 0 &&
+      info.extensions.length === 0
+    ) {
+      return;
+    }
+    try {
+      pi.sendMessage({
+        customType: STARTUP_CUSTOM_TYPE,
+        content: JSON.stringify(info),
+        display: true,
+      });
+    } catch {
+      // never break the session start because of the banner
     }
   });
 

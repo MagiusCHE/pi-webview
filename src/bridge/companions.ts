@@ -498,15 +498,29 @@ export interface CompanionNote {
  * installed or companions already current — silent skip). With
  * `opts.force` the version compare is skipped and the companions are
  * reinstalled (used by the explicit /piw reinstall command).
+ * `opts.onStep` receives a human-readable progress line for EVERY phase
+ * (including silent skips) so the caller can show the user what the check
+ * is doing; `opts.ignoreAutoInstall` skips the PI_WEBVIEW_AUTO_INSTALL env
+ * switch (explicit commands always run).
  * Never throws: every failure becomes an error note.
  */
 export async function ensureCompanions(
   packageRoot: string,
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; onStep?: (step: string) => void; ignoreAutoInstall?: boolean } = {},
 ): Promise<CompanionNote[]> {
   const force = opts.force === true;
-  const autoInstall = (process.env[AUTO_INSTALL_ENV] ?? "1").trim().toLowerCase();
-  if (["0", "false", "off", "none"].includes(autoInstall)) return [];
+  // step: progress trace emitted for EVERY phase (even silent skips), so the
+  // caller can surface what the check is doing (console / notify / log file)
+  const step = (s: string): void => opts.onStep?.(s);
+  // explicit commands (/piw install, reinstall) always run; the env switch
+  // only disables the AUTOMATIC startup check
+  if (!opts.ignoreAutoInstall) {
+    const autoInstall = (process.env[AUTO_INSTALL_ENV] ?? "1").trim().toLowerCase();
+    if (["0", "false", "off", "none"].includes(autoInstall)) {
+      step("auto-install disabled (PI_WEBVIEW_AUTO_INSTALL=0)");
+      return [];
+    }
+  }
   const notes: CompanionNote[] = [];
 
   // 1) VS Code companion
@@ -518,6 +532,7 @@ export async function ensureCompanions(
     vsixVersion = undefined;
   }
   if (vsixVersion === undefined) {
+    step("VS Code: bundled vsix unreadable or missing");
     notes.push({
       target: "vscode",
       kind: "error",
@@ -525,15 +540,25 @@ export async function ensureCompanions(
     });
   } else {
     try {
+      step("VS Code: checking code CLI…");
       const cli = await resolveCodeCli();
       if (cli) {
         const installed = await installedCompanionVersion(cli);
         if (!force && installed !== null && installed === vsixVersion) {
           clearReloadSignal(); // already current: no pending signal
+          step(`VS Code: companion already current (${vsixVersion})`);
         } else {
+          step(
+            `VS Code: installing ${vsixVersion}${installed === null ? "" : ` (${installed} → ${vsixVersion})`}…`,
+          );
           await installCompanion(cli, vsCodeVsix);
           // update (not fresh install) → signal the open IDE to reload
           if (installed !== null) writeReloadSignal(vsixVersion);
+          step(
+            installed === null
+              ? `VS Code: companion installed (${vsixVersion})`
+              : `VS Code: companion updated (${installed} → ${vsixVersion})`,
+          );
           notes.push({
             target: "vscode",
             kind: installed === null ? "installed" : "updated",
@@ -544,10 +569,15 @@ export async function ensureCompanions(
       } else {
         // no `code` CLI anywhere → last resort: direct vsix extraction into
         // the extensions folder (VS Code scans folders, no CLI involved)
+        step("VS Code: no code CLI — direct vsix extraction");
         const direct = await installVsCodeCompanionDirect(vsCodeVsix, vsixVersion, force);
-        if (direct) notes.push(direct);
+        if (direct) {
+          step(`VS Code: ${direct.kind === "error" ? "error" : "installed"} (${vsixVersion})`);
+          notes.push(direct);
+        }
       }
     } catch (err) {
+      step(`VS Code: error — ${err instanceof Error ? err.message : String(err)}`);
       notes.push({
         target: "vscode",
         kind: "error",
@@ -566,6 +596,7 @@ export async function ensureCompanions(
       vsVsixVersion = undefined;
     }
     if (vsVsixVersion === undefined) {
+      step("Visual Studio: bundled vsix unreadable");
       notes.push({
         target: "visualstudio",
         kind: "error",
@@ -573,16 +604,26 @@ export async function ensureCompanions(
       });
     } else {
       try {
+        step("Visual Studio: checking instances…");
         const instances = await visualStudioInstances();
         for (const inst of instances) {
-          if (!isVsVersionSupported(inst.version)) continue; // VS 2019 (16.x): manifest excludes it
-          const vsixInstaller = join(inst.path, "Common7", "IDE", "VSIXInstaller.exe");
-          if (!existsSync(vsixInstaller)) continue;
           const label = inst.displayName || `VS ${inst.version || inst.id}`;
+          if (!isVsVersionSupported(inst.version)) {
+            step(`Visual Studio ${label}: unsupported version (skip)`);
+            continue; // VS 2019 (16.x): manifest excludes it
+          }
+          const vsixInstaller = join(inst.path, "Common7", "IDE", "VSIXInstaller.exe");
+          if (!existsSync(vsixInstaller)) {
+            step(`Visual Studio ${label}: VSIXInstaller not found (skip)`);
+            continue;
+          }
           // per-instance skip: an instance that already has the current
           // version must not make every other instance skip too
           const installed = await installedVsCompanionVersion(inst);
-          if (!force && installed !== null && installed === vsVsixVersion) continue;
+          if (!force && installed !== null && installed === vsVsixVersion) {
+            step(`Visual Studio ${label}: companion already current (${vsVsixVersion})`);
+            continue;
+          }
           try {
             // Per-instance install via /instanceIds — without it VSIXInstaller
             // targets only the newest instance. Per-user first (no elevation),
@@ -603,9 +644,11 @@ export async function ensureCompanions(
             };
             let error: string | undefined;
             try {
+              step(`Visual Studio ${label}: installing ${vsVsixVersion}${installed === null ? "" : ` (${installed} → ${vsVsixVersion})`} (per-user)…`);
               await tryInstall(false);
             } catch (err1) {
               // per-user install failed outright → retry all-users
+              step(`Visual Studio ${label}: per-user install failed — retrying all-users (UAC may prompt)…`);
               try {
                 await tryInstall(true);
               } catch (err2) {
@@ -629,8 +672,14 @@ export async function ensureCompanions(
               }
             }
             if (error) {
+              step(`Visual Studio ${label}: error — ${error}`);
               notes.push({ target: "visualstudio", kind: "error", label, error });
             } else {
+              step(
+                installed === null
+                  ? `Visual Studio ${label}: companion installed (${vsVsixVersion})`
+                  : `Visual Studio ${label}: companion updated (${installed} → ${vsVsixVersion})`,
+              );
               // update (not fresh install) → signal the open IDE to reload
               if (installed !== null) writeReloadSignal(vsVsixVersion);
               notes.push({
@@ -658,6 +707,8 @@ export async function ensureCompanions(
         });
       }
     }
+  } else {
+    step("Visual Studio: companion vsix not bundled (skip)");
   }
 
   return notes;

@@ -84,9 +84,13 @@ The bridge shuts down by itself after **1 minute with no open session** (no conn
 pi install npm:@magiusche/pi-webview
 ```
 
-> **⚠️ The companions are checked at every pi start** (the extension
-> installs/updates them from the bundled VSIXes if missing or outdated —
-> idempotent, silent when the target IDE is not installed):
+> **⚠️ The companions are checked at every pi start** — the check **blocks
+> startup until it finishes** (pi.dev / the webview never start with a pending
+> install), and every phase is traced to the console and to
+> `~/.pi/pi-webview/companion-install.log`, so you always see what is
+> happening. The extension installs/updates them from the bundled VSIXes if
+> missing or outdated — idempotent, silent (no notifications) when nothing
+> needs to be done:
 >
 > - **VS Code** companion: checked always — the `code` CLI is resolved from
 >   `PATH` or from the standard install locations, with a last-resort direct
@@ -95,9 +99,13 @@ pi install npm:@magiusche/pi-webview
 > - **Visual Studio** companion (Windows only): detected via `vswhere.exe`,
 >   installed per instance with `VSIXInstaller.exe /quiet /instanceIds:`
 >   (VS 2022 + 2026; VS 2019 is out of the manifest range) when VS is present;
->   disable all auto-install with `PI_WEBVIEW_AUTO_INSTALL=0`.
->   You can also install explicitly with **`/piw install`** from a pi
->   terminal, or manually (`code --install-extension companion/pi-webview-ide.vsix`
+>   disable the automatic check with `PI_WEBVIEW_AUTO_INSTALL=0` (explicit
+>   commands below are NOT affected).
+>   You can also install explicitly with **`/piw install`** (or reinstall
+>   with **`/piw reinstall`**) from a pi terminal: the command reports every
+>   step as it runs (e.g. "VS Code: checking code CLI…", "Visual Studio
+>   2026: installing 0.2.3 (per-user)…"), or manually
+>   (`code --install-extension companion/pi-webview-ide.vsix`
 >   / `VSIXInstaller /q companion/pi-webview-visualstudio.vsix` from the package
 >   dir), then reload the window / restart Visual Studio.
 

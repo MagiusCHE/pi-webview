@@ -2,7 +2,10 @@
 // At startup it does TWO ensures: 1) the IDE companions (VS Code + Visual
 // Studio, installed/updated from the bundled vsixes when missing or
 // outdated — centralized in src/bridge/companions.ts, the SAME module `piw`
-// calls) and 2) the `piw` link on PATH.
+// calls) and 2) the `piw` link on PATH. The companion check BLOCKS startup
+// until it finishes (the core awaits the extension factory): every phase is
+// traced to the console + ~/.pi/pi-webview/companion-install.log, so the
+// user always sees what is happening.
 // When pi runs inside the webview (env PI_WEBVIEW_COMPANION=1) the companion
 // check still runs: it is the update channel for webview-only users (the
 // package on disk is updated, the installed companion is not).
@@ -13,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import {
+  appendFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -40,6 +44,19 @@ import {
 } from "../../src/bridge/companions.ts";
 
 const execFileAsync = promisify(execFile);
+
+// diagnostic log of the companion check/install (best-effort): every step is
+// appended to ~/.pi/pi-webview/companion-install.log so the user can inspect
+// what happened, also when the UI was not available yet (startup block)
+function appendInstallLog(line: string): void {
+  try {
+    const file = join(homedir(), ".pi", "pi-webview", "companion-install.log");
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, `${new Date().toISOString()} ${line}\n`);
+  } catch {
+    // best effort: a full disk / missing home must never break startup
+  }
+}
 
 const PKG_NAME = "@magiusche/pi-webview";
 // Fallback ref (npm install). The REAL ref is resolved at runtime: a local
@@ -348,7 +365,7 @@ function compactExtensionLabel(si: SourceInfoLike): string {
   return `${sourceLabel}:${packagePath}`;
 }
 
-export default function (pi: PiApi): void {
+export default async function (pi: PiApi): Promise<void> {
   // package root: extension.js lives in dist/, the companions vsix at
   // package ROOT level (companion/…) → go up one level
   const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -366,17 +383,34 @@ export default function (pi: PiApi): void {
   // Runs at EVERY pi startup (idempotent), not gated by IDE detection.
   // Disable with PI_WEBVIEW_AUTO_INSTALL=0 (checked inside the module).
   const tryAutoInstall = async (): Promise<void> => {
-    const notes = await ensureCompanions(packageRoot);
+    // progress trace: console (visible when pi runs from a terminal) + the
+    // diagnostic log file; the UI notify stays for the final summary only
+    const steps: string[] = [];
+    const notes = await ensureCompanions(packageRoot, {
+      onStep: (step) => {
+        steps.push(step);
+        console.log(`[pi-webview] ${step}`);
+        appendInstallLog(step);
+      },
+    });
     const msgs = formatCompanionNotes(notes, "en", "pi-webview: ");
-    if (msgs.length === 0) return; // silent skip (app absent / already current)
-    const text = msgs.join(" ");
+    if (msgs.length === 0 && steps.length === 0) return; // nothing to report
+    const text =
+      msgs.length > 0
+        ? msgs.join(" ")
+        : "pi-webview: companion check completed — nothing to install.";
     if (lastUi) lastUi.notify(text, "info");
     else pendingNotify = text;
   };
 
-  // at load: ensure the companions + the piw link (fire and forget)
-  void tryAutoInstall();
-  ensurePiwBin();
+  // at load: BLOCKS pi.dev startup until the check/installs are done (the
+  // core awaits the extension factory), so the user always sees what is
+  // happening (console + install log) and startup never proceeds with a
+  // pending install. The piw launcher link is ensured right after.
+  await tryAutoInstall();
+  appendInstallLog(
+    ensurePiwBin() ? "piw launcher link created" : "piw launcher link already in place",
+  );
 
   // notify the user as soon as there is a UI context (or immediately, if a
   // session already started before the install finished)
@@ -555,8 +589,12 @@ export default function (pi: PiApi): void {
           case "install": {
             // idempotent: installs only the companions that are missing or
             // outdated (same check as the startup auto-install), and ensures
-            // the `piw` launcher link exists
-            const notes = await ensureCompanions(packageRoot);
+            // the `piw` launcher link exists. Every phase is notified in real
+            // time so the user always sees what the command is doing.
+            const notes = await ensureCompanions(packageRoot, {
+              ignoreAutoInstall: true,
+              onStep: (step) => notify(`pi-webview: ${step}`, "info"),
+            });
             const piwLink = ensurePiwBin();
             const msgs = formatCompanionNotes(notes, "en", "pi-webview: ");
             const piwMsg = piwLink
@@ -569,7 +607,11 @@ export default function (pi: PiApi): void {
             // force: reinstalls every companion even when the installed
             // version matches (repair of a broken install) and re-creates the
             // `piw` launcher link
-            const notes = await ensureCompanions(packageRoot, { force: true });
+            const notes = await ensureCompanions(packageRoot, {
+              force: true,
+              ignoreAutoInstall: true,
+              onStep: (step) => notify(`pi-webview: ${step}`, "info"),
+            });
             ensurePiwBin(true);
             const msgs = formatCompanionNotes(notes, "en", "pi-webview: ");
             notify(

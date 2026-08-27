@@ -162,6 +162,14 @@ companion** — modello pi-x-ide, ognuno solo se l'IDE è presente:
 > (installato/aggiornato/errore) una nota viene riportata in entrambi i canali.
 > Niente logica companion duplicata negli entry point — solo formattazione dei
 > messaggi (inglese per l'estensione, italiano per piw).
+> **Progresso visibile**: `ensureCompanions` accetta `opts.onStep` (riga di
+> progresso per OGNI fase, skip inclusi) — `piw` la stampa in console, il
+> comando `/piw install|reinstall` la notifica in tempo reale, e l'avvio
+> dell'estensione la scrive in `~/.pi/pi-webview/companion-install.log`.
+> **Avvio bloccante**: l'auto-install a load dell'estensione è in `await` (il
+> core fa await sul factory), quindi pi.dev non completa l'avvio finché i
+> check/install non finiscono; i comandi espliciti passano
+> `ignoreAutoInstall: true` (funzionano anche con `PI_WEBVIEW_AUTO_INSTALL=0`).
 
 - **VS Code**: il CLI `code` è risolto da `PATH` o dalle posizioni di
   installazione standard; ultima risorsa: estrazione diretta del vsix nella

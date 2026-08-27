@@ -15,6 +15,7 @@ import {
   readVsCodeCompanionVersion,
   ensureCompanions,
   formatCompanionNotes,
+  companionReloadHints,
   type CompanionNote,
 } from "../src/bridge/companions.ts";
 
@@ -141,33 +142,72 @@ test("formatCompanionNotes: install/update/error notes in it and en", () => {
   ];
   const en = formatCompanionNotes(notes, "en", "pi-webview: ");
   const it = formatCompanionNotes(notes, "it", "piw: ");
-  assert.equal(
-    en[0],
-    "pi-webview: companion installed in VS Code (0.2.1). Reload the window to activate the webview.",
-  );
-  assert.equal(
-    en[1],
-    "pi-webview: companion updated in VS Code (0.2.0 → 0.2.1). Reload the window to activate the webview.",
-  );
+  assert.equal(en[0], "pi-webview: companion installed in VS Code (0.2.1).");
+  assert.equal(en[1], "pi-webview: companion updated in VS Code (0.2.0 → 0.2.1).");
   assert.equal(en[2], "pi-webview: companion install failed in VS Code: boom");
   assert.equal(
     en[3],
-    "pi-webview: companion installed in Visual Studio (VS 2022, 0.2.1). Reload Visual Studio to activate the webview.",
+    "pi-webview: companion installed in Visual Studio (VS 2022, 0.2.1).",
   );
   assert.equal(
     en[5],
     "pi-webview: companion install failed in Visual Studio (VS 2022): bang",
   );
-  assert.equal(
-    it[0],
-    "piw: companion VS Code installato (0.2.1). Reload della finestra VS Code per attivare la webview.",
-  );
+  assert.equal(it[0], "piw: companion VS Code installato (0.2.1).");
   assert.equal(
     it[4],
-    "piw: companion Visual Studio aggiornato in VS 2026 (0.2.0 → 0.2.1). Reload di Visual Studio.",
+    "piw: companion Visual Studio aggiornato in VS 2026 (0.2.0 → 0.2.1).",
   );
   assert.equal(
     it[5],
     "piw: installazione companion Visual Studio fallita in VS 2022: bang",
   );
+});
+
+test("companionReloadHints: one line per IDE, none for errors only", () => {
+  const both: CompanionNote[] = [
+    { target: "vscode", kind: "installed", version: "0.2.3" },
+    {
+      target: "visualstudio",
+      kind: "updated",
+      version: "0.2.3",
+      fromVersion: "0.2.3",
+      label: "Visual Studio Community 2026",
+    },
+  ];
+  const en = companionReloadHints(both, "en", "pi-webview: ");
+  assert.deepEqual(en, [
+    "pi-webview: reload the VS Code window to activate the webview.",
+    "pi-webview: reload Visual Studio to activate the webview.",
+  ]);
+  // multiple VS instances updated → still ONE hint (never per install)
+  const multi: CompanionNote[] = [
+    {
+      target: "visualstudio",
+      kind: "updated",
+      version: "0.2.3",
+      fromVersion: "0.2.2",
+      label: "Visual Studio Community 2026",
+    },
+    {
+      target: "visualstudio",
+      kind: "updated",
+      version: "0.2.3",
+      fromVersion: "0.2.2",
+      label: "Visual Studio Professional 2022",
+    },
+  ];
+  assert.deepEqual(companionReloadHints(multi, "en", "pi-webview: "), [
+    "pi-webview: reload Visual Studio to activate the webview.",
+  ]);
+  // errors only → no reload hints
+  assert.deepEqual(
+    companionReloadHints([{ target: "vscode", kind: "error", error: "x" }], "en", "p: "),
+    [],
+  );
+  // it locale
+  assert.deepEqual(companionReloadHints(both, "it", "piw: "), [
+    "piw: ricarica la finestra di VS Code per attivare la webview.",
+    "piw: ricarica Visual Studio per attivare la webview.",
+  ]);
 });

@@ -89,12 +89,13 @@ pi install npm:@magiusche/pi-webview
 > install). The check steps are silent while nothing is being done; the **first
 > action** (install/update/error) flushes the whole trace immediately and the
 > following steps are streamed as they happen — console,
-> `~/.pi/pi-webview/companion-install.log` and notifications
-> (`/piw install` buffers the check and streams from the first action,
-> `/piw reinstall` streams everything from the start). When everything is
-> already current the check is **totally silent**: no log lines, no
-> notifications. The extension installs/updates the companions from the
-> bundled VSIXes if missing or outdated — idempotent:
+> `~/.pi/pi-webview/companion-install.log` and notifications. When everything
+> is already current the check is **totally silent**: no log lines, no
+> notifications. The explicit commands `/piw install|reinstall|uninstall`
+> **always log**: every step is streamed and the final recap (one notify)
+> summarizes what was done with a **single reload hint per IDE** — never one
+> per installed extension. The extension installs/updates the companions from
+> the bundled VSIXes if missing or outdated — idempotent:
 >
 > - **VS Code** companion: checked always — the `code` CLI is resolved from
 >   `PATH` or from the standard install locations, with a last-resort direct

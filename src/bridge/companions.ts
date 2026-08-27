@@ -749,6 +749,9 @@ export type CompanionLocale = "it" | "en";
 /**
  * Formats the notes into ready-to-surface messages. `prefix` is prepended to
  * every line (e.g. "pi-webview: " for the pi extension, "piw: " for the CLI).
+ * The notes describe the ACTION only — the reload hints come separately from
+ * `companionReloadHints`, so the final recap asks for a single reload per
+ * IDE instead of one per installed extension.
  */
 export function formatCompanionNotes(
   notes: CompanionNote[],
@@ -764,30 +767,30 @@ export function formatCompanionNotes(
       case "installed":
         return n.target === "vscode"
           ? it
-            ? `${prefix}companion VS Code installato (${n.version}). Reload della finestra VS Code per attivare la webview.`
-            : `${prefix}companion installed in VS Code (${n.version}). Reload the window to activate the webview.`
+            ? `${prefix}companion VS Code installato (${n.version}).`
+            : `${prefix}companion installed in VS Code (${n.version}).`
           : it
-            ? `${prefix}companion Visual Studio installato in ${label} (${n.version}). Reload di Visual Studio per attivare la webview.`
-            : `${prefix}companion installed in Visual Studio (${label}, ${n.version}). Reload Visual Studio to activate the webview.`;
+            ? `${prefix}companion Visual Studio installato in ${label} (${n.version}).`
+            : `${prefix}companion installed in Visual Studio (${label}, ${n.version}).`;
       case "updated":
         // reinstalled (force): the from/to versions match — avoid the
         // confusing "0.2.3 → 0.2.3"
         if (n.fromVersion === n.version) {
           return n.target === "vscode"
             ? it
-              ? `${prefix}companion VS Code reinstallato (${n.version}). Reload della finestra VS Code.`
-              : `${prefix}companion reinstalled in VS Code (${n.version}). Reload the window to activate the webview.`
+              ? `${prefix}companion VS Code reinstallato (${n.version}).`
+              : `${prefix}companion reinstalled in VS Code (${n.version}).`
             : it
-              ? `${prefix}companion Visual Studio reinstallato in ${label} (${n.version}). Reload di Visual Studio.`
-              : `${prefix}companion reinstalled in Visual Studio (${label}, ${n.version}). Reload Visual Studio to activate the webview.`;
+              ? `${prefix}companion Visual Studio reinstallato in ${label} (${n.version}).`
+              : `${prefix}companion reinstalled in Visual Studio (${label}, ${n.version}).`;
         }
         return n.target === "vscode"
           ? it
-            ? `${prefix}companion VS Code aggiornato ${n.fromVersion} → ${n.version}. Reload della finestra VS Code.`
-            : `${prefix}companion updated in VS Code (${n.fromVersion} → ${n.version}). Reload the window to activate the webview.`
+            ? `${prefix}companion VS Code aggiornato ${n.fromVersion} → ${n.version}.`
+            : `${prefix}companion updated in VS Code (${n.fromVersion} → ${n.version}).`
           : it
-            ? `${prefix}companion Visual Studio aggiornato in ${label} (${n.fromVersion} → ${n.version}). Reload di Visual Studio.`
-            : `${prefix}companion updated in Visual Studio (${label}, ${n.fromVersion} → ${n.version}). Reload Visual Studio to activate the webview.`;
+            ? `${prefix}companion Visual Studio aggiornato in ${label} (${n.fromVersion} → ${n.version}).`
+            : `${prefix}companion updated in Visual Studio (${label}, ${n.fromVersion} → ${n.version}).`;
       case "error":
         return n.target === "vscode"
           ? it
@@ -798,4 +801,36 @@ export function formatCompanionNotes(
             : `${prefix}companion install failed in Visual Studio (${label || "Visual Studio"}): ${n.error}`;
     }
   });
+}
+
+/**
+ * Reload hints for the IDEs that received an install/update — ONE line per
+ * target, never one per installed extension/instance: the final recap asks
+ * the user to reload the window once per IDE, then it is done.
+ */
+export function companionReloadHints(
+  notes: CompanionNote[],
+  locale: CompanionLocale,
+  prefix: string,
+): string[] {
+  const it = locale === "it";
+  const targets = new Set(
+    notes
+      .filter((n) => n.kind === "installed" || n.kind === "updated")
+      .map((n) => n.target),
+  );
+  const lines: string[] = [];
+  if (targets.has("vscode"))
+    lines.push(
+      it
+        ? `${prefix}ricarica la finestra di VS Code per attivare la webview.`
+        : `${prefix}reload the VS Code window to activate the webview.`,
+    );
+  if (targets.has("visualstudio"))
+    lines.push(
+      it
+        ? `${prefix}ricarica Visual Studio per attivare la webview.`
+        : `${prefix}reload Visual Studio to activate the webview.`,
+    );
+  return lines;
 }

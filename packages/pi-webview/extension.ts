@@ -41,6 +41,7 @@ import {
   isVsVersionSupported,
   ensureCompanions,
   formatCompanionNotes,
+  companionReloadHints,
 } from "../../src/bridge/companions.ts";
 
 const execFileAsync = promisify(execFile);
@@ -410,7 +411,10 @@ export default async function (pi: PiApi): Promise<void> {
       },
     });
     if (notes.length > 0) flushSteps(); // buffered check steps before the summary
-    const msgs = formatCompanionNotes(notes, "en", "pi-webview: ");
+    const msgs = [
+      ...formatCompanionNotes(notes, "en", "pi-webview: "),
+      ...companionReloadHints(notes, "en", "pi-webview: "),
+    ];
     const text = msgs.join("\n");
     if (msgs.length > 0) {
       if (lastUi) lastUi.notify(text, "info");
@@ -606,92 +610,86 @@ export default async function (pi: PiApi): Promise<void> {
           case "install": {
             // idempotent: installs only the companions that are missing or
             // outdated (same check as the startup auto-install), and ensures
-            // the `piw` launcher link exists. Check steps are buffered and
-            // flushed at the FIRST action (installing…), then streamed one
-            // notify per step; nothing to do (no action, link already in
-            // place) → total silence.
-            const steps: string[] = [];
-            let flushing = false;
-            const flushSteps = (): void => {
-              if (flushing) return;
-              flushing = true;
-              for (const s of steps) notify(`pi-webview: ${s}`, "info");
-            };
+            // the `piw` launcher link exists. Explicit command → logs ALWAYS:
+            // every step is streamed (one notify per step) and the final
+            // recap (ONE notify) summarizes what was done with a single
+            // reload hint per IDE.
             const notes = await ensureCompanions(packageRoot, {
               ignoreAutoInstall: true,
-              onStep: (step, action) => {
-                if (action) {
-                  flushSteps();
-                  notify(`pi-webview: ${step}`, "info");
-                } else {
-                  steps.push(step);
-                }
-              },
+              onStep: (step) => notify(`pi-webview: ${step}`, "info"),
             });
             const piwLink = ensurePiwBin();
-            if (notes.length > 0 || piwLink) {
-              flushSteps(); // remaining check steps, in order
-              for (const m of formatCompanionNotes(notes, "en", "pi-webview: ")) {
-                notify(m, "info");
-              }
-              if (piwLink) notify("pi-webview: piw launcher link created.", "info");
-            }
+            const recap = [
+              ...formatCompanionNotes(notes, "en", "pi-webview: "),
+              ...companionReloadHints(notes, "en", "pi-webview: "),
+            ];
+            if (recap.length === 0)
+              recap.push("pi-webview: nothing to install — all companions already current.");
+            if (piwLink) recap.push("pi-webview: piw launcher link created.");
+            notify(recap.join("\n"), "info");
             return;
           }
           case "reinstall": {
             // force: reinstalls every companion even when the installed
             // version matches (repair of a broken install) and re-creates the
-            // `piw` launcher link. Every step is streamed from the start
-            // (no buffering: a forced reinstall always acts).
+            // `piw` launcher link. Every step is streamed from the start;
+            // the final recap (ONE notify) reports everything that was done
+            // with a single reload hint per IDE.
             const notes = await ensureCompanions(packageRoot, {
               force: true,
               ignoreAutoInstall: true,
               onStep: (step) => notify(`pi-webview: ${step}`, "info"),
             });
             ensurePiwBin(true);
-            for (const m of formatCompanionNotes(notes, "en", "pi-webview: ")) {
-              notify(m, "info");
-            }
-            notify("pi-webview: piw launcher link re-created.", "info");
+            notify(
+              [
+                ...formatCompanionNotes(notes, "en", "pi-webview: "),
+                ...companionReloadHints(notes, "en", "pi-webview: "),
+                "pi-webview: piw launcher link re-created.",
+              ].join("\n"),
+              "info",
+            );
             return;
           }
           case "uninstall": {
+            // Explicit command → logs ALWAYS. Steps accumulate into a single
+            // final recap notify (one reload hint per IDE that was actually
+            // touched). Silent skip only for IDEs that are not installed at
+            // all (no Visual Studio instance on this machine).
+            const lines: string[] = [];
+            let removedVsCode = false;
             // 1) VS Code companion (if present — no gate on IDE detection)
             try {
               const cli = await resolveCodeCli();
               if (cli) {
                 const before = await installedCompanionVersion(cli);
                 if (before === null) {
-                  notify("pi-webview: companion not installed in VS Code.", "info");
+                  lines.push("pi-webview: companion not installed in VS Code.");
                 } else {
                   await runCli(cli, ["--uninstall-extension", COMPANION_ID], 30_000);
-                  notify(
-                    `pi-webview: companion ${COMPANION_ID} removed from VS Code.`,
-                    "info",
-                  );
+                  removedVsCode = true;
+                  lines.push(`pi-webview: companion ${COMPANION_ID} removed from VS Code.`);
                 }
               } else {
                 // no code CLI: remove the companion folder directly (best effort)
                 const folder = findVsCodeCompanionFolder(vsCodeExtensionsDir());
                 if (folder === null) {
-                  notify("pi-webview: companion not installed in VS Code.", "info");
+                  lines.push("pi-webview: companion not installed in VS Code.");
                 } else {
                   rmSync(folder, { recursive: true, force: true });
-                  notify(
-                    `pi-webview: companion ${COMPANION_ID} removed from VS Code.`,
-                    "info",
-                  );
+                  removedVsCode = true;
+                  lines.push(`pi-webview: companion ${COMPANION_ID} removed from VS Code.`);
                 }
               }
             } catch (err) {
-              notify(
+              lines.push(
                 `pi-webview: companion uninstall failed: ${err instanceof Error ? err.message : String(err)}`,
-                "error",
               );
             }
             // 1b) Visual Studio companion (Windows only): remove the package
             // by its id via VSIXInstaller /uninstall, one instance at a time
-            // (best effort)
+            // (best effort). No instance installed → silent skip (IDE absent).
+            let removedVs = false;
             try {
               const instances = await visualStudioInstances();
               let removedAny = false;
@@ -725,33 +723,38 @@ export default async function (pi: PiApi): Promise<void> {
                   }
                 }
               }
-              if (removedAny)
-                notify("pi-webview: Visual Studio companion removed.", "info");
+              if (removedAny) {
+                removedVs = true;
+                lines.push("pi-webview: Visual Studio companion removed.");
+              } else if (instances.length > 0) {
+                lines.push("pi-webview: Visual Studio companion not installed.");
+              }
             } catch (err) {
-              notify(
+              lines.push(
                 `pi-webview: Visual Studio companion uninstall failed: ${err instanceof Error ? err.message : String(err)}`,
-                "error",
               );
             }
             // 2) `piw` link from PATH (if it is ours)
             unlinkPiwBin();
-            notify("pi-webview: piw binary link removed from PATH.", "info");
+            lines.push("pi-webview: piw binary link removed from PATH.");
             // 3) remove the package from pi itself — the ref depends on how
             // it was installed (npm: entry or local path), so resolve it at
             // runtime instead of hardcoding the npm name
             const ref = installedPackageRef(packageRoot);
             try {
               await runCli("pi", ["remove", ref], 60_000);
-              notify(
-                "pi-webview: package removed from pi. Restart pi to finish (reload the VS Code window if the companion was removed).",
-                "info",
-              );
+              lines.push("pi-webview: package removed from pi. Restart pi to finish.");
             } catch (err) {
-              notify(
+              lines.push(
                 `pi-webview: pi remove failed (${err instanceof Error ? err.message : String(err)}). Run it manually: pi remove ${ref}`,
-                "error",
               );
             }
+            // final recap: single reload hint per IDE that was touched
+            if (removedVsCode)
+              lines.push("pi-webview: reload the VS Code window to finish the uninstall.");
+            if (removedVs)
+              lines.push("pi-webview: reload Visual Studio to finish the uninstall.");
+            notify(lines.join("\n"), "info");
             return;
           }
           default:

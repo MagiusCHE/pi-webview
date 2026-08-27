@@ -24,14 +24,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { resolvePi } from "./spawn.ts";
-import {
-  readLock,
-  writeLock,
-  clearLock,
-  pidAlive,
-  healthCheck,
-} from "./lock.ts";
-import { ensureVscodeCompanion } from "./companion.ts";
+import { readLock, writeLock, clearLock, pidAlive, healthCheck } from "./lock.ts";
+import { ensureCompanions, formatCompanionNotes } from "./companions.ts";
 
 // dist/piw.js → root of the installed package
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -41,24 +35,28 @@ const webDir = join(root, "dist", "web");
 // package version (for --version and the launch line)
 const piwVersion: string = (() => {
   try {
-    const json = JSON.parse(
-      readFileSync(join(root, "package.json"), "utf-8"),
-    ) as { version?: unknown };
+    const json = JSON.parse(readFileSync(join(root, "package.json"), "utf-8")) as {
+      version?: unknown;
+    };
     return typeof json.version === "string" ? json.version : "?";
   } catch {
     return "?";
   }
 })();
 
-// VS Code companion check (fire and forget: never block startup)
-// split: pi extension → only piw link; piw → only VS Code companion
-void ensureVscodeCompanion(root).then((msg) => {
-  if (msg) console.log(msg);
+// Companion check (VS Code + Visual Studio), fire and forget: never block
+// startup. Same centralized module as the pi extension (ensureCompanions in
+// src/bridge/companions.ts); the notes go to the console (piw channel).
+void ensureCompanions(root).then((notes) => {
+  for (const msg of formatCompanionNotes(notes, "it", "piw: ")) {
+    console.log(msg);
+  }
 });
 
 for (const f of [bridgeJs, webDir]) {
   if (!existsSync(f)) {
-    console.error(`piw: manca ${f} — pacchetto installato incompleto`);    process.exit(1);
+    console.error(`piw: manca ${f} — pacchetto installato incompleto`);
+    process.exit(1);
   }
 }
 
@@ -92,9 +90,7 @@ for (let i = 0; i < argv.length; i++) {
 }
 
 // intent for the UI: new session (default) or resume of an existing one
-const intent = session
-  ? `session=${encodeURIComponent(session)}`
-  : "new=1";
+const intent = session ? `session=${encodeURIComponent(session)}` : "new=1";
 
 function openBrowser(url: string): void {
   const platform = process.platform;
@@ -166,7 +162,9 @@ async function main(): Promise<void> {
         return;
       }
       if (Date.now() > deadline) {
-        console.error("piw: il bridge non è diventato attivo entro 10s — controlla i log");
+        console.error(
+          "piw: il bridge non è diventato attivo entro 10s — controlla i log",
+        );
         process.exit(1);
       }
       await new Promise((r) => setTimeout(r, 250));
@@ -177,7 +175,9 @@ async function main(): Promise<void> {
   const lock = readLock();
   if (lock && pidAlive(lock.pid) && (await healthCheck(lock.port, lock.token))) {
     const url = `http://127.0.0.1:${lock.port}/?${intent}`;
-    console.log(`piw: bridge già attivo su http://127.0.0.1:${lock.port} — apro ${intent}`);
+    console.log(
+      `piw: bridge già attivo su http://127.0.0.1:${lock.port} — apro ${intent}`,
+    );
     if (!noOpen && !detachedRun) openBrowser(url);
     return;
   }

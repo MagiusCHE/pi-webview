@@ -1,5 +1,6 @@
 // Unit tests for the Visual Studio companion version scan
-// (findVsixManifestVersion, packages/pi-webview/extension.ts).
+// (findVsixManifestVersion, src/bridge/companions.ts — the centralized
+// companion module used by the pi extension and piw).
 // The scan mirrors the two real install layouts: admin (/a) into each
 // instance's Common7\IDE\Extensions and per-user into
 // %LocalAppData%\Microsoft\VisualStudio\<version>_<sku>\Extensions.
@@ -9,7 +10,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { findVsixManifestVersion } from "../packages/pi-webview/extension.ts";
+import { findVsixManifestVersion } from "../src/bridge/companions.ts";
 
 const VS_ID = "PiWebview.Vs.4d433864-8ac9-420a-bc57-700940833fc6";
 const MANIFEST = (version: string) =>
@@ -25,7 +26,13 @@ function makeRoot(): string {
 test("findVsixManifestVersion: finds the version in an admin-install layout", () => {
   const root = makeRoot();
   try {
-    const extDir = join(root, "Common7", "IDE", "Extensions", "PiWebview.Vs.4d433864-8ac9-420a-bc57-700940833fc6");
+    const extDir = join(
+      root,
+      "Common7",
+      "IDE",
+      "Extensions",
+      "PiWebview.Vs.4d433864-8ac9-420a-bc57-700940833fc6",
+    );
     mkdirSync(extDir, { recursive: true });
     writeFileSync(join(extDir, "extension.vsixmanifest"), MANIFEST("0.1.20"));
     assert.equal(findVsixManifestVersion(root, VS_ID, 6), "0.1.20");

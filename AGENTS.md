@@ -146,6 +146,16 @@ L'addon si installa con **`pi install ./packages/pi-webview`** (o da git/npm).
 L'estensione pi-webview (lato pi) rileva gli IDE installati e **auto-installa i
 companion** — modello pi-x-ide, ognuno solo se l'IDE è presente:
 
+> **Il check/install dei companion è CENTRALIZZATO** in un unico modulo,
+> `src/bridge/companions.ts` (`ensureCompanions` + `formatCompanionNotes`):
+> l'estensione pi (`packages/pi-webview/extension.ts`, canale ui.notify) e
+> `piw` (`src/bridge/piw.ts`, canale console) chiamano la STESSA implementazione
+> per entrambi i companion. Contratto unico: skip silenzioso se l'app non è
+> installata o se la versione installata eguaglia il vsix; in ogni altro caso
+> (installato/aggiornato/errore) una nota viene riportata in entrambi i canali.
+> Niente logica companion duplicata negli entry point — solo formattazione dei
+> messaggi (inglese per l'estensione, italiano per piw).
+
 - **VS Code**: il CLI `code` è risolto da `PATH` o dalle posizioni di
   installazione standard; ultima risorsa: estrazione diretta del vsix nella
   cartella extensions (nessun CLI richiesto) — `code --install-extension` sul

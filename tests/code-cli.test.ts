@@ -1,6 +1,7 @@
 // Unit tests for the companion resolution helpers added with the VS 2022 fix
-// (packages/pi-webview/extension.ts): vswhere json parsing, manifest version
-// range check and the Level-2 folder scan (install without the `code` CLI).
+// (src/bridge/companions.ts — the centralized companion module): vswhere json
+// parsing, manifest version range check and the Level-2 folder scan (install
+// without the `code` CLI).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -12,7 +13,10 @@ import {
   isVsVersionSupported,
   findVsCodeCompanionFolder,
   readVsCodeCompanionVersion,
-} from "../packages/pi-webview/extension.ts";
+  ensureCompanions,
+  formatCompanionNotes,
+  type CompanionNote,
+} from "../src/bridge/companions.ts";
 
 // Real vswhere output shape for a machine with VS 2019 + 2022 + 18 (preview),
 // like the one where the companion only reached the newest instance.
@@ -102,4 +106,68 @@ test("readVsCodeCompanionVersion: reads package.json version", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("ensureCompanions: PI_WEBVIEW_AUTO_INSTALL=0 disables everything silently", async () => {
+  const prev = process.env.PI_WEBVIEW_AUTO_INSTALL;
+  try {
+    process.env.PI_WEBVIEW_AUTO_INSTALL = "0";
+    assert.deepEqual(await ensureCompanions(process.cwd()), []);
+  } finally {
+    if (prev === undefined) delete process.env.PI_WEBVIEW_AUTO_INSTALL;
+    else process.env.PI_WEBVIEW_AUTO_INSTALL = prev;
+  }
+});
+
+test("formatCompanionNotes: install/update/error notes in it and en", () => {
+  const notes: CompanionNote[] = [
+    { target: "vscode", kind: "installed", version: "0.2.1" },
+    { target: "vscode", kind: "updated", version: "0.2.1", fromVersion: "0.2.0" },
+    { target: "vscode", kind: "error", error: "boom" },
+    {
+      target: "visualstudio",
+      kind: "installed",
+      version: "0.2.1",
+      label: "VS 2022",
+    },
+    {
+      target: "visualstudio",
+      kind: "updated",
+      version: "0.2.1",
+      fromVersion: "0.2.0",
+      label: "VS 2026",
+    },
+    { target: "visualstudio", kind: "error", error: "bang", label: "VS 2022" },
+  ];
+  const en = formatCompanionNotes(notes, "en", "pi-webview: ");
+  const it = formatCompanionNotes(notes, "it", "piw: ");
+  assert.equal(
+    en[0],
+    "pi-webview: companion installed in VS Code (0.2.1). Reload the window to activate the webview.",
+  );
+  assert.equal(
+    en[1],
+    "pi-webview: companion updated in VS Code (0.2.0 → 0.2.1). Reload the window to activate the webview.",
+  );
+  assert.equal(en[2], "pi-webview: companion install failed in VS Code: boom");
+  assert.equal(
+    en[3],
+    "pi-webview: companion installed in Visual Studio (VS 2022, 0.2.1). Reload Visual Studio to activate the webview.",
+  );
+  assert.equal(
+    en[5],
+    "pi-webview: companion install failed in Visual Studio (VS 2022): bang",
+  );
+  assert.equal(
+    it[0],
+    "piw: companion VS Code installato (0.2.1). Reload della finestra VS Code per attivare la webview.",
+  );
+  assert.equal(
+    it[4],
+    "piw: companion Visual Studio aggiornato in VS 2026 (0.2.0 → 0.2.1). Reload di Visual Studio.",
+  );
+  assert.equal(
+    it[5],
+    "piw: installazione companion Visual Studio fallita in VS 2022: bang",
+  );
 });

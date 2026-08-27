@@ -123,10 +123,12 @@ If `pi remove` fails, or you already removed the package manually, do it by hand
 
 ## How it works
 
-Two entry points, both ensuring the IDE companions (VS Code + Visual Studio):
+Both entry points run the **same centralized companion logic** (`ensureCompanions` in `src/bridge/companions.ts`):
 
-- **`pi` start (the extension)**: (1) checks the **VS Code companion** against the bundled VSIX (installs/updates with `--force` if missing or outdated; idempotent; the `code` CLI is resolved from `PATH` or known install locations, falling back to direct vsix extraction into the extensions folder when no CLI exists; silent when VS Code is not installed; disable with `PI_WEBVIEW_AUTO_INSTALL=0`), (2) checks the **Visual Studio companion** on Windows (vswhere → `VSIXInstaller /instanceIds:` for **each** VS 2022/2026 instance, silent when no VS or no bundled vsix) and (3) re-creates the **`piw` link** on your `PATH` if missing (the package has no install scripts — this is the only way the link is created; it never touches user files, only its own link).
-- **`piw` start (standalone bridge)**: repeats the **VS Code companion** check (same logic, same silence when `code` is missing).
+- **`pi` start (the extension)**: (1) checks the **VS Code companion** against the bundled VSIX (installs/updates if missing or outdated; idempotent; the `code` CLI is resolved from `PATH` or known install locations, falling back to direct vsix extraction into the extensions folder when no CLI exists; silent when VS Code is not installed; disable with `PI_WEBVIEW_AUTO_INSTALL=0`), (2) checks the **Visual Studio companion** on Windows (vswhere → `VSIXInstaller /instanceIds:` for **each** VS 2022/2026 instance, silent when no VS or no bundled vsix) and (3) re-creates the **`piw` link** on your `PATH` if missing (the package has no install scripts — this is the only way the link is created; it never touches user files, only its own link).
+- **`piw` start (standalone bridge)**: runs the **same check for both companions** (VS Code + Visual Studio), printing the outcome to the console.
+
+Every install/update/error is reported — in the pi.dev TUI and in the webview (via `ui.notify`, `pi-webview: …`) and on the `piw` console (`piw: …`). Only two cases stay silent: the target app is not installed, or the installed companion already matches the bundled VSIX.
 
 The companion can also be installed explicitly:
 

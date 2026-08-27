@@ -121,7 +121,8 @@ ensured **at every pi start**: the pi-side extension installs/updates the **VS
 Code companion** from the bundled VSIX if missing or outdated (idempotent,
 silent when `code` is not on `PATH`, disable with `PI_WEBVIEW_AUTO_INSTALL=0`),
 and the **Visual Studio companion** (Windows only) via vswhere + VSIXInstaller
-when VS is present; `piw` repeats the VS Code check at its startup. The same
+when VS is present; `piw` runs the **same centralized check** (one shared
+module, `src/bridge/companions.ts`) at its startup. The same
 pi-side extension creates the `piw` link on the PATH (the package has no install
 scripts).
 

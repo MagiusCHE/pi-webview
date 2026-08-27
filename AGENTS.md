@@ -144,17 +144,24 @@ webview è la UI.
 L'addon si installa con **`pi install ./packages/pi-webview`** (o da git/npm).
 L'estensione pi-webview (lato pi) rileva gli IDE installati e **auto-installa i
 companion** — modello pi-x-ide, ognuno solo se l'IDE è presente:
-- **VS Code**: `code --install-extension` sul vsix incluso
-  (`companion/pi-webview-ide.vsix`); il companion crea la webview della sidebar,
-  spawna `pi --mode rpc` (env `PI_WEBVIEW_COMPANION=1`) e parla l'IDE bridge
-  protocol via postMessage. Sviluppo dell'adapter: F5 con `launch.json`
-  (Extension Development Host) dopo `pnpm compile`.
+
+- **VS Code**: il CLI `code` è risolto da `PATH` o dalle posizioni di
+  installazione standard; ultima risorsa: estrazione diretta del vsix nella
+  cartella extensions (nessun CLI richiesto) — `code --install-extension` sul
+  vsix incluso (`companion/pi-webview-ide.vsix`); il companion crea la webview
+  della sidebar, spawna `pi --mode rpc` (env `PI_WEBVIEW_COMPANION=1`) e parla
+  l'IDE bridge protocol via postMessage. Sviluppo dell'adapter: F5 con
+  `launch.json` (Extension Development Host) dopo `pnpm compile`.
 - **Visual Studio** (solo Windows): rilevamento istanze con `vswhere.exe`
   (`-products * -prerelease` — VS 2026/18.0 è preview e senza `-prerelease`
   l'istanza non viene listata; nessun filtro workload) + installazione
-  `VSIXInstaller.exe` per-user (`/q`, nessuna elevazione) con fallback `/q /a`
-  sul vsix incluso (`companion/pi-webview-visualstudio.vsix`, build su Linux
-  via wine — `tools/setup-vs-wine.mjs`); skip silenzioso senza Visual Studio.
+  `VSIXInstaller.exe` **per istanza** con `/instanceIds:` (senza di esso il
+  vsix finisce SOLO nell'istanza più recente — la 2022 non verrebbe mai
+  installata quando c'è anche la 2026), per-user (`/q`, nessuna elevazione)
+  con fallback `/q /a`, sul vsix incluso
+  (`companion/pi-webview-visualstudio.vsix`, build su Linux via wine —
+  `tools/setup-vs-wine.mjs`); le istanze fuori range manifest [17.0, 19.0)
+  (es. VS 2019/16.x) vengono saltate; skip silenzioso senza Visual Studio.
 
 ## Aggiornamento automatico
 

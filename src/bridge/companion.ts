@@ -8,7 +8,15 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { inflateRawSync } from "node:zlib";
@@ -74,21 +82,93 @@ function readVsixVersion(vsixPath: string): string | undefined {
 
 // --- portable `code` CLI (on Windows it is a .cmd: needs cmd /c) -----------
 
-function runCode(args: string[], timeoutMs: number): Promise<string> {
+// --- `code` CLI resolution -------------------------------------------------
+// `code` may be missing from the PATH of the process that started piw (a
+// terminal opened before VS Code was installed, or a launcher with a reduced
+// PATH) even when VS Code itself is installed. Resolution order:
+//   1. PATH lookup (where/which), keeping only real executables on Windows
+//      (`where` also lists the extension-less bash script `…\bin\code`);
+//   2. known install locations per platform;
+//   3. last resort: direct vsix extraction into the extensions folder — VS
+//      Code picks folders up by scanning, no CLI involved.
+function codeCliKnownPaths(): string[] {
   if (process.platform === "win32") {
-    const quoted = args.map((a) =>
-      /[\s"]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a,
-    );
-    return execFileAsync("cmd", ["/c", "code", ...quoted], {
-      timeout: timeoutMs,
-      windowsHide: true,
-    }).then((r) => r.stdout);
+    return [
+      // per-user install (the default)
+      join(
+        process.env.LOCALAPPDATA ?? "",
+        "Programs",
+        "Microsoft VS Code",
+        "bin",
+        "code.cmd",
+      ),
+      // machine-wide install
+      join(process.env.ProgramFiles ?? "", "Microsoft VS Code", "bin", "code.cmd"),
+    ];
   }
-  return execFileAsync("code", args, { timeout: timeoutMs }).then((r) => r.stdout);
+  if (process.platform === "darwin") {
+    return ["/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"];
+  }
+  return [
+    "/usr/bin/code",
+    "/usr/local/bin/code",
+    "/snap/bin/code",
+    "/var/lib/flatpak/exports/bin/com.visualstudio.code",
+    join(
+      homedir(),
+      ".local",
+      "share",
+      "flatpak",
+      "exports",
+      "bin",
+      "com.visualstudio.code",
+    ),
+  ];
 }
 
-async function installedCompanionVersion(): Promise<string | null> {
-  const out = await runCode(["--list-extensions", "--show-versions"], 15_000);
+async function resolveCodeCli(): Promise<string | null> {
+  try {
+    const probe = process.platform === "win32" ? "where" : "which";
+    const { stdout } = await execFileAsync(probe, ["code"], {
+      timeout: 5_000,
+      windowsHide: true,
+    });
+    for (const line of stdout.split(/\r?\n/)) {
+      const p = line.trim();
+      if (!p) continue;
+      if (process.platform === "win32") {
+        if (/\.(cmd|exe|bat)$/i.test(p)) return p;
+      } else if (existsSync(p)) {
+        return p;
+      }
+    }
+  } catch {
+    // not on PATH
+  }
+  for (const p of codeCliKnownPaths()) {
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+function runCode(cli: string, args: string[], timeoutMs: number): Promise<string> {
+  if (process.platform === "win32") {
+    // cmd /c quoting: wrap the WHOLE command line in quotes and use /s so
+    // cmd strips only the outer pair — keeps full paths with spaces intact.
+    const cmdLine = [cli, ...args]
+      .map((a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a))
+      .join(" ");
+    return execFileAsync("cmd", ["/d", "/s", "/c", `"${cmdLine}"`], {
+      timeout: timeoutMs,
+      windowsHide: true,
+      windowsVerbatimArguments: true,
+    }).then((r) => r.stdout);
+  }
+  return execFileAsync(cli, args, { timeout: timeoutMs }).then((r) => r.stdout);
+}
+
+async function installedCompanionVersion(cli: string): Promise<string | null> {
+  const out = await runCode(cli, ["--list-extensions", "--show-versions"], 15_000);
   for (const line of out.split(/\r?\n/)) {
     const t = line.trim();
     if (t.toLowerCase().startsWith(COMPANION_ID)) {
@@ -97,6 +177,101 @@ async function installedCompanionVersion(): Promise<string | null> {
     }
   }
   return null;
+}
+
+// --- Level 2: install without the CLI --------------------------------------
+
+function vsCodeExtensionsDir(): string {
+  return process.platform === "win32"
+    ? join(process.env.USERPROFILE ?? "", ".vscode", "extensions")
+    : join(homedir(), ".vscode", "extensions");
+}
+
+function findVsCodeCompanionFolder(dir: string): string | null {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  // highest version wins (readdir order is not deterministic)
+  let best: string | null = null;
+  let bestVersion: string | null = null;
+  for (const name of entries) {
+    if (!name.toLowerCase().startsWith(`${COMPANION_ID}-`)) continue;
+    const version = name.slice(COMPANION_ID.length + 1);
+    if (bestVersion === null || compareVersions(version, bestVersion) > 0) {
+      best = join(dir, name);
+      bestVersion = version;
+    }
+  }
+  return best;
+}
+
+// numeric semver compare ("0.10.0" > "0.9.0"), missing segments = 0
+function compareVersions(a: string, b: string): number {
+  const pa = a.split(".").map((n) => parseInt(n, 10) || 0);
+  const pb = b.split(".").map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+function readInstalledCompanionVersion(folder: string): string | null {
+  try {
+    const json = JSON.parse(readFileSync(join(folder, "package.json"), "utf-8")) as {
+      version?: unknown;
+    };
+    return typeof json.version === "string" ? json.version : null;
+  } catch {
+    return null;
+  }
+}
+
+async function installVsCodeCompanionDirect(
+  vsixPath: string,
+  vsixVersion: string,
+): Promise<string | null> {
+  const dir = vsCodeExtensionsDir();
+  if (!existsSync(dir)) return null; // VS Code never started: skip silently
+  const installedFolder = findVsCodeCompanionFolder(dir);
+  const installedVersion = installedFolder
+    ? readInstalledCompanionVersion(installedFolder)
+    : null;
+  if (installedVersion !== null && installedVersion === vsixVersion) {
+    clearReloadSignal();
+    return null; // already current
+  }
+  // extract OUTSIDE the extensions dir (sibling ~/.vscode) so VS Code never
+  // sees the half-written folder; same filesystem → rename works on all OS
+  const tmp = join(dirname(dir), `.${COMPANION_ID}-${vsixVersion}.tmp`);
+  try {
+    rmSync(tmp, { recursive: true, force: true });
+    mkdirSync(tmp, { recursive: true });
+    // tar reads zips on Windows 10+ (bsdtar), macOS and Linux
+    await execFileAsync("tar", ["-xf", vsixPath, "-C", tmp], {
+      timeout: 60_000,
+      windowsHide: true,
+    });
+    // `code --install-extension` strips these two from the folder
+    for (const f of ["extension.vsixmanifest", "[Content_Types].xml"]) {
+      rmSync(join(tmp, f), { force: true });
+    }
+    rmSync(join(tmp, "__MACOSX"), { recursive: true, force: true });
+    if (installedFolder) rmSync(installedFolder, { recursive: true, force: true });
+    const dest = join(dir, `${COMPANION_ID}-${vsixVersion}`);
+    rmSync(dest, { recursive: true, force: true });
+    renameSync(tmp, dest);
+    if (installedVersion !== null) writeReloadSignal(vsixVersion);
+    return installedVersion === null
+      ? `piw: companion VS Code installato (${vsixVersion}). Reload della finestra VS Code per attivare la webview.`
+      : `piw: companion VS Code aggiornato ${installedVersion} → ${vsixVersion}. Reload della finestra VS Code.`;
+  } catch {
+    rmSync(tmp, { recursive: true, force: true }); // best effort cleanup
+    return null; // never break the bridge startup
+  }
 }
 
 /**
@@ -110,17 +285,23 @@ export async function ensureVscodeCompanion(packageRoot: string): Promise<string
   try {
     const vsixVersion = readVsixVersion(vsixPath);
     if (vsixVersion === undefined) return null; // vsix unreadable: skip
-    const installed = await installedCompanionVersion();
-    if (installed !== null && installed === vsixVersion) {
-      clearReloadSignal(); // already updated: no pending signal
-      return null; // ok
+    const cli = await resolveCodeCli();
+    if (cli) {
+      const installed = await installedCompanionVersion(cli);
+      if (installed !== null && installed === vsixVersion) {
+        clearReloadSignal(); // already updated: no pending signal
+        return null; // ok
+      }
+      await runCode(cli, ["--install-extension", vsixPath, "--force"], 60_000);
+      // update (not fresh install) → signal the open IDE to reload
+      if (installed !== null) writeReloadSignal(vsixVersion);
+      return installed === null
+        ? `piw: companion VS Code installato (${vsixVersion}). Reload della finestra VS Code per attivare la webview.`
+        : `piw: companion VS Code aggiornato ${installed} → ${vsixVersion}. Reload della finestra VS Code.`;
     }
-    await runCode(["--install-extension", vsixPath, "--force"], 60_000);
-    // update (not fresh install) → signal the open IDE to reload
-    if (installed !== null) writeReloadSignal(vsixVersion);
-    return installed === null
-      ? `piw: companion VS Code installato (${vsixVersion}). Reload della finestra VS Code per attivare la webview.`
-      : `piw: companion VS Code aggiornato ${installed} → ${vsixVersion}. Reload della finestra VS Code.`;
+    // no `code` CLI anywhere → last resort: direct extraction into the
+    // extensions folder
+    return await installVsCodeCompanionDirect(vsixPath, vsixVersion);
   } catch {
     return null; // missing code / error: never break the bridge startup
   }

@@ -172,4 +172,15 @@ public sealed class SessionStoreTests : IDisposable
         var store = new SessionStore();
         Assert.Empty(store.ReadSessionCliFlags(Path.Combine(_dir, "no.jsonl")));
     }
+
+    [Fact]
+    public void SameWorkspace_windows_case_insensitive_e_separatori()
+    {
+        Assert.True(SessionStore.SameWorkspace(@"C:\Users\Magius\proj", @"c:\users\magius\PROJ"));
+        Assert.True(SessionStore.SameWorkspace(@"C:/Users/magius/proj", @"C:\Users\magius\proj"));
+        Assert.True(SessionStore.SameWorkspace(@"C:\Users\magius\proj\", @"C:\Users\magius\proj"));
+        Assert.False(SessionStore.SameWorkspace(@"C:\Users\a\proj", @"C:\Users\b\proj"));
+        Assert.False(SessionStore.SameWorkspace(null, @"C:\proj"));
+        Assert.False(SessionStore.SameWorkspace("/home/x/proj", "/home/X/proj"));
+    }
 }

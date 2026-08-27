@@ -382,7 +382,7 @@ public sealed class SessionStore
     private static string NormalizeWindowsWorkspace(string path) =>
         path.Replace('/', '\\').TrimEnd('\\');
 
-    private static bool SameWorkspace(string? left, string right)
+    public static bool SameWorkspace(string? left, string right)
     {
         if (left is null) return false;
         if (string.Equals(left, right, StringComparison.Ordinal)) return true;

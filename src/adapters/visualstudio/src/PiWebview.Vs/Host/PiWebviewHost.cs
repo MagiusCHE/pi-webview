@@ -116,7 +116,7 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
             {
                 var info = _sessions.GetSessionInfo(sessionPath);
                 var ws = Workspace();
-                if (info.Cwd is not null && ws is not null && info.Cwd != ws)
+                if (info.Cwd is not null && ws is not null && !SessionStore.SameWorkspace(info.Cwd, ws))
                 {
                     var forked = _sessions.ForkSession(sessionPath, ws);
                     sessionPath = forked.Path;

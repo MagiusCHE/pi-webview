@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { PiProcess } from "../../bridge/pi-process.ts";
 import { resolvePi, findPiFallback, findPiViaShell } from "../../bridge/spawn.ts";
+import { samePath } from "../../ide/paths.ts";
 
 // localization for host-side user-facing strings: no hardcoded Italian —
 // every visible message respects the configured locale (config.json)
@@ -301,7 +302,7 @@ export abstract class PiWebviewHost {
       try {
         const info = getSessionInfo(sessionPath);
         const ws = this.workspace();
-        if (info.cwd && ws && info.cwd !== ws) {
+        if (info.cwd && ws && !samePath(info.cwd, ws)) {
           const forked = forkSession(sessionPath, ws);
           sessionPath = forked.path;
         }

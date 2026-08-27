@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { SessionInfo, CliFlags } from "../ide/protocol.ts";
+import { samePath, isWindowsPath } from "../ide/paths.ts";
 
 export function defaultSessionDir(): string {
   return join(homedir(), ".pi", "agent", "sessions");
@@ -60,8 +61,8 @@ export function listSessions(
       // The cwd header is authoritative when folder-name encoding differs.
       if (
         workspace &&
-        !sameWorkspace(info.cwd, workspace) &&
-        !sameWorkspace(decodedWorkspace, workspace)
+        !samePath(info.cwd, workspace) &&
+        !samePath(decodedWorkspace, workspace)
       ) {
         continue;
       }
@@ -250,33 +251,13 @@ export function forkSession(
   return { path: newPath };
 }
 
-function isWindowsWorkspace(path: string): boolean {
-  return /^[a-zA-Z]:[/\\]/.test(path) || path.includes("\\");
-}
-
-function normalizeWindowsWorkspace(path: string): string {
-  return path
-    .replace(/\//g, "\\")
-    .replace(/[\\]+$/, "")
-    .toLowerCase();
-}
-
-function sameWorkspace(left: string | null | undefined, right: string): boolean {
-  if (!left) return false;
-  if (left === right) return true;
-  if (isWindowsWorkspace(left) && isWindowsWorkspace(right)) {
-    return normalizeWindowsWorkspace(left) === normalizeWindowsWorkspace(right);
-  }
-  return false;
-}
-
 function projectFolderMatches(folder: string, workspace: string): boolean {
   const target = encodeProjectFolder(workspace);
   if (folder === target) return true;
-  if (isWindowsWorkspace(workspace) && folder.toLowerCase() === target.toLowerCase()) {
+  if (isWindowsPath(workspace) && folder.toLowerCase() === target.toLowerCase()) {
     return true;
   }
-  return sameWorkspace(decodeProjectFolder(folder), workspace);
+  return samePath(decodeProjectFolder(folder), workspace);
 }
 
 export function decodeProjectFolder(name: string): string | null {

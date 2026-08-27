@@ -16,6 +16,7 @@ import type {
   StartupInfo,
 } from "../ide/protocol.ts";
 import { rpc } from "../ide/protocol.ts";
+import { samePath } from "../ide/paths.ts";
 import {
   createWsTransport,
   createVsCodeTransport,
@@ -961,7 +962,7 @@ async function startNewSession(): Promise<void> {
 async function pickSession(path: string): Promise<void> {
   if (switchingSession) return;
   const s = sessions.find((x) => x.path === path);
-  const crossFolder = s?.cwd && workspacePath && s.cwd !== workspacePath;
+  const crossFolder = s?.cwd && workspacePath && !samePath(s.cwd, workspacePath);
   if (!crossFolder) {
     switchSession(path);
     return;
@@ -1242,7 +1243,7 @@ function populateSessionMenu(): void {
       // in "All" mode, highlight the sessions of the current folder
       item.classList.toggle(
         "in-workspace",
-        filterMode === "all" && !!workspacePath && s.cwd === workspacePath,
+        filterMode === "all" && !!workspacePath && samePath(s.cwd, workspacePath),
       );
       const main = document.createElement("button");
       main.type = "button";

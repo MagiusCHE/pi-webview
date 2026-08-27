@@ -77,7 +77,7 @@ public static class IdeBridge
                 case "getCliFlags":
                 {
                     var available = await host.AvailableFlagsAsync().ConfigureAwait(false);
-                    var values = host.Sessions.ReadSessionCliFlags(host.CurrentSessionPath ?? "");
+                    var values = host.Sessions.ReadSessionCliFlags(req.SessionPath ?? host.CurrentSessionPath ?? "");
                     host.PostIdeResponse(Ok(req, new Dictionary<string, object?>
                     {
                         ["available"] = available,
@@ -88,7 +88,7 @@ public static class IdeBridge
                 case "setCliFlags":
                 {
                     if (req.Flags is null) { host.PostIdeResponse(Fail(req, "setCliFlags: missing flags")); return; }
-                    host.Sessions.WriteSessionCliFlags(host.CurrentSessionPath ?? "", req.Flags);
+                    host.Sessions.WriteSessionCliFlags(req.SessionPath ?? host.CurrentSessionPath ?? "", req.Flags);
                     host.PostIdeResponse(Ok(req, new Dictionary<string, object?> { ["flags"] = req.Flags }));
                     await host.RestartPiAsync().ConfigureAwait(false);
                     return;

@@ -14,9 +14,10 @@ import { homedir } from "node:os";
 import { dirname, extname, join, normalize } from "node:path";
 import { randomBytes } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
-import type { Frame, IdeRequest, IdeResponse, RpcEvent } from "../ide/protocol.ts";
+import type { CliFlags, Frame, IdeRequest, IdeResponse, RpcEvent } from "../ide/protocol.ts";
 import { PiProcess } from "./pi-process.ts";
 import { resolvePi } from "./spawn.ts";
+import { cliFlagArgs, fetchAvailableCliFlags } from "./cli-flags.ts";
 import { createMockIde } from "./mock-ide.ts";
 import { ConfigStore, readCompactionSettings } from "./config.ts";
 import {
@@ -27,6 +28,8 @@ import {
   deleteSessionFile,
   readSessionSettings,
   writeSessionSettings,
+  readSessionCliFlags,
+  writeSessionCliFlags,
 } from "./sessions.ts";
 import { getTrust, setTrust } from "./trust.ts";
 import { readStartupInfo } from "./startup-info.ts";
@@ -203,6 +206,16 @@ function main(): void {
   const token = opts.token ?? randomBytes(16).toString("hex");
   const mockIde = opts.mockIde ? createMockIde((m) => console.error(m)) : null;
   const configStore = new ConfigStore();
+  let availableCliFlagsPromise: ReturnType<typeof fetchAvailableCliFlags> | null = null;
+  const availableCliFlags = () => {
+    if (!availableCliFlagsPromise) {
+      availableCliFlagsPromise = fetchAvailableCliFlags(piCommand, (message) => {
+        bridgeLog(message);
+        log(message);
+      });
+    }
+    return availableCliFlagsPromise;
+  };
 
   // --- HTTP server (health, config, optional static serve) -----------------
 // stderr forwarding quota (terminal parity, no thread flooding)
@@ -274,7 +287,13 @@ function stderrAllowed(): boolean {
       send({ channel: "ide", payload: { ...payload, id } });
 
     let workspaceDir = process.cwd();
-    const makePi = (cwd: string, sessionPath?: string): PiProcess =>
+    let currentSessionPath =
+      intent.kind === "session" ? intent.sessionPath : undefined;
+    const makePi = (
+      cwd: string,
+      sessionPath?: string,
+      flags: CliFlags = readSessionCliFlags(sessionPath ?? ""),
+    ): PiProcess =>
       new PiProcess(
         piCommand,
         {
@@ -302,18 +321,34 @@ function stderrAllowed(): boolean {
         },
         {
           cwd,
-          ...(sessionPath ? { args: ["--session", sessionPath] } : {}),
+          args: [
+            ...(sessionPath ? ["--session", sessionPath] : []),
+            ...cliFlagArgs(flags),
+          ],
         },
       );
 
-    let pi = makePi(workspaceDir, intent.kind === "session" ? intent.sessionPath : undefined);
+    let pi = makePi(workspaceDir, currentSessionPath);
     pi.start();
     log(`channel open (intent=${intent.kind})`);
+
+    const restartPi = (sessionPath: string | undefined, flags: CliFlags): void => {
+      currentSessionPath = sessionPath;
+      pi.dispose();
+      send({
+        channel: "rpc",
+        payload: { type: "connection_closed", reason: "restart" },
+      });
+      pi = makePi(workspaceDir, sessionPath, flags);
+      pi.start();
+      send({ channel: "rpc", payload: { type: "pi_restarted" } });
+    };
 
     // workspace change: restart pi with the new cwd
     const switchWorkspace = (newCwd: string): Promise<void> =>
       new Promise((resolve) => {
         workspaceDir = newCwd;
+        currentSessionPath = undefined;
         pi.dispose();
         pi = makePi(newCwd);
         pi.start();
@@ -360,6 +395,28 @@ function stderrAllowed(): boolean {
           ok: true,
           data: { source: "piw", version: packageVersion() },
         });
+        return;
+      }
+      if (req.type === "getCliFlags") {
+        const sessionPath = req.sessionPath ?? currentSessionPath ?? "";
+        if (sessionPath) currentSessionPath = sessionPath;
+        void availableCliFlags().then((available) =>
+          respond(req.id ?? "", {
+            ok: true,
+            data: {
+              available,
+              values: readSessionCliFlags(sessionPath),
+            },
+          }),
+        );
+        return;
+      }
+      if (req.type === "setCliFlags") {
+        const sessionPath = req.sessionPath ?? currentSessionPath;
+        const next = req.flags ?? {};
+        if (sessionPath) writeSessionCliFlags(sessionPath, next);
+        respond(req.id ?? "", { ok: true, data: { flags: next } });
+        restartPi(sessionPath, next);
         return;
       }
       if (req.type === "getBalance") {
@@ -414,9 +471,15 @@ function stderrAllowed(): boolean {
         return;
       }
       if (req.type === "listSessions") {
+        // ALL mode: the webview sends NO workspace → list EVERY project folder
+        // (the old `req.workspace ?? workspaceDir` fallback filtered to the
+        // current folder even in ALL mode). With a workspace → filter to it.
+        const sessions = req.workspace
+          ? listSessions(undefined, req.workspace)
+          : listSessions(undefined);
         respond(req.id ?? "", {
           ok: true,
-          data: { sessions: listSessions(undefined, req.workspace ?? workspaceDir), workspace: workspaceDir },
+          data: { sessions, workspace: workspaceDir },
         });
         return;
       }
@@ -557,6 +620,12 @@ function stderrAllowed(): boolean {
         return;
       }
       if (frame.channel === "rpc") {
+        const payload = frame.payload as { type?: string; sessionPath?: string };
+        if (payload.type === "switch_session" && payload.sessionPath) {
+          currentSessionPath = payload.sessionPath;
+        } else if (payload.type === "new_session") {
+          currentSessionPath = undefined;
+        }
         pi.send(frame.payload);
         return;
       }

@@ -700,7 +700,10 @@ function renderCliFlags(available: CliFlagInfo[], values: CliFlags): void {
 function refreshCliFlags(): void {
   els.pidevTitle.textContent = "pi.dev";
   els.pidevNote.textContent = t("settingsPiDevNote");
-  void ideRequest({ type: "getCliFlags" }).then((res) => {
+  void ideRequest({
+    type: "getCliFlags",
+    ...(currentSessionPath ? { sessionPath: currentSessionPath } : {}),
+  }).then((res) => {
     if (!res?.ok) return;
     const data = res.data as { available?: CliFlagInfo[]; values?: CliFlags } | undefined;
     savedCliValues = data?.values ?? {};
@@ -716,7 +719,11 @@ els.cliApply.addEventListener("click", () => {
     const doApply = async (): Promise<void> => {
       els.cliApply.disabled = true;
       els.cliApplyHint.textContent = t("applyCliRestarting");
-      await ideRequest({ type: "setCliFlags", flags: currentCliValues() });
+      await ideRequest({
+        type: "setCliFlags",
+        ...(currentSessionPath ? { sessionPath: currentSessionPath } : {}),
+        flags: currentCliValues(),
+      });
     };
     if (working) {
       const ok = await showConfirm(t("applyCliWarn"));

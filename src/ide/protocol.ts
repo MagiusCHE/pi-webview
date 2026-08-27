@@ -124,8 +124,8 @@ export type IdeRequest =
   | { type: "listSessions"; workspace?: string; id?: string }
   | { type: "getWorkspace"; id?: string }
   | { type: "getVersion"; id?: string }
-  | { type: "getCliFlags"; id?: string }
-  | { type: "setCliFlags"; flags: CliFlags; id?: string }
+  | { type: "getCliFlags"; sessionPath?: string; id?: string }
+  | { type: "setCliFlags"; sessionPath?: string; flags: CliFlags; id?: string }
   | { type: "getSessionSettings"; sessionPath?: string; id?: string }
   | {
       type: "setSessionSettings";

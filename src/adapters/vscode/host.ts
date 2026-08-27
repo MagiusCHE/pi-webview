@@ -4,14 +4,11 @@
 
 import * as vscode from "vscode";
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PiProcess } from "../../bridge/pi-process.ts";
 import { resolvePi, findPiFallback, findPiViaShell } from "../../bridge/spawn.ts";
-
-const execFileAsync = promisify(execFile);
 
 // localization for host-side user-facing strings: no hardcoded Italian —
 // every visible message respects the configured locale (config.json)
@@ -127,6 +124,7 @@ function nativeNotify(
   toast();
 }
 import { ConfigStore, readCompactionSettings } from "../../bridge/config.ts";
+import { cliFlagArgs, fetchAvailableCliFlags } from "../../bridge/cli-flags.ts";
 import {
   listSessions,
   forkSession,
@@ -217,32 +215,13 @@ export abstract class PiWebviewHost {
 
   private async fetchAvailableFlags(): Promise<CliFlagInfo[]> {
     if (this.cachedFlags) return this.cachedFlags;
-    try {
-      const piCmd = resolvePi();
-      if (!piCmd.found) return [];
-      const { stdout } = await execFileAsync(
-        piCmd.command,
-        ["--help"],
-        { timeout: 15_000 },
-      );
-      const out = stdout.replace(/\x1b\[[0-9;]*m/g, ""); // strip ANSI
-      const section = out.split("Extension CLI Flags:")[1]?.split(/\n\s*\n/)[0] ?? "";
-      const flags: CliFlagInfo[] = [];
-      for (const line of section.split(/\r?\n/)) {
-        const m = /^\s*--([a-z0-9-]+)( <value>)?\s+(.+)$/.exec(line.trim());
-        if (m) {
-          flags.push({
-            name: m[1] ?? "",
-            type: m[2] ? "string" : "boolean",
-            description: m[3] ?? "",
-          });
-        }
-      }
-      this.cachedFlags = flags;
-      return flags;
-    } catch {
-      return [];
-    }
+    const piCmd = resolvePi();
+    if (!piCmd.found) return [];
+    this.cachedFlags = await fetchAvailableCliFlags(
+      piCmd.path ?? piCmd.command,
+      logLine,
+    );
+    return this.cachedFlags;
   }
 
   /** active values (flag → value) of the CURRENT session: read from the
@@ -258,18 +237,6 @@ export abstract class PiWebviewHost {
     const override = readSessionSettings(this.currentSessionPath ?? "")
       .notifications;
     return override ?? this.config.get().notifications ?? "desktop";
-  }
-
-  /** CLI arguments for the active flags (e.g. --session-control, --preset <v>) */
-  private cliFlagArgs(): string[] {
-    const args: string[] = [];
-    for (const [name, value] of Object.entries(this.cliFlagValues())) {
-      if (value === true) args.push(`--${name}`);
-      else if (typeof value === "string" && value !== "") {
-        args.push(`--${name}`, value);
-      }
-    }
-    return args;
   }
 
   protected workspace(): string | undefined {
@@ -355,10 +322,16 @@ export abstract class PiWebviewHost {
     // when resuming a session, it (possibly forked) becomes the current one
     if (sessionArgs.length > 0) this.currentSessionPath = sessionPath;
     // CLI flags from settings (block 3: e.g. --session-control)
-    const cliFlagArgs = this.cliFlagArgs();
+    const activeCliFlagArgs = cliFlagArgs(this.cliFlagValues());
     // actual command line used to launch pi (for error messages: suggested
     // to the user to verify pi works from a terminal)
-    this.piCommand = [piCmd.command, "--mode", "rpc", ...sessionArgs, ...cliFlagArgs].join(" ");
+    this.piCommand = [
+      piCmd.command,
+      "--mode",
+      "rpc",
+      ...sessionArgs,
+      ...activeCliFlagArgs,
+    ].join(" ");
 
     this.pi = new PiProcess(
       piCmd.command,
@@ -446,7 +419,7 @@ export abstract class PiWebviewHost {
       // directory even if the session belongs to another folder
       {
         env: { ...process.env, PI_WEBVIEW_COMPANION: "1" },
-        args: [...sessionArgs, ...cliFlagArgs],
+        args: [...sessionArgs, ...activeCliFlagArgs],
         ...(this.workspace() ? { cwd: this.workspace() } : {}),
       },
     );
@@ -558,7 +531,7 @@ export abstract class PiWebviewHost {
         void this.fetchAvailableFlags().then((available) =>
           this.respond(req.id, true, {
             available,
-            values: this.cliFlagValues(),
+            values: readSessionCliFlags(req.sessionPath ?? this.currentSessionPath ?? ""),
           }),
         );
         return;
@@ -567,7 +540,9 @@ export abstract class PiWebviewHost {
         // with the new command line (the webview already did dequeue+stop
         // if there was an in-flight run)
         const next: CliFlags = req.flags ?? {};
-        writeSessionCliFlags(this.currentSessionPath ?? "", next);
+        const sessionPath = req.sessionPath ?? this.currentSessionPath ?? "";
+        writeSessionCliFlags(sessionPath, next);
+        if (sessionPath) this.currentSessionPath = sessionPath;
         this.respond(req.id, true, { flags: next });
         this.restartPi();
         return;

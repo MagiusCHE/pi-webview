@@ -46,16 +46,26 @@ const piwVersion: string = (() => {
 
 // Companion check (VS Code + Visual Studio), fire and forget: never block
 // startup. Same centralized module as the pi extension (ensureCompanions in
-// src/bridge/companions.ts). Steps are BUFFERED: nothing is printed when
-// nothing needs to be installed/updated (total silence for the "all current"
-// case); with at least one action the whole trace + the final notes go to
-// the console (piw channel) in order.
+// src/bridge/companions.ts). Steps are buffered only while nothing is being
+// done: the FIRST action step flushes the whole trace, then every step is
+// streamed — nothing to install/update → total silence (no output).
 const steps: string[] = [];
+let flushing = false;
 void ensureCompanions(root, {
-  onStep: (step) => steps.push(step),
+  onStep: (step, action) => {
+    if (action) {
+      if (!flushing) {
+        flushing = true;
+        for (const s of steps) console.log(`piw: ${s}`);
+      }
+      console.log(`piw: ${step}`);
+    } else {
+      steps.push(step);
+    }
+  },
 }).then((notes) => {
   if (notes.length === 0) return; // nothing to install/update → silent
-  for (const s of steps) console.log(`piw: ${s}`);
+  if (!flushing) for (const s of steps) console.log(`piw: ${s}`); // safety
   for (const msg of formatCompanionNotes(notes, "it", "piw: ")) {
     console.log(msg);
   }

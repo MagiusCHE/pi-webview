@@ -301,9 +301,23 @@ async function installVsCodeCompanionDirect(
     return {
       target: "vscode",
       kind: "error",
-      error: err instanceof Error ? err.message : String(err),
+      error: describeExecError(err),
     };
   }
+}
+
+// execFile errors: Node's message is "Command failed: <cmd>" WITHOUT the
+// child's stderr — quiet-mode failures (VSIXInstaller /q, code CLI) carry
+// the real reason on stderr, so include it (truncated) or the user only
+// sees the command line.
+function describeExecError(err: unknown): string {
+  const e = err as { message?: unknown; stderr?: unknown };
+  const base = typeof e?.message === "string" ? e.message : String(err);
+  const stderr = typeof e?.stderr === "string" ? e.stderr.trim() : "";
+  if (!stderr) return base;
+  const MAX = 400;
+  const snippet = stderr.length > MAX ? `${stderr.slice(0, MAX)}…` : stderr;
+  return `${base}\n  stderr: ${snippet}`;
 }
 
 // --- Visual Studio companion (multi-IDE, Fase 3) ----------------------------
@@ -498,22 +512,28 @@ export interface CompanionNote {
  * installed or companions already current — silent skip). With
  * `opts.force` the version compare is skipped and the companions are
  * reinstalled (used by the explicit /piw reinstall command).
- * `opts.onStep` receives a human-readable progress line for EVERY phase
- * (including silent skips) so the caller can show the user what the check
- * is doing — the caller decides WHEN to surface them (buffer and flush
- * only when at least one note exists: total silence when nothing to do);
+ * `opts.onStep(step, action)` receives a human-readable progress line for
+ * EVERY phase (including silent skips). `action` is true only for steps
+ * that LEAD to work being done (installing…, retrying…, error —…): the
+ * caller buffers the check steps and flushes them at the FIRST action
+ * (before the install runs), then streams — total silence when no action
+ * ever happens (everything already current).
  * `opts.ignoreAutoInstall` skips the PI_WEBVIEW_AUTO_INSTALL env
  * switch (explicit commands always run).
  * Never throws: every failure becomes an error note.
  */
 export async function ensureCompanions(
   packageRoot: string,
-  opts: { force?: boolean; onStep?: (step: string) => void; ignoreAutoInstall?: boolean } = {},
+  opts: {
+    force?: boolean;
+    onStep?: (step: string, action?: boolean) => void;
+    ignoreAutoInstall?: boolean;
+  } = {},
 ): Promise<CompanionNote[]> {
   const force = opts.force === true;
-  // step: progress trace emitted for EVERY phase (even silent skips), so the
-  // caller can surface what the check is doing (console / notify / log file)
-  const step = (s: string): void => opts.onStep?.(s);
+  // step: progress trace emitted for EVERY phase (even silent skips); the
+  // second arg marks steps that lead to actual work (install/update/error)
+  const step = (s: string, action = false): void => opts.onStep?.(s, action);
   // explicit commands (/piw install, reinstall) always run; the env switch
   // only disables the AUTOMATIC startup check
   if (!opts.ignoreAutoInstall) {
@@ -552,6 +572,7 @@ export async function ensureCompanions(
         } else {
           step(
             `VS Code: installing ${vsixVersion}${installed === null ? "" : ` (${installed} → ${vsixVersion})`}…`,
+            true,
           );
           await installCompanion(cli, vsCodeVsix);
           // update (not fresh install) → signal the open IDE to reload
@@ -571,19 +592,20 @@ export async function ensureCompanions(
       } else {
         // no `code` CLI anywhere → last resort: direct vsix extraction into
         // the extensions folder (VS Code scans folders, no CLI involved)
-        step("VS Code: no code CLI — direct vsix extraction");
+        step("VS Code: no code CLI — direct vsix extraction", true);
         const direct = await installVsCodeCompanionDirect(vsCodeVsix, vsixVersion, force);
         if (direct) {
-          step(`VS Code: ${direct.kind === "error" ? "error" : "installed"} (${vsixVersion})`);
+          step(`VS Code: ${direct.kind === "error" ? "error" : "installed"} (${vsixVersion})`, true);
           notes.push(direct);
         }
       }
     } catch (err) {
-      step(`VS Code: error — ${err instanceof Error ? err.message : String(err)}`);
+      const desc = describeExecError(err);
+      step(`VS Code: error — ${desc}`, true);
       notes.push({
         target: "vscode",
         kind: "error",
-        error: err instanceof Error ? err.message : String(err),
+        error: desc,
       });
     }
   }
@@ -609,7 +631,12 @@ export async function ensureCompanions(
         step("Visual Studio: checking instances…");
         const instances = await visualStudioInstances();
         for (const inst of instances) {
-          const label = inst.displayName || `VS ${inst.version || inst.id}`;
+          // displayName already starts with "Visual Studio " — strip it, the
+          // steps/notes add the "Visual Studio" context themselves
+          const label = (inst.displayName || `VS ${inst.version || inst.id}`).replace(
+            /^Visual Studio\s+/i,
+            "",
+          );
           if (!isVsVersionSupported(inst.version)) {
             step(`Visual Studio ${label}: unsupported version (skip)`);
             continue; // VS 2019 (16.x): manifest excludes it
@@ -646,15 +673,15 @@ export async function ensureCompanions(
             };
             let error: string | undefined;
             try {
-              step(`Visual Studio ${label}: installing ${vsVsixVersion}${installed === null ? "" : ` (${installed} → ${vsVsixVersion})`} (per-user)…`);
+              step(`Visual Studio ${label}: installing ${vsVsixVersion}${installed === null ? "" : ` (${installed} → ${vsVsixVersion})`} (per-user)…`, true);
               await tryInstall(false);
             } catch (err1) {
               // per-user install failed outright → retry all-users
-              step(`Visual Studio ${label}: per-user install failed — retrying all-users (UAC may prompt)…`);
+              step(`Visual Studio ${label}: per-user install failed — retrying all-users (UAC may prompt)…`, true);
               try {
                 await tryInstall(true);
               } catch (err2) {
-                error = `${err1 instanceof Error ? err1.message : String(err1)}; /a: ${err2 instanceof Error ? err2.message : String(err2)}`;
+                error = `${describeExecError(err1)}; /a: ${describeExecError(err2)}`;
               }
             }
             if (!error) {
@@ -669,12 +696,12 @@ export async function ensureCompanions(
                   if (after2 !== vsVsixVersion)
                     error = `installed version still ${after2 === null ? "missing" : `"${after2}"`} after install (bundled ${vsVsixVersion})`;
                 } catch (err3) {
-                  error = err3 instanceof Error ? err3.message : String(err3);
+                  error = describeExecError(err3);
                 }
               }
             }
             if (error) {
-              step(`Visual Studio ${label}: error — ${error}`);
+              step(`Visual Studio ${label}: error — ${error}`, true);
               notes.push({ target: "visualstudio", kind: "error", label, error });
             } else {
               step(
@@ -693,11 +720,12 @@ export async function ensureCompanions(
               });
             }
           } catch (err) {
+            const desc = describeExecError(err);
             notes.push({
               target: "visualstudio",
               kind: "error",
               label,
-              error: err instanceof Error ? err.message : String(err),
+              error: desc,
             });
           }
         }
@@ -705,7 +733,7 @@ export async function ensureCompanions(
         notes.push({
           target: "visualstudio",
           kind: "error",
-          error: err instanceof Error ? err.message : String(err),
+          error: describeExecError(err),
         });
       }
     }
@@ -729,6 +757,9 @@ export function formatCompanionNotes(
 ): string[] {
   const it = locale === "it";
   return notes.map((n) => {
+    // VS displayName already starts with "Visual Studio " — the notes/format
+    // add the context themselves, so strip it defensively here too
+    const label = (n.label ?? "").replace(/^Visual Studio\s+/i, "");
     switch (n.kind) {
       case "installed":
         return n.target === "vscode"
@@ -736,8 +767,8 @@ export function formatCompanionNotes(
             ? `${prefix}companion VS Code installato (${n.version}). Reload della finestra VS Code per attivare la webview.`
             : `${prefix}companion installed in VS Code (${n.version}). Reload the window to activate the webview.`
           : it
-            ? `${prefix}companion Visual Studio installato in ${n.label} (${n.version}). Reload di Visual Studio per attivare la webview.`
-            : `${prefix}companion installed in Visual Studio (${n.label}, ${n.version}). Reload Visual Studio to activate the webview.`;
+            ? `${prefix}companion Visual Studio installato in ${label} (${n.version}). Reload di Visual Studio per attivare la webview.`
+            : `${prefix}companion installed in Visual Studio (${label}, ${n.version}). Reload Visual Studio to activate the webview.`;
       case "updated":
         // reinstalled (force): the from/to versions match — avoid the
         // confusing "0.2.3 → 0.2.3"
@@ -747,24 +778,24 @@ export function formatCompanionNotes(
               ? `${prefix}companion VS Code reinstallato (${n.version}). Reload della finestra VS Code.`
               : `${prefix}companion reinstalled in VS Code (${n.version}). Reload the window to activate the webview.`
             : it
-              ? `${prefix}companion Visual Studio reinstallato in ${n.label} (${n.version}). Reload di Visual Studio.`
-              : `${prefix}companion reinstalled in Visual Studio (${n.label}, ${n.version}). Reload Visual Studio to activate the webview.`;
+              ? `${prefix}companion Visual Studio reinstallato in ${label} (${n.version}). Reload di Visual Studio.`
+              : `${prefix}companion reinstalled in Visual Studio (${label}, ${n.version}). Reload Visual Studio to activate the webview.`;
         }
         return n.target === "vscode"
           ? it
             ? `${prefix}companion VS Code aggiornato ${n.fromVersion} → ${n.version}. Reload della finestra VS Code.`
             : `${prefix}companion updated in VS Code (${n.fromVersion} → ${n.version}). Reload the window to activate the webview.`
           : it
-            ? `${prefix}companion Visual Studio aggiornato in ${n.label} (${n.fromVersion} → ${n.version}). Reload di Visual Studio.`
-            : `${prefix}companion updated in Visual Studio (${n.label}, ${n.fromVersion} → ${n.version}). Reload Visual Studio to activate the webview.`;
+            ? `${prefix}companion Visual Studio aggiornato in ${label} (${n.fromVersion} → ${n.version}). Reload di Visual Studio.`
+            : `${prefix}companion updated in Visual Studio (${label}, ${n.fromVersion} → ${n.version}). Reload Visual Studio to activate the webview.`;
       case "error":
         return n.target === "vscode"
           ? it
             ? `${prefix}installazione companion VS Code fallita: ${n.error}`
             : `${prefix}companion install failed in VS Code: ${n.error}`
           : it
-            ? `${prefix}installazione companion Visual Studio fallita in ${n.label ?? "Visual Studio"}: ${n.error}`
-            : `${prefix}companion install failed in Visual Studio (${n.label ?? "Visual Studio"}): ${n.error}`;
+            ? `${prefix}installazione companion Visual Studio fallita in ${label || "Visual Studio"}: ${n.error}`
+            : `${prefix}companion install failed in Visual Studio (${label || "Visual Studio"}): ${n.error}`;
     }
   });
 }

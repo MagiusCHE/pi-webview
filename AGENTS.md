@@ -163,9 +163,13 @@ companion** — modello pi-x-ide, ognuno solo se l'IDE è presente:
 > Niente logica companion duplicata negli entry point — solo formattazione dei
 > messaggi (inglese per l'estensione, italiano per piw).
 > **Progresso visibile**: `ensureCompanions` accetta `opts.onStep` (riga di
-> progresso per OGNI fase, skip inclusi) — `piw` la stampa in console, il
-> comando `/piw install|reinstall` la notifica in tempo reale, e l'avvio
-> dell'estensione la scrive in `~/.pi/pi-webview/companion-install.log`.
+> progresso per OGNI fase, skip inclusi; flag `action` sui passi che portano a
+> lavoro reale) — i passi di check sono bufferizzati e flushati alla PRIMA
+> azione (prima dell'install), poi streammati uno per uno; niente azione =
+> silenzio totale. `piw` li stampa in console, il comando
+> `/piw install|reinstall` li notifica in tempo reale (reinstall streamma
+> tutto dall'inizio), l'avvio dell'estensione li scrive in
+> `~/.pi/pi-webview/companion-install.log`.
 > **Avvio bloccante**: l'auto-install a load dell'estensione è in `await` (il
 > core fa await sul factory), quindi pi.dev non completa l'avvio finché i
 > check/install non finiscono; i comandi espliciti passano

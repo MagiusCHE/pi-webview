@@ -383,24 +383,39 @@ export default async function (pi: PiApi): Promise<void> {
   // Runs at EVERY pi startup (idempotent), not gated by IDE detection.
   // Disable with PI_WEBVIEW_AUTO_INSTALL=0 (checked inside the module).
   const tryAutoInstall = async (): Promise<void> => {
-    // progress steps are BUFFERED: nothing is printed when nothing needs to
-    // be installed/updated (no notes) — total silence for the "all current"
-    // case. With at least one action, the whole trace (console + install
-    // log) is flushed in order before the summary, so the user sees every
-    // phase that led to it.
+    // steps are BUFFERED only while the check finds nothing to do; the FIRST
+    // action step (installing…/error) flushes the whole trace (console +
+    // install log) BEFORE the install runs, then every step is streamed —
+    // the user sees what happens when it happens. No action ever happened
+    // → total silence (everything already current).
     const steps: string[] = [];
+    let flushing = false;
+    const flushSteps = (): void => {
+      if (flushing) return;
+      flushing = true;
+      for (const s of steps) {
+        console.log(`[pi-webview] ${s}`);
+        appendInstallLog(s);
+      }
+    };
     const notes = await ensureCompanions(packageRoot, {
-      onStep: (step) => steps.push(step),
+      onStep: (step, action) => {
+        if (action) {
+          flushSteps();
+          console.log(`[pi-webview] ${step}`);
+          appendInstallLog(step);
+        } else {
+          steps.push(step);
+        }
+      },
     });
-    if (notes.length === 0) return; // nothing to install/update → silent
-    for (const step of steps) {
-      console.log(`[pi-webview] ${step}`);
-      appendInstallLog(step);
-    }
+    if (notes.length > 0) flushSteps(); // buffered check steps before the summary
     const msgs = formatCompanionNotes(notes, "en", "pi-webview: ");
     const text = msgs.join("\n");
-    if (lastUi) lastUi.notify(text, "info");
-    else pendingNotify = text;
+    if (msgs.length > 0) {
+      if (lastUi) lastUi.notify(text, "info");
+      else pendingNotify = text;
+    }
   };
 
   // at load: BLOCKS pi.dev startup until the check/installs are done (the
@@ -591,37 +606,53 @@ export default async function (pi: PiApi): Promise<void> {
           case "install": {
             // idempotent: installs only the companions that are missing or
             // outdated (same check as the startup auto-install), and ensures
-            // the `piw` launcher link exists. Steps are buffered and flushed
-            // in ONE multiline notify (\n-separated) only when at least one
-            // action happened (install/update/error/link created); nothing to
-            // do → total silence.
+            // the `piw` launcher link exists. Check steps are buffered and
+            // flushed at the FIRST action (installing…), then streamed one
+            // notify per step; nothing to do (no action, link already in
+            // place) → total silence.
             const steps: string[] = [];
+            let flushing = false;
+            const flushSteps = (): void => {
+              if (flushing) return;
+              flushing = true;
+              for (const s of steps) notify(`pi-webview: ${s}`, "info");
+            };
             const notes = await ensureCompanions(packageRoot, {
               ignoreAutoInstall: true,
-              onStep: (step) => steps.push(step),
+              onStep: (step, action) => {
+                if (action) {
+                  flushSteps();
+                  notify(`pi-webview: ${step}`, "info");
+                } else {
+                  steps.push(step);
+                }
+              },
             });
             const piwLink = ensurePiwBin();
-            if (notes.length === 0 && !piwLink) return; // nothing to do → silent
-            const lines = [...steps, ...formatCompanionNotes(notes, "en", "pi-webview: ")];
-            if (piwLink) lines.push("pi-webview: piw launcher link created.");
-            notify(lines.join("\n"), "info");
+            if (notes.length > 0 || piwLink) {
+              flushSteps(); // remaining check steps, in order
+              for (const m of formatCompanionNotes(notes, "en", "pi-webview: ")) {
+                notify(m, "info");
+              }
+              if (piwLink) notify("pi-webview: piw launcher link created.", "info");
+            }
             return;
           }
           case "reinstall": {
             // force: reinstalls every companion even when the installed
             // version matches (repair of a broken install) and re-creates the
-            // `piw` launcher link
-            const steps: string[] = [];
+            // `piw` launcher link. Every step is streamed from the start
+            // (no buffering: a forced reinstall always acts).
             const notes = await ensureCompanions(packageRoot, {
               force: true,
               ignoreAutoInstall: true,
-              onStep: (step) => steps.push(step),
+              onStep: (step) => notify(`pi-webview: ${step}`, "info"),
             });
             ensurePiwBin(true);
-            notify(
-              [...steps, ...formatCompanionNotes(notes, "en", "pi-webview: "), "pi-webview: piw launcher link re-created."].join("\n"),
-              "info",
-            );
+            for (const m of formatCompanionNotes(notes, "en", "pi-webview: ")) {
+              notify(m, "info");
+            }
+            notify("pi-webview: piw launcher link re-created.", "info");
             return;
           }
           case "uninstall": {

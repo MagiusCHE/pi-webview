@@ -3,9 +3,10 @@
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { openBrowser } from "./open-browser.mjs";
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 const bin = (name) => {
   const base = `${root}node_modules/.bin/${name}`;
   if (existsSync(base)) return base;

@@ -6,6 +6,7 @@
 import { build } from "esbuild";
 import { execSync } from "node:child_process";
 import { cpSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // 1) UI web → dist/web + adapter → dist/extension/extension.cjs
 execSync("vite build", { stdio: "inherit" });
@@ -50,9 +51,8 @@ cpSync("media/icon.png", "dist/web/icon.png");
 cpSync("README.md", "dist/companion/README.md");
 cpSync("LICENSE", "dist/companion/LICENSE");
 
-// 3) vsce package
 // 3) vsce package (run from the extension folder, absolute out)
-const out = new URL("../dist/pi-webview-ide.vsix", import.meta.url).pathname;
+const out = fileURLToPath(new URL("../dist/pi-webview-ide.vsix", import.meta.url));
 execSync(`pnpm exec vsce package --out "${out}"`, {
   cwd: "dist/companion",
   stdio: "inherit",

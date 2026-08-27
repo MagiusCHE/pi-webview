@@ -370,23 +370,13 @@ export async function visualStudioInstances(): Promise<VsInstance[]> {
     // instances without it, so the companion would never install.
     // No -requires: a workload filter hides instances lacking that specific
     // workload, while VSIXInstaller.exe works for every full VS install.
+    // No -property flags: vswhere keeps only the LAST -property when repeated
+    // (observed on the real CLI), which broke the parse (empty instanceId +
+    // installationPath → every instance filtered out). The default JSON
+    // already includes all the fields parseVsInstances needs.
     const { stdout } = await execFileAsync(
       vswhere,
-      [
-        "-products",
-        "*",
-        "-prerelease",
-        "-format",
-        "json",
-        "-property",
-        "instanceId",
-        "-property",
-        "installationPath",
-        "-property",
-        "installationVersion",
-        "-property",
-        "displayName",
-      ],
+      ["-products", "*", "-prerelease", "-format", "json"],
       { timeout: 15_000, windowsHide: true },
     );
     return parseVsInstances(stdout);

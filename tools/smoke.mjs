@@ -3,9 +3,10 @@
 // with commands that do not need the model (get_state, get_commands).
 
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 const TIMEOUT_MS = 30_000;
 
 const bridge = spawn("node", ["src/bridge/index.ts"], { cwd: root });

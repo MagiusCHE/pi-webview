@@ -10,12 +10,13 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { dirname, isAbsolute, join, posix, relative } from "node:path";
+import { dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readFileSync,
   readlinkSync,
   renameSync,
   rmSync,
@@ -41,8 +42,51 @@ import {
 const execFileAsync = promisify(execFile);
 
 const PKG_NAME = "@magiusche/pi-webview";
-// `pi remove` wants the name WITH the npm: source prefix (like `pi install npm:…`)
+// Fallback ref (npm install). The REAL ref is resolved at runtime: a local
+// install (`pi install ./packages/pi-webview`) is registered in settings.json
+// as the relative PATH, not as `npm:<name>` — removing `npm:<name>` then
+// fails with "No matching package found".
 const PKG_REF = `npm:${PKG_NAME}`;
+
+function samePath(a: string, b: string): boolean {
+  const A = resolve(a);
+  const B = resolve(b);
+  return process.platform === "win32" ? A.toLowerCase() === B.toLowerCase() : A === B;
+}
+
+// Pure: given the `packages` list from ~/.pi/agent/settings.json and the
+// agent dir (the base for relative path entries), returns the entry that
+// refers to THIS package, or null. npm entries match by name (exact or
+// versioned `name@tag`); path entries match by resolving them against the
+// agent dir and comparing with the package root on disk.
+export function findInstalledRef(
+  packages: string[],
+  packageRoot: string,
+  agentDir: string,
+): string | null {
+  for (const entry of packages) {
+    if (entry === PKG_REF || entry.startsWith(`${PKG_REF}@`)) return entry;
+    if (entry.startsWith("npm:") || entry.startsWith("git:")) continue;
+    if (samePath(resolve(agentDir, entry), packageRoot)) return entry;
+  }
+  return null;
+}
+
+function installedPackageRef(packageRoot: string): string {
+  const agentDir = join(homedir(), ".pi", "agent");
+  try {
+    const raw = readFileSync(join(agentDir, "settings.json"), "utf-8");
+    const parsed = JSON.parse(raw) as { packages?: unknown };
+    const packages = Array.isArray(parsed.packages)
+      ? parsed.packages.filter((p): p is string => typeof p === "string")
+      : [];
+    const ref = findInstalledRef(packages, packageRoot, agentDir);
+    if (ref) return ref;
+  } catch {
+    // unreadable settings → fall back to the npm ref below
+  }
+  return PKG_REF;
+}
 
 type Notify = (message: string, kind: "info" | "warning" | "error") => void;
 
@@ -131,6 +175,37 @@ function piwBinPaths(): {
   };
 }
 
+// Windows piw.cmd is a REGULAR file (not a symlink), so the symlink-only
+// checks below are wrong there. Reads our generated .cmd shim back to the
+// absolute path it invokes, or null when the file is missing or is NOT ours
+// (a user's own piw.cmd that does not reference a dist/piw.js).
+function readPiwCmdTarget(): string | null {
+  const { link, isWindows } = piwBinPaths();
+  if (!isWindows || !link) return null;
+  try {
+    const m = /node "([^"]*piw\.js)" %\*/.exec(readFileSync(link, "utf-8"));
+    return m ? (m[1] ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Whether the piw shim on PATH points to THIS package's dist/piw.js.
+// Windows: compare the path embedded in the .cmd; Unix: symlink readlink.
+function piwPointsHere(): boolean {
+  const { link, target, isWindows } = piwBinPaths();
+  if (!link) return false;
+  try {
+    if (isWindows) {
+      const cur = readPiwCmdTarget();
+      return cur !== null && samePath(cur, target);
+    }
+    return lstatSync(link).isSymbolicLink() && readlinkSync(link) === target;
+  } catch {
+    return false;
+  }
+}
+
 // Creates the `piw` link on PATH if missing. NO npm postinstall (removed to
 // avoid install scripts): the only creation/update path for the link is this
 // ensure at pi startup. Best effort: never break pi startup because of a link.
@@ -140,8 +215,10 @@ function ensurePiwBin(): void {
     const { dir, link, target, isWindows } = piwBinPaths();
     if (!dir) return;
     if (isWindows) {
-      // .cmd: create ONLY if missing (never overwrite a possible user file)
-      if (existsSync(link)) return;
+      // .cmd: create if missing, REWRITE if it is our stale shim pointing at
+      // an old install path. Never touch a user's own piw.cmd.
+      if (piwPointsHere()) return;
+      if (existsSync(link) && readPiwCmdTarget() === null) return; // user file
       mkdirSync(dir, { recursive: true });
       const content = `@echo off\r\nnode "${target.replace(/"/g, '\\"')}" %*\r\n`;
       writeFileSync(link, content);
@@ -174,10 +251,15 @@ function ensurePiwBin(): void {
 // Replicated here because without an npm postinstall the link cleanup is
 // entirely up to /pi-webview uninstall.
 function unlinkPiwBin(): void {
-  const { dir, link, target } = piwBinPaths();
+  const { dir, link, target, isWindows } = piwBinPaths();
   if (!dir) return;
   try {
     if (!existsSync(link)) return;
+    if (isWindows) {
+      if (readPiwCmdTarget() === null) return; // user file: do not touch
+      rmSync(link);
+      return;
+    }
     if (!lstatSync(link).isSymbolicLink()) return; // user file: do not touch
     const cur = readlinkSync(link);
     if (cur !== target) return; // not our link
@@ -455,15 +537,10 @@ export default function (pi: PiApi): void {
           case "status": {
             const ide = detectIde();
             const companion = process.env.PI_WEBVIEW_COMPANION === "1";
-            // presence of the piw link on PATH (diagnostics; lstat: sees even
-            // dangling symlinks)
-            const { dir, link } = piwBinPaths();
-            let piw = "missing";
-            try {
-              if (dir && lstatSync(link).isSymbolicLink()) piw = "present";
-            } catch {
-              piw = "missing";
-            }
+            // presence of the piw shim on PATH, pointing at THIS package.
+            // Windows piw.cmd is a regular file — not a symlink — so a plain
+            // symlink check would always report "missing".
+            const piw = piwPointsHere() ? "present" : "missing";
             notify(
               `pi-webview: IDE detected = ${ide ?? "none"}; companion active = ${companion ? "yes (webview)" : "no"}; piw link = ${piw}`,
               "info",
@@ -565,16 +642,19 @@ export default function (pi: PiApi): void {
             // 2) `piw` link from PATH (if it is ours)
             unlinkPiwBin();
             notify("pi-webview: piw binary link removed from PATH.", "info");
-            // 3) remove the package from pi itself (pi remove npm:<name>)
+            // 3) remove the package from pi itself — the ref depends on how
+            // it was installed (npm: entry or local path), so resolve it at
+            // runtime instead of hardcoding the npm name
+            const ref = installedPackageRef(packageRoot);
             try {
-              await runCli("pi", ["remove", PKG_REF], 60_000);
+              await runCli("pi", ["remove", ref], 60_000);
               notify(
                 "pi-webview: package removed from pi. Restart pi to finish (reload the VS Code window if the companion was removed).",
                 "info",
               );
             } catch (err) {
               notify(
-                `pi-webview: pi remove failed (${err instanceof Error ? err.message : String(err)}). Run it manually: pi remove ${PKG_REF}`,
+                `pi-webview: pi remove failed (${err instanceof Error ? err.message : String(err)}). Run it manually: pi remove ${ref}`,
                 "error",
               );
             }

@@ -1,0 +1,20 @@
+{
+  "search.followSymlinks": false,
+  "search.exclude": {
+    "**/.wine/**": true,
+    "**/bin/**": true,
+    "**/obj/**": true,
+    "**/dist/**": true
+  },
+  "files.exclude": {
+    "**/.wine/**": true,
+    "**/bin/**": true,
+    "**/obj/**": true
+  },
+  "files.watcherExclude": {
+    "**/.wine/**": true,
+    "**/bin/**": true,
+    "**/obj/**": true,
+    "**/dist/**": true
+  }
+}

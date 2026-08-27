@@ -189,7 +189,70 @@ function setupVssdk() {
   }
 }
 
+// --- 3. workspace settings: never expose the prefix to indexers ------------
+// The prefix contains dosdevices/z: -> / (wine maps the unix root). VS Code
+// search/watcher that follow symlinks escape the workspace through it and
+// scan the whole filesystem (4 ripgrep at 100% CPU). The guard keys live in
+// .vscode-example/settings.json (committed, single source of truth); merge
+// them into .vscode/settings.json (idempotent, preserves other settings).
+function ensureWorkspaceSettings() {
+  step("workspace settings (indexer guard for .wine)");
+  const vscodeDir = join(root, ".vscode");
+  const settingsPath = join(vscodeDir, "settings.json");
+  const examplePath = join(root, ".vscode-example", "settings.json");
+  const fallback = {
+    "search.followSymlinks": false,
+    "search.exclude": { "**/.wine/**": true },
+    "files.exclude": { "**/.wine/**": true },
+    "files.watcherExclude": { "**/.wine/**": true },
+  };
+  let guardKeys = fallback;
+  if (existsSync(examplePath)) {
+    try {
+      const example = JSON.parse(readFileSync(examplePath, "utf8"));
+      guardKeys = {};
+      for (const key of Object.keys(fallback)) {
+        guardKeys[key] = example[key] ?? fallback[key];
+      }
+    } catch (err) {
+      console.warn(`could not parse ${examplePath} (${err.message}) — using built-in fallback`);
+    }
+  }
+  let settings = {};
+  if (existsSync(settingsPath)) {
+    try {
+      settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+    } catch (err) {
+      console.warn(`could not parse ${settingsPath} (${err.message}) — add the .wine excludes manually`);
+      return;
+    }
+  }
+  let changed = false;
+  for (const [key, value] of Object.entries(guardKeys)) {
+    if (key === "search.followSymlinks") {
+      if (settings[key] !== value) {
+        settings[key] = value;
+        changed = true;
+      }
+      continue;
+    }
+    const merged = { ...(settings[key] ?? {}), ...value };
+    if (JSON.stringify(merged) !== JSON.stringify(settings[key] ?? {})) {
+      settings[key] = merged;
+      changed = true;
+    }
+  }
+  if (changed) {
+    mkdirSync(vscodeDir, { recursive: true });
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+    console.log(`updated ${settingsPath} (search.followSymlinks=false, .wine excluded from search/files/watcher)`);
+  } else {
+    console.log("settings already protected");
+  }
+}
+
 function main() {
+  ensureWorkspaceSettings();
   setupPrefix();
   setupVssdk();
   console.log("\nDone. Build the adapter with:\n  pnpm build && dotnet build src/adapters/visualstudio/PiWebview.Vs.slnx");

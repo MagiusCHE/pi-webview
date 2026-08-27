@@ -73,6 +73,12 @@ webview è la UI.
 - `tests/` — test unitari (`pnpm test`, `node --test tests/`)
 - `tools/` — script di sviluppo (es. `check-package-manager.mjs`)
 - `dist/` — output build, **gitignored**, specchia `src/`
+- `.vscode-example/` — template impostazioni workspace (`.vscode/` è gitignored):
+  `settings.json` disabilita il follow dei symlink ed esclude `**/.wine/**` da
+  search/files/watcher. Su Linux il prefix wine (`src/adapters/visualstudio/.wine/`)
+  espone `z:` → `/`: senza queste regole VS Code scansiona tutto il filesystem.
+  Copiare i file in `.vscode/` quando serve (lo fa automaticamente
+  `tools/setup-vs-wine.mjs`)
 
 ## Convenzioni
 

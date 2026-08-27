@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { findVsixManifestVersion } from "../src/bridge/companions.ts";
+import { findVsixManifestVersion, findVsixManifestVersions, pickHighestVersion } from "../src/bridge/companions.ts";
 
 const VS_ID = "PiWebview.Vs.4d433864-8ac9-420a-bc57-700940833fc6";
 const MANIFEST = (version: string) =>
@@ -88,5 +88,56 @@ test("findVsixManifestVersion: skips unreadable dirs and returns null when missi
     assert.equal(findVsixManifestVersion(root, VS_ID, 6), null);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("findVsixManifestVersions: collects EVERY copy in a root (stale + current)", () => {
+  const root = makeRoot();
+  try {
+    const stale = join(root, "Common7", "IDE", "Extensions", "PiWebview-stale");
+    const current = join(root, "Common7", "IDE", "Extensions", "PiWebview-current");
+    mkdirSync(stale, { recursive: true });
+    mkdirSync(current, { recursive: true });
+    writeFileSync(join(stale, "extension.vsixmanifest"), MANIFEST("0.2.2"));
+    writeFileSync(join(current, "extension.vsixmanifest"), MANIFEST("0.2.3"));
+    const all = findVsixManifestVersions(root, VS_ID, 6);
+    assert.deepEqual([...all].sort(), ["0.2.2", "0.2.3"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("pickHighestVersion: stale all-users copy never shadows the current one", () => {
+  assert.equal(pickHighestVersion(["0.2.2", "0.2.3"]), "0.2.3");
+  assert.equal(pickHighestVersion(["0.2.3", "0.2.2"]), "0.2.3");
+  assert.equal(pickHighestVersion(["0.9.9", "0.10.0"]), "0.10.0");
+  assert.equal(pickHighestVersion([]), null);
+  assert.equal(pickHighestVersion([""]), "");
+  assert.equal(pickHighestVersion(["", "0.2.3"]), "0.2.3");
+  assert.equal(pickHighestVersion(["0.2.2", ""]), "0.2.2");
+});
+
+test("installed scan: admin copy (0.2.2) + per-user copy (0.2.3) → 0.2.3 wins", () => {
+  // mirrors the reported bug layout: Common7 holds a stale all-users copy of
+  // the previous release, LocalAppData holds the per-user update. The version
+  // check must read 0.2.3 (highest), so the next pi start skips the install
+  // instead of reinstalling at every session.
+  const admin = makeRoot();
+  const perUser = makeRoot();
+  try {
+    const adminExt = join(admin, "Common7", "IDE", "Extensions", "PiWebview");
+    const userExt = join(perUser, "18.0_ff9c53f7", "Extensions", "PiWebview");
+    mkdirSync(adminExt, { recursive: true });
+    mkdirSync(userExt, { recursive: true });
+    writeFileSync(join(adminExt, "extension.vsixmanifest"), MANIFEST("0.2.2"));
+    writeFileSync(join(userExt, "extension.vsixmanifest"), MANIFEST("0.2.3"));
+    const versions = [
+      ...findVsixManifestVersions(admin, VS_ID, 6),
+      ...findVsixManifestVersions(perUser, VS_ID, 6),
+    ];
+    assert.equal(pickHighestVersion(versions), "0.2.3");
+  } finally {
+    rmSync(admin, { recursive: true, force: true });
+    rmSync(perUser, { recursive: true, force: true });
   }
 });

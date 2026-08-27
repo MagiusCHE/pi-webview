@@ -385,30 +385,31 @@ export async function visualStudioInstances(): Promise<VsInstance[]> {
   }
 }
 
-// Installed VS companion version: the admin install (/a) goes into each
-// instance's Common7\IDE\Extensions, per-user installs into
-// %LocalAppData%\Microsoft\VisualStudio\<version>_<sku>\Extensions. Scan both
-// (bounded walk) for an extension.vsixmanifest whose Identity Id matches
-// VSIX_ID. Returns null when not installed, "" when present without version.
-export function findVsixManifestVersion(
+// All versions found for an extension id under a root (bounded walk): a
+// directory may hold several copies of the same extension (e.g. a stale
+// all-users install next to a newer per-user one), and readdir order is
+// unspecified — a first-match scan would read an arbitrary one of them.
+// Callers that decide "installed vs bundled" must see ALL of them. [] when
+// nothing found; "" for a manifest that lacks Version.
+export function findVsixManifestVersions(
   root: string,
   id: string,
   maxDepth: number,
-): string | null {
-  const walk = (dir: string, depth: number): string | null => {
-    if (depth > maxDepth) return null;
+): string[] {
+  const out: string[] = [];
+  const walk = (dir: string, depth: number): void => {
+    if (depth > maxDepth) return;
     let entries: Dirent[];
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch {
-      return null; // unreadable dir (permissions): skip
+      return; // unreadable dir (permissions): skip
     }
     for (const entry of entries) {
       const p = join(dir, entry.name);
       if (entry.isDirectory()) {
         if (entry.name === ".cache") continue; // VS cache dirs
-        const found = walk(p, depth + 1);
-        if (found !== null) return found;
+        walk(p, depth + 1);
       } else if (
         entry.isFile() &&
         entry.name.toLowerCase() === "extension.vsixmanifest"
@@ -417,22 +418,51 @@ export function findVsixManifestVersion(
           const xml = readFileSync(p, "utf-8");
           const at = xml.indexOf(`Id="${id}"`);
           if (at >= 0)
-            return /Version="([^"]+)"/.exec(xml.slice(at, at + 200))?.[1] ?? "";
+            out.push(/Version="([^"]+)"/.exec(xml.slice(at, at + 200))?.[1] ?? "");
         } catch {
           // unreadable manifest: keep scanning
         }
       }
     }
-    return null;
   };
-  return walk(root, 0);
+  walk(root, 0);
+  return out;
+}
+
+// First match found under the root, or null. Kept for the layout tests: the
+// install/version check uses findVsixManifestVersions + pickHighestVersion.
+export function findVsixManifestVersion(
+  root: string,
+  id: string,
+  maxDepth: number,
+): string | null {
+  return findVsixManifestVersions(root, id, maxDepth)[0] ?? null;
+}
+
+// Highest version in a list (numeric semver), null when the list is empty.
+// An empty-string entry (manifest without Version) counts only when no
+// versioned copy exists.
+export function pickHighestVersion(versions: string[]): string | null {
+  let best: string | null = null;
+  for (const v of versions) {
+    if (v === "") {
+      if (best === null) best = "";
+      continue;
+    }
+    if (best === null || best === "" || compareVersions(v, best) > 0) best = v;
+  }
+  return best;
 }
 
 // Installed VS companion version for ONE instance: the admin install (/a)
 // goes into <install>\Common7\IDE\Extensions, per-user installs into
 // %LocalAppData%\Microsoft\VisualStudio\<major>.0_<instanceId>\Extensions.
-// Per-instance scan: the global one returns the FIRST match anywhere, which
-// would wrongly skip instances that still lack the companion.
+// Scans ALL roots and returns the HIGHEST version found: a stale copy (e.g.
+// an old all-users install that per-user updates never touch) must not
+// shadow the current one — a first-match scan would reinstall at every pi
+// start (the reported VS "0.2.2 → 0.2.3" loop). Per-instance scan: an
+// instance that already has the current version must not make every other
+// instance skip too.
 async function installedVsCompanionVersion(inst: VsInstance): Promise<string | null> {
   const roots = [join(inst.path, "Common7", "IDE", "Extensions")];
   const major = inst.version.split(".")[0];
@@ -440,14 +470,14 @@ async function installedVsCompanionVersion(inst: VsInstance): Promise<string | n
     ? join(process.env.LOCALAPPDATA, "Microsoft", "VisualStudio")
     : "";
   if (localVs && major) roots.push(join(localVs, `${major}.0_${inst.id}`, "Extensions"));
+  const versions: string[] = [];
   const seen = new Set<string>();
   for (const root of roots) {
     if (seen.has(root) || !existsSync(root)) continue;
     seen.add(root);
-    const found = findVsixManifestVersion(root, VSIX_ID, 6);
-    if (found !== null) return found;
+    versions.push(...findVsixManifestVersions(root, VSIX_ID, 6));
   }
-  return null;
+  return pickHighestVersion(versions);
 }
 
 // --- unified entry point -----------------------------------------------------
@@ -556,30 +586,61 @@ export async function ensureCompanions(
           try {
             // Per-instance install via /instanceIds — without it VSIXInstaller
             // targets only the newest instance. Per-user first (no elevation),
-            // fall back to /a (all-users, may raise a UAC prompt) only when
-            // the per-user install fails.
+            // fall back to /a (all-users, may raise a UAC prompt) when the
+            // per-user install FAILS or does not take effect: a stale
+            // all-users copy in Common7\IDE\Extensions is not updated by a
+            // per-user install, so the version check would keep reading the
+            // old copy and reinstall at every pi start (the reported VS
+            // "0.2.2 → 0.2.3" loop).
+            const tryInstall = async (allUsers: boolean): Promise<void> => {
+              await execFileAsync(
+                vsixInstaller,
+                allUsers
+                  ? ["/q", "/a", `/instanceIds:${inst.id}`, vsVsix]
+                  : ["/q", `/instanceIds:${inst.id}`, vsVsix],
+                { timeout: 120_000, windowsHide: true },
+              );
+            };
+            let error: string | undefined;
             try {
-              await execFileAsync(
-                vsixInstaller,
-                ["/q", `/instanceIds:${inst.id}`, vsVsix],
-                { timeout: 120_000, windowsHide: true },
-              );
-            } catch {
-              await execFileAsync(
-                vsixInstaller,
-                ["/q", "/a", `/instanceIds:${inst.id}`, vsVsix],
-                { timeout: 120_000, windowsHide: true },
-              );
+              await tryInstall(false);
+            } catch (err1) {
+              // per-user install failed outright → retry all-users
+              try {
+                await tryInstall(true);
+              } catch (err2) {
+                error = `${err1 instanceof Error ? err1.message : String(err1)}; /a: ${err2 instanceof Error ? err2.message : String(err2)}`;
+              }
             }
-            // update (not fresh install) → signal the open IDE to reload
-            if (installed !== null) writeReloadSignal(vsVsixVersion);
-            notes.push({
-              target: "visualstudio",
-              kind: installed === null ? "installed" : "updated",
-              label,
-              version: vsVsixVersion,
-              ...(installed !== null ? { fromVersion: installed } : {}),
-            });
+            if (!error) {
+              // post-install verification: the highest-version-wins check
+              // must now read the bundled version; if not, the per-user
+              // install did not take effect → install all-users as well
+              const after = await installedVsCompanionVersion(inst);
+              if (after !== vsVsixVersion) {
+                try {
+                  await tryInstall(true);
+                  const after2 = await installedVsCompanionVersion(inst);
+                  if (after2 !== vsVsixVersion)
+                    error = `installed version still ${after2 === null ? "missing" : `"${after2}"`} after install (bundled ${vsVsixVersion})`;
+                } catch (err3) {
+                  error = err3 instanceof Error ? err3.message : String(err3);
+                }
+              }
+            }
+            if (error) {
+              notes.push({ target: "visualstudio", kind: "error", label, error });
+            } else {
+              // update (not fresh install) → signal the open IDE to reload
+              if (installed !== null) writeReloadSignal(vsVsixVersion);
+              notes.push({
+                target: "visualstudio",
+                kind: installed === null ? "installed" : "updated",
+                label,
+                version: vsVsixVersion,
+                ...(installed !== null ? { fromVersion: installed } : {}),
+              });
+            }
           } catch (err) {
             notes.push({
               target: "visualstudio",

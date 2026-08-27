@@ -108,7 +108,8 @@ webview è la UI.
 - Sorgente in `src/`, build in `dist/` (mai il contrario)
 - **Deploy cross-platform** (Linux/macOS/Windows, D6): niente path o
   comandi unix hard-coded; `os.tmpdir()`/`path.join`; risoluzione binario
-  `pi` (shim `.cmd` su Windows); check bash su Windows (requisito di pi)
+  `pi` (shim `.cmd` su Windows). La risoluzione della shell e gli eventuali
+  errori del tool `bash` restano responsabilità del core di pi
 - **Tema (D7)**: standalone → preferenza utente light/dark/system (default
   system), config in `src/bridge/config.ts` (cartella config utente per SO,
   accesso via `getConfig`/`setConfig`); in webview VS Code → tema dell'IDE

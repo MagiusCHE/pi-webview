@@ -37,9 +37,10 @@ Sviluppo fasantato su **Linux**, ma con occhio costante a portabilità;
 
 - pi si installa via npm (`npm install -g --ignore-scripts …`) → cross-platform
 - protocollo RPC identico su tutti i sistemi (stdio JSONL)
-- **Windows**: pi richiede una bash shell (Git Bash / Cygwin / MSYS2 / WSL,
-  vedi `docs/windows.md` di pi) — il bridge/adapter deve rilevarla e dare
-  errore chiaro se assente
+- **Windows**: il tool `bash` predefinito di pi usa Git Bash (o una shell
+  compatibile; vedi `docs/windows.md` di pi). La risoluzione della shell e gli
+  eventuali errori restano responsabilità del core di pi: bridge e adapter non
+  duplicano il controllo, per evitare falsi allarmi
 - accortezze nel codice: risoluzione del binario `pi` (shim `pi.cmd` su
   Windows), segnali (`child.kill()` cross-platform), percorsi via
   `os.tmpdir()`/`path.join`, mai hard-coded unix

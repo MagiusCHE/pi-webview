@@ -100,8 +100,6 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
                 "'pi' command not found: install pi with npm install -g @earendil-works/pi-coding-agent"));
             return;
         }
-        var bashWarning = BashDetector.CheckBashOnWindows();
-        if (bashWarning is not null) _cb.OnWarning(bashWarning);
         var bashDir = BashDetector.FindBashDir();
 
         // a saved session from ANOTHER workspace must be FORKED into the

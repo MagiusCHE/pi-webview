@@ -9,7 +9,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFil
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PiProcess } from "../../bridge/pi-process.ts";
-import { resolvePi, findPiFallback, findPiViaShell, checkBashOnWindows } from "../../bridge/spawn.ts";
+import { resolvePi, findPiFallback, findPiViaShell } from "../../bridge/spawn.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -326,15 +326,6 @@ export abstract class PiWebviewHost {
       });
       return;
     }
-    const bashWarning = checkBashOnWindows();
-    if (bashWarning) {
-      // checkBashOnWindows returns the Italian text: localize at the call site
-      const locale = this.config.get().locale;
-      void vscode.window.showWarningMessage(
-        hostT(locale, bashWarning, "pi on Windows requires a bash shell (Git Bash, Cygwin, MSYS2 or WSL) in PATH"),
-      );
-    }
-
     // a session saved in ANOTHER workspace (header cwd ≠ open folder) must be
     // FORKED into the current workspace before resuming (like pi's
     // cross-folder resume): never resume a foreign session as-is.

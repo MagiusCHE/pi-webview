@@ -147,10 +147,10 @@ public static class PiResolver
 
 public static class BashDetector
 {
-    /// <summary>pi on Windows requires a bash shell (pi's docs/windows.md).
-    /// Looks for bash in PATH and in the typical Git Bash / MSYS2 / Cygwin /
-    /// WSL locations. Returns the directory to PREPEND to the pi process
-    /// PATH, or null when no bash is found.</summary>
+    /// <summary>Looks for the shell used by pi's default bash tool in PATH and
+    /// in typical Git Bash / MSYS2 / Cygwin / WSL locations. Returns the
+    /// directory to prepend to the pi process PATH, or null when none is found.
+    /// Shell errors remain the responsibility of the pi core.</summary>
     public static string? FindBashDir()
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return null;
@@ -185,17 +185,8 @@ public static class BashDetector
                 // next candidate
             }
         }
-        // wsl.exe available? pi can use WSL if configured — not a real bash
-        // in PATH: report it as missing and the host will warn the user.
+        // wsl.exe is not a bash directory that can be prepended to PATH;
+        // leave any configured WSL resolution to the pi core.
         return null;
-    }
-
-    /// <summary>User-facing warning message, or null when ok.</summary>
-    public static string? CheckBashOnWindows()
-    {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return null;
-        return FindBashDir() is null
-            ? "pi on Windows requires a bash shell (Git Bash, Cygwin, MSYS2 or WSL)"
-            : null;
     }
 }

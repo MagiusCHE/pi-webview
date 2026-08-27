@@ -16,7 +16,7 @@ import { randomBytes } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import type { Frame, IdeRequest, IdeResponse, RpcEvent } from "../ide/protocol.ts";
 import { PiProcess } from "./pi-process.ts";
-import { resolvePi, checkBashOnWindows } from "./spawn.ts";
+import { resolvePi } from "./spawn.ts";
 import { createMockIde } from "./mock-ide.ts";
 import { ConfigStore, readCompactionSettings } from "./config.ts";
 import {
@@ -196,9 +196,6 @@ function main(): void {
     );
     process.exit(1);
   }
-  const bashWarning = checkBashOnWindows();
-  if (bashWarning) console.warn(`[bridge] ATTENZIONE: ${bashWarning}`);
-
   // command to spawn: use the resolved path (on Windows pi.cmd needs the
   // full path), unless the user passes an explicit one
   const piCommand = opts.piCommand === "pi" && pi.path ? pi.path : opts.piCommand;

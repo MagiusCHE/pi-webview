@@ -168,7 +168,7 @@ docs/
 
 ## Cross-platform
 
-Development is done on Linux, but the deploy targets **Linux, macOS and Windows**: pi is an npm package on all three (Windows requires a bash shell, e.g. Git Bash — a requirement of pi itself). The bridge resolves the `pi` binary (`.cmd` shim on Windows), uses `os.tmpdir()`/`path.join` and never hard-codes unix paths.
+Development is done on Linux, but the deploy targets **Linux, macOS and Windows**: pi is an npm package on all three. On Windows, pi itself resolves the shell used by its default `bash` tool; pi-webview does not duplicate that check. The bridge resolves the `pi` binary (`.cmd` shim on Windows), uses `os.tmpdir()`/`path.join` and never hard-codes unix paths.
 
 ## License
 

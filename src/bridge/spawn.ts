@@ -226,14 +226,3 @@ async function probeShell(): Promise<PiResolution | null> {
   }
   return null;
 }
-
-// pi on Windows requires a bash shell (Git Bash / Cygwin / MSYS2 / WSL):
-// docs/windows.md of pi. Returns a warning if missing.
-export function checkBashOnWindows(
-  platform: NodeJS.Platform = process.platform,
-): string | null {
-  if (platform !== "win32") return null;
-  const found = findOnPath("bash", platform);
-  if (found) return null;
-  return "pi su Windows richiede una bash shell (Git Bash, Cygwin, MSYS2 o WSL) in PATH";
-}

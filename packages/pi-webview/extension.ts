@@ -206,23 +206,26 @@ function piwPointsHere(): boolean {
   }
 }
 
-// Creates the `piw` link on PATH if missing. NO npm postinstall (removed to
-// avoid install scripts): the only creation/update path for the link is this
-// ensure at pi startup. Best effort: never break pi startup because of a link.
-// Idempotent: never touches user regular files.
-function ensurePiwBin(): void {
+// Creates (or re-creates with `force`) the `piw` link on PATH. NO npm
+// postinstall (removed to avoid install scripts): the only creation/update
+// path for the link is this ensure at pi startup and the /piw install|reinstall
+// command. Best effort: never break pi startup because of a link. Idempotent:
+// never touches user regular files. Returns true when the link was created or
+// rewritten, false when it was already in place or skipped.
+function ensurePiwBin(force = false): boolean {
   try {
     const { dir, link, target, isWindows } = piwBinPaths();
-    if (!dir) return;
+    if (!dir) return false;
     if (isWindows) {
       // .cmd: create if missing, REWRITE if it is our stale shim pointing at
-      // an old install path. Never touch a user's own piw.cmd.
-      if (piwPointsHere()) return;
-      if (existsSync(link) && readPiwCmdTarget() === null) return; // user file
+      // an old install path (or always with force). Never touch a user's own
+      // piw.cmd.
+      if (piwPointsHere() && !force) return false;
+      if (existsSync(link) && readPiwCmdTarget() === null) return false; // user file
       mkdirSync(dir, { recursive: true });
       const content = `@echo off\r\nnode "${target.replace(/"/g, '\\"')}" %*\r\n`;
       writeFileSync(link, content);
-      return;
+      return true;
     }
     // lstatSync as an EXISTENCE check (not existsSync): it sees even DANGLING
     // symlinks, which would otherwise never be replaced (and symlinkSync
@@ -231,25 +234,27 @@ function ensurePiwBin(): void {
     try {
       st = lstatSync(link);
     } catch {
-      st = null; // non esiste
+      st = null; // missing
     }
     if (st) {
-      if (!st.isSymbolicLink()) return; // user regular file: do not touch
+      if (!st.isSymbolicLink()) return false; // user regular file: do not touch
       const cur = readlinkSync(link);
-      if (cur === target) return; // already our link
-      rmSync(link); // link to another version/install path: replace
+      if (cur === target && !force) return false; // already our link
+      rmSync(link); // stale or forced: replace
     }
     mkdirSync(dir, { recursive: true });
     symlinkSync(target, link);
+    return true;
   } catch {
     // best effort: never break startup because of a link
+    return false;
   }
 }
 
 // Removes the `piw` symlink from the user's PATH, ONLY if it points to this
 // package's bin (never user regular files, never links pointing elsewhere).
 // Replicated here because without an npm postinstall the link cleanup is
-// entirely up to /pi-webview uninstall.
+// entirely up to /piw uninstall.
 function unlinkPiwBin(): void {
   const { dir, link, target, isWindows } = piwBinPaths();
   if (!dir) return;
@@ -527,7 +532,7 @@ export default function (pi: PiApi): void {
   // two registrations pi mangles the name to "pi-webview:1"/"pi-webview:2"
   // and the command is no longer invocable.
   const registerCommand = (): void => {
-    pi.registerCommand("pi-webview", {
+    pi.registerCommand("piw", {
       description:
         "Manage the webview IDE integration (status, install, reinstall, uninstall)",
       handler: async (args, ctx) => {
@@ -547,16 +552,28 @@ export default function (pi: PiApi): void {
             );
             return;
           }
-          case "install":
+          case "install": {
+            // idempotent: installs only the companions that are missing or
+            // outdated (same check as the startup auto-install), and ensures
+            // the `piw` launcher link exists
+            const notes = await ensureCompanions(packageRoot);
+            const piwLink = ensurePiwBin();
+            const msgs = formatCompanionNotes(notes, "en", "pi-webview: ");
+            const piwMsg = piwLink
+              ? "pi-webview: piw launcher link created."
+              : "pi-webview: piw launcher link already in place.";
+            notify(msgs.length ? `${msgs.join(" ")} ${piwMsg}` : piwMsg, "info");
+            return;
+          }
           case "reinstall": {
-            // force: reinstall even when the version already matches (the
-            // explicit command is meant to repair a broken install)
+            // force: reinstalls every companion even when the installed
+            // version matches (repair of a broken install) and re-creates the
+            // `piw` launcher link
             const notes = await ensureCompanions(packageRoot, { force: true });
+            ensurePiwBin(true);
             const msgs = formatCompanionNotes(notes, "en", "pi-webview: ");
             notify(
-              msgs.length
-                ? msgs.join(" ")
-                : "pi-webview: nothing to do — companions already up to date or app not installed.",
+              `${msgs.length ? `${msgs.join(" ")} ` : ""}pi-webview: piw launcher link re-created.`,
               "info",
             );
             return;
@@ -673,7 +690,7 @@ export default function (pi: PiApi): void {
   pi.on("session_start", () => {
     const already = pi
       .getCommands()
-      .some((c) => c.name === "pi-webview" || c.name.startsWith("pi-webview:"));
+      .some((c) => c.name === "piw" || c.name.startsWith("piw:"));
     if (!already) registerCommand();
   });
 }

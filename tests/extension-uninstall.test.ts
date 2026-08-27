@@ -1,4 +1,4 @@
-// Unit tests for the runtime package-ref resolution used by /pi-webview
+// Unit tests for the runtime package-ref resolution used by /piw
 // uninstall (findInstalledRef, packages/pi-webview/extension.ts). The ref
 // must match what `pi list` shows: npm installs are `npm:<name>`, local
 // installs are the relative path registered in ~/.pi/agent/settings.json.

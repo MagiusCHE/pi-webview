@@ -71,7 +71,13 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
             var solution = _dte.Solution;
             if (solution is not null && solution.FullName is { Length: > 0 } full)
             {
-                return Path.GetDirectoryName(full);
+                // Open-folder mode has no .sln: FullName IS the folder path
+                // (GetDirectoryName would strip the last segment → the PARENT
+                // folder, breaking session lookup). With a .sln, FullName is
+                // the solution FILE → take its directory.
+                if (Directory.Exists(full)) return Path.GetFullPath(full);
+                var dir = Path.GetDirectoryName(full);
+                if (!string.IsNullOrEmpty(dir)) return dir;
             }
             var doc = _dte.ActiveDocument;
             if (doc is not null && doc.FullName is { Length: > 0 } docFull)

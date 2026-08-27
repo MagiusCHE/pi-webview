@@ -3,6 +3,7 @@
 // requests answer with a clear error (same behavior as the VS Code companion:
 // the dialogs are done by the web UI).
 
+using System.Reflection;
 using System.Text.Json;
 using EnvDTE;
 using PiWebview.Vs.Config;
@@ -71,7 +72,7 @@ public static class IdeBridge
                     host.PostIdeResponse(Ok(req, new Dictionary<string, object?>
                     {
                         ["source"] = "visualstudio",
-                        ["version"] = typeof(IdeBridge).Assembly.GetName().Version?.ToString() ?? null,
+                        ["version"] = VersionLabel(),
                     }));
                     return;
                 case "getCliFlags":
@@ -215,6 +216,21 @@ public static class IdeBridge
         {
             host.PostIdeResponse(Fail(req, ex.Message));
         }
+    }
+
+    // Version shown in the settings dialog: the assembly informational version
+    // (set from the package version at build time via -p:VsixVersion, e.g.
+    // "0.2.3"), not the 4-part AssemblyVersion ("0.2.3.0") — the same version
+    // reported by the VS Code companion and piw.
+    private static string? VersionLabel()
+    {
+        var info = typeof(IdeBridge).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion;
+        if (string.IsNullOrEmpty(info)) return null;
+        // net472: no range operator (System.Range/System.Index are not available)
+        var plus = info!.IndexOf('+');
+        return plus >= 0 ? info.Substring(0, plus) : info;
     }
 
     private static IdeResponse Ok(IdeRequest req, object? data) => new()

@@ -132,7 +132,7 @@ module, `src/bridge/companions.ts`) at its startup. The same
 pi-side extension creates the `piw` link on the PATH (the package has no install
 scripts).
 
-> For user-facing instructions (install, `/pi-webview` subcommands, uninstall)
+> For user-facing instructions (install, `/piw` subcommands, uninstall)
 > see the [npm package page](https://www.npmjs.com/package/@magiusche/pi-webview).
 
 > **Note:** the repo does **not** track build artifacts (`*.vsix`, `dist/`):

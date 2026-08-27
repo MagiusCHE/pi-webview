@@ -96,7 +96,7 @@ pi install npm:@magiusche/pi-webview
 >   installed per instance with `VSIXInstaller.exe /quiet /instanceIds:`
 >   (VS 2022 + 2026; VS 2019 is out of the manifest range) when VS is present;
 >   disable all auto-install with `PI_WEBVIEW_AUTO_INSTALL=0`.
->   You can also install explicitly with **`/pi-webview install`** from a pi
+>   You can also install explicitly with **`/piw install`** from a pi
 >   terminal, or manually (`code --install-extension companion/pi-webview-ide.vsix`
 >   / `VSIXInstaller /q companion/pi-webview-visualstudio.vsix` from the package
 >   dir), then reload the window / restart Visual Studio.
@@ -116,7 +116,7 @@ This package has **no npm install scripts** (nothing to approve, no `npm warn in
 `pi remove` cannot clean up by itself (no uninstall scripts in the package, and pi has no package-removal hook). Run this **inside pi** (while the extension is still loaded) — it removes everything and then uninstalls the package from pi itself:
 
 ```
-/pi-webview uninstall
+/piw uninstall
 ```
 
 It removes, in order:
@@ -141,10 +141,10 @@ Every install/update/error is reported — in the pi.dev TUI and in the webview 
 The companion can also be installed explicitly:
 
 ```
-/pi-webview install
+/piw install
 ```
 
-(or `code --install-extension companion/pi-webview-ide.vsix` from the package dir), then **reload the VS Code window** — a **pi** icon appears in the activity bar with the webview chat. Subcommands: `status | install | reinstall | uninstall` (`/pi-webview` for the list). `uninstall` removes both the companion and the `piw` link.
+(or `code --install-extension companion/pi-webview-ide.vsix` from the package dir), then **reload the VS Code window** — a **pi** icon appears in the activity bar with the webview chat. Subcommands: `status | install | reinstall | uninstall` (`/piw` for the list). `install` installs only what is missing or outdated and ensures the `piw` launcher link; `reinstall` forces a full reinstall of the companions and re-creates the `piw` link. `uninstall` removes both the companion and the `piw` link.
 
 The companion spawns `pi --mode rpc` and bridges the UI via `postMessage` (same UI and protocol as standalone; editor selection flows directly to the webview).
 

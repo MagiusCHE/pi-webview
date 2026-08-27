@@ -467,7 +467,7 @@ export interface CompanionNote {
  * Returns the notes to surface (empty = nothing to report: app not
  * installed or companions already current — silent skip). With
  * `opts.force` the version compare is skipped and the companions are
- * reinstalled (used by the explicit /pi-webview install|reinstall command).
+ * reinstalled (used by the explicit /piw reinstall command).
  * Never throws: every failure becomes an error note.
  */
 export async function ensureCompanions(

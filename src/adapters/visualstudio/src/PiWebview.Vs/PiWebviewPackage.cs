@@ -110,7 +110,13 @@ public sealed class PiWebviewPackage : AsyncPackage
             var solution = dte.Solution;
             if (solution is not null && solution.FullName is { Length: > 0 } full)
             {
-                return System.IO.Path.GetDirectoryName(full);
+                // Open-folder mode has no .sln: FullName IS the folder path
+                // (GetDirectoryName would strip the last segment → the PARENT
+                // folder, breaking session lookup). With a .sln, FullName is
+                // the solution FILE → take its directory.
+                if (System.IO.Directory.Exists(full)) return System.IO.Path.GetFullPath(full);
+                var dir = System.IO.Path.GetDirectoryName(full);
+                if (!string.IsNullOrEmpty(dir)) return dir;
             }
             var doc = dte.ActiveDocument;
             if (doc is not null && doc.FullName is { Length: > 0 } docFull)

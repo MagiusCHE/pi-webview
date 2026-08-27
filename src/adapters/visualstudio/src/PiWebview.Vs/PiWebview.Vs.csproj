@@ -130,7 +130,11 @@
     <ExtensionInstallationFolder>PiWebview</ExtensionInstallationFolder>
     <!-- fallback for plain `dotnet build`; the canonical build passes
          -p:VsixVersion=<package.json version> (tools/build-vs-vsix.mjs) -->
-    <VsixVersion Condition="'$(VsixVersion)' == ''">0.1.3</VsixVersion>
+    <VsixVersion Condition="'$(VsixVersion)' == ''">0.2.3</VsixVersion>
+    <!-- Assembly version follows the vsix/package version: the settings
+         getVersion (IdeBridge.cs) reads the assembly informational version,
+         so the VS addon shows the same version as VS Code and piw. -->
+    <Version>$(VsixVersion)</Version>
   </PropertyGroup>
 
   <ItemGroup>

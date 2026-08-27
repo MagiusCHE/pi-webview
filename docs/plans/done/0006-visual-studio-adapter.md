@@ -78,9 +78,9 @@
       Visual Studio con `vswhere.exe` (solo Windows), installa il vsix con
       `VSIXInstaller.exe /quiet` — come avviene con
       `code --install-extension`. Il vsix è incluso nel package pi
-      (`companion/pi-webview-visualstudio.vsix`, via `pnpm package:vs`).
-- [x] **Integrazione release**: build del vsix nel flusso `pnpm package:addon`
-      (`pnpm package:ide` → `pnpm package:vs` → `build-addon.mjs` copia i due
+      (`companion/pi-webview-visualstudio.vsix`, via `pnpm package:visualstudio`).
+- [x] **Integrazione release**: build del vsix nel flusso `pnpm package:pi`
+      (`pnpm package:vscode` → `pnpm package:visualstudio` → `build-addon.mjs` copia i due
       vsix in `packages/pi-webview/companion/`); `pnpm release` usa lo stesso
       flusso. Bump di versione sincronizzato con l'estensione pi (il reload
       signal confronta le versioni).
@@ -89,7 +89,7 @@
       gitignored — non tocca `~/.wine`) con .NET Framework 4.8 (winetricks
       dotnet48) e applica le patch al pacchetto VSSDK.BuildTools nel nuget
       cache (symlink case, wrapper shims wine per VSCT/CreatePkgDef, Newtonsoft
-      netstandard2.0). `pnpm package:vs` = `pnpm build` + `dotnet build` +
+      netstandard2.0). `pnpm package:visualstudio` = `pnpm build` + `dotnet build` +
       copia in `dist/`.
 - [x] **Nome e icona allineati al companion VS Code**: DisplayName "pi",
       icona 32x32 generata da `media/icon-mark-128.png` nel vsix
@@ -111,7 +111,7 @@
 # dalla radice del repo
 pnpm build                                     # UI → dist/web (prerequisito del vsix)
 node tools/setup-vs-wine.mjs                   # una tantum: prefix wine + patch VSSDK
-pnpm package:vs                               # dotnet build → dist/pi-webview-visualstudio.vsix
-pnpm package:addon                            # tutto: UI + vsix VS Code + vsix VS + bundle pi
+pnpm package:visualstudio                     # dotnet build → dist/pi-webview-visualstudio.vsix
+pnpm package:pi                               # tutto: UI + vsix VS Code + vsix VS + bundle pi
 dotnet test src/adapters/visualstudio/PiWebview.Vs.slnx   # 33 test C#
 ```

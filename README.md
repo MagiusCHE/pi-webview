@@ -108,9 +108,9 @@ pnpm dev          # then open http://localhost:5173/?demo=1&theme=dark&lang=en
 | `pnpm format` / `pnpm format:check` | Prettier                                                 |
 | `pnpm typecheck`                    | `tsc --noEmit`                                           |
 | `pnpm compile`                      | Build UI + VS Code adapter (for F5)                      |
-| `pnpm package:ide`                  | Build the VS Code companion → `dist/pi-webview-ide.vsix` |
-| `pnpm package:vs`                   | Build the Visual Studio companion → `dist/pi-webview-visualstudio.vsix` (Linux: requires `node tools/setup-vs-wine.mjs` once — project-local wine prefix + VSSDK cache patches) |
-| `pnpm package:addon`                | Assemble the pi package (`packages/pi-webview/`, both vsix included)         |
+| `pnpm package:vscode`               | Build the VS Code companion → `dist/pi-webview-ide.vsix` |
+| `pnpm package:visualstudio`          | Build the Visual Studio companion → `dist/pi-webview-visualstudio.vsix` (Linux: requires `node tools/setup-vs-wine.mjs` once — project-local wine prefix + VSSDK cache patches) |
+| `pnpm package:pi`                    | Assemble the pi package (`packages/pi-webview/`, both vsix included)         |
 | `pnpm release -- --version 0.1.1 [--publish] [--tag <dist-tag>]` | Release prep: bump versione in entrambi i package.json, rebuild vsix+bundle+UI, `npm pack` di verifica. Con `--publish` esegue anche `npm publish --access public` e crea automaticamente il tag git `v<version>` + la GitHub release (idempotente: skip se tag/release già esistenti). Senza `--publish` non pubblica mai. |
 
 ## IDE integration (VS Code first, Visual Studio too)
@@ -129,7 +129,7 @@ scripts).
 > see the [npm package page](https://www.npmjs.com/package/@magiusche/pi-webview).
 
 > **Note:** the repo does **not** track build artifacts (`*.vsix`, `dist/`):
-> `pnpm package:addon` is **required** before `pi install` from a fresh clone,
+> `pnpm package:pi` is **required** before `pi install` from a fresh clone,
 > and after changing the companion or the pi-side extension code.
 
 The companions create the webview, spawn `pi --mode rpc` and bridge the UI via

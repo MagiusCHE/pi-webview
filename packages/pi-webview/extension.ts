@@ -487,7 +487,7 @@ async function installedVsCompanionVersion(inst: VsInstance): Promise<string | n
 }
 
 async function installVsCompanion(vsixPath: string): Promise<string | null> {
-  if (!existsSync(vsixPath)) return null; // vsix not bundled (build without pnpm package:vs)
+  if (!existsSync(vsixPath)) return null; // vsix not bundled (build without pnpm package:visualstudio)
   const instances = await visualStudioInstances();
   if (instances.length === 0) return null; // no Visual Studio: silent skip
   const vsixVersion = readVsixVersion(vsixPath);

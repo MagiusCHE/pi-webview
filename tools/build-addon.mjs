@@ -8,11 +8,11 @@ import { build } from "esbuild";
 import { cpSync, mkdirSync, existsSync } from "node:fs";
 
 if (!existsSync("dist/pi-webview-ide.vsix")) {
-  console.error("VS Code companion vsix missing: run `pnpm package:ide` first");
+  console.error("VS Code companion vsix missing: run `pnpm package:vscode` first");
   process.exit(1);
 }
 if (!existsSync("dist/web/index.html")) {
-  console.error("built UI missing: run `pnpm package:ide` first (vite build)");
+  console.error("built UI missing: run `pnpm package:vscode` first (vite build)");
   process.exit(1);
 }
 // the Visual Studio companion vsix is optional at assembly time (it needs the
@@ -23,7 +23,9 @@ const vsVsix = "dist/pi-webview-visualstudio.vsix";
 if (existsSync(vsVsix)) {
   console.log("VS companion vsix present → included in the package");
 } else {
-  console.warn("VS companion vsix missing: run `pnpm package:vs` to include Visual Studio support");
+  console.warn(
+    "VS companion vsix missing: run `pnpm package:visualstudio` to include Visual Studio support",
+  );
 }
 
 mkdirSync("packages/pi-webview/dist", { recursive: true });

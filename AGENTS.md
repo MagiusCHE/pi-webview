@@ -26,9 +26,9 @@ webview è la UI.
 - `pnpm test:watch` — test in watch
 - `pnpm smoke` — smoke test del bridge contro pi reale (no LLM)
 - `pnpm compile` — build UI + adapter VS Code (per F5)
-- `pnpm package:ide` — vsix del companion VS Code (→ `dist/pi-webview-ide.vsix`)
-- `pnpm package:vs` — build UI + vsix del companion Visual Studio (→ `dist/pi-webview-visualstudio.vsix`; su Linux richiede `node tools/setup-vs-wine.mjs` una tantum: prefix wine dedicato nel progetto + patch al VSSDK nel nuget cache)
-- `pnpm package:addon` — assembly del package pi (vsix VS Code + vsix VS + estensione pi-webview lato pi)
+- `pnpm package:vscode` — vsix del companion VS Code (→ `dist/pi-webview-ide.vsix`)
+- `pnpm package:visualstudio` — build UI + vsix del companion Visual Studio (→ `dist/pi-webview-visualstudio.vsix`; su Linux richiede `node tools/setup-vs-wine.mjs` una tantum: prefix wine dedicato nel progetto + patch al VSSDK nel nuget cache)
+- `pnpm package:pi` — assembly del package pi (vsix VS Code + vsix Visual Studio + estensione pi-webview lato pi)
 - `pnpm release -- --version 0.1.1 [--publish] [--tag <dist-tag>]` — prepara (bump versioni in entrambi i package.json, rebuild vsix+bundle+UI, `npm pack` di verifica); con `--publish` esegue anche `npm publish --access public` e crea in automatico il tag git `v<version>` + la GitHub release (idempotente: skip se già esistenti). Senza `--publish` non pubblica mai.
 - `pnpm format` / `pnpm format:check` — prettier
 - `pnpm typecheck` — `tsc --noEmit`

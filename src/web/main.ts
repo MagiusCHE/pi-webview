@@ -36,6 +36,11 @@ import { runtime } from "./environment.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { toolSummary, type ToolSummary } from "./tool-summary.ts";
 import {
+  attachEditorSelectionContext,
+  stripEditorSelectionContext,
+  type ActiveEditorSelection,
+} from "./selection-context.ts";
+import {
   trustIcon,
   sendIcon,
   stopIcon,
@@ -3351,9 +3356,9 @@ function renderRpcEvent(evt: RpcEvent): void {
   } else if (evt.type === "panel_mode") {
     // webview in an EDITOR PANEL (not sidebar): the attached selection is
     // unreliable (panel focus clears the active-editor context) → disable
-    // the selection block
+    // the selection block and never attach stale sidebar context
     panelMode = evt.enabled === true;
-    if (panelMode) els.selectionPanel.hidden = true;
+    if (panelMode) clearEditorSelectionPanel();
   } else if (evt.type === "pi_restarted") {
     // restart completed: re-initialize WITHOUT reload (transparent): session
     // state + config; the current session is resumed by the companion with
@@ -3837,22 +3842,52 @@ async function maybeShowStartupBanner(): Promise<void> {
   scrollToBottom();
 }
 
+type SelectionPanel = HTMLDivElement & {
+  editorSelection?: ActiveEditorSelection;
+};
+
+function clearEditorSelectionPanel(): void {
+  const panel = els.selectionPanel as SelectionPanel;
+  panel.hidden = true;
+  delete panel.editorSelection;
+}
+
+// The box is the source of truth: context exists only while this exact box is
+// visible. There is no separate "last selection" state in the webview.
+function visibleEditorSelection(): ActiveEditorSelection | null {
+  const panel = els.selectionPanel as SelectionPanel;
+  return panel.hidden ? null : (panel.editorSelection ?? null);
+}
+
 function renderIdeEvent(evt: IdeEvent): void {
   if (evt.type === "selection_changed" || evt.type === "selection_cleared") {
-    // editor panel: selection block DISABLED (panel focus clears the
-    // active-editor context → showing it would be confusing)
-    if (panelMode) return;
+    // editor panel: selection context is disabled because panel focus clears
+    // the active editor; never retain context that cannot be shown reliably
+    if (panelMode) {
+      clearEditorSelectionPanel();
+      return;
+    }
     if (evt.type === "selection_changed") {
+      const ranges = (evt.ranges ?? []).filter((range) => range.text.length > 0);
+      if (ranges.length === 0) {
+        clearEditorSelectionPanel();
+        return;
+      }
+      const panel = els.selectionPanel as SelectionPanel;
+      panel.editorSelection = {
+        filePath: evt.filePath,
+        workspaceFolder: evt.workspaceFolder,
+        ranges,
+      };
       // dedicated block (one row, like the steering): appears with the selection
-      const n = evt.ranges?.length ?? 0;
       const base = evt.filePath?.split(/[\\/]/).pop() ?? evt.filePath ?? "?";
-      els.selectionPanel.textContent = `${t("selection")}: ${base} (${n})`;
-      els.selectionPanel.title = `${t("selection")}: ${evt.filePath ?? "?"} — ${n} ${t("ranges")}`;
-      const wasHidden = els.selectionPanel.hidden;
-      els.selectionPanel.hidden = false;
-      if (wasHidden) scrollToBottom(true); // the block covers the last message
+      panel.textContent = `${t("selection")}: ${base} (${ranges.length})`;
+      panel.title = `${t("selection")}: ${evt.filePath ?? "?"} — ${ranges.length} ${t("ranges")}`;
+      const wasHidden = panel.hidden;
+      panel.hidden = false;
+      if (wasHidden) scrollToBottom(true);
     } else {
-      els.selectionPanel.hidden = true;
+      clearEditorSelectionPanel();
     }
     return;
   }
@@ -3916,7 +3951,7 @@ function renderHistory(messages: unknown[]): void {
       const wrapper = addMsg("user");
       const bubble = document.createElement("div");
       bubble.className = "bubble user";
-      bubble.textContent = contentToText(msg.content);
+      bubble.textContent = stripEditorSelectionContext(contentToText(msg.content));
       wrapper.appendChild(bubble);
     } else if (msg.role === "custom" && (msg as { display?: unknown }).display !== false) {
       // legacy "pi-webview-startup" custom messages (older extension versions
@@ -4809,7 +4844,11 @@ function sendOrStop(): void {
     bubble.textContent = text;
     wrapper.appendChild(bubble);
   }
-  const message = [text, ...fileMentions].filter(Boolean).join("\n\n");
+  const visibleMessage = [text, ...fileMentions].filter(Boolean).join("\n\n");
+  const message = attachEditorSelectionContext(
+    visibleMessage,
+    visibleEditorSelection(),
+  );
   transport.send({
     channel: "rpc",
     payload: rpc.prompt(
@@ -4844,10 +4883,14 @@ function submitSteering(): void {
     (a) => a.mimeType.startsWith("image/") && a.dataBase64,
   );
   const fileAtts = attachments.filter((a) => !imageAtts.includes(a));
-  const message = [text, ...fileAtts.map((a) => `[attachment: ${a.path}]`)]
+  const visibleMessage = [text, ...fileAtts.map((a) => `[attachment: ${a.path}]`)]
     .filter(Boolean)
     .join("\n\n");
-  if (!message && imageAtts.length === 0) return;
+  if (!visibleMessage && imageAtts.length === 0) return;
+  const message = attachEditorSelectionContext(
+    visibleMessage,
+    visibleEditorSelection(),
+  );
   steerShadow.push({
     id: `st-${++steerSeq}`,
     text: message,
@@ -4945,7 +4988,11 @@ function renderSteerPanel(): void {
     (a, b) => seqOf(a) - seqOf(b),
   );
   for (const m of merged) {
-    appendSteerRow(panel, m.text, steerPending.includes(m));
+    appendSteerRow(
+      panel,
+      stripEditorSelectionContext(m.text),
+      steerPending.includes(m),
+    );
   }
 }
 
@@ -4970,7 +5017,9 @@ function appendSteerRow(panel: HTMLElement, text: string, sending: boolean): voi
 // to pi do not.
 function dequeueSteering(): void {
   if (steerShadow.length === 0) return;
-  const texts = steerShadow.map((m) => m.text).join("\n\n");
+  const texts = steerShadow
+    .map((m) => stripEditorSelectionContext(m.text))
+    .join("\n\n");
   steerShadow = [];
   persistSteerQueue();
   const current = els.input.value;
@@ -5070,7 +5119,7 @@ function handleUserMessageStart(evt: RpcEvent): void {
   const wrapper = addMsg("user");
   const bubble = document.createElement("div");
   bubble.className = "bubble user";
-  bubble.textContent = text;
+  bubble.textContent = stripEditorSelectionContext(text);
   wrapper.appendChild(bubble);
   scrollToBottom();
 }

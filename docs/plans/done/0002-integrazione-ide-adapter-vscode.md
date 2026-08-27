@@ -10,13 +10,13 @@
 >    (`code --install-extension` sul vsix incluso nel package) — stesso modello
 >    di pi-x-ide;
 > 2. il **companion VS Code** (adapter in `src/adapters/vscode/`, vsix generato
->    da `pnpm package:ide`): crea la webview della sidebar, spawna
+>    da `pnpm package:vscode`): crea la webview della sidebar, spawna
 >    `pi --mode rpc` (env `PI_WEBVIEW_COMPANION=1` per evitare il re-install),
 >    parla l'IDE bridge protocol via postMessage e riusa i moduli bridge
 >    (config/sessioni/trust/allegati); la selezione editor viene inviata
 >    direttamente alla webview (niente WS/lock file: il webview è in-process).
->    Script: `pnpm compile` (web+adapter per F5), `pnpm package:ide` (vsix),
->    `pnpm package:addon` (assembly del package pi).
+>    Script: `pnpm compile` (web+adapter per F5), `pnpm package:vscode` (vsix),
+>    `pnpm package:pi` (assembly del package pi).
 >    Riferimenti: concept 0002 (D1–D6), piano 0001 (base riusata).
 >    Dipendenze: la UI e il bridge protocol del piano 0001.
 >    Piattaforme: sviluppo su Linux; **deploy cross-platform** (D6) — VS Code

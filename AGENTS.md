@@ -77,8 +77,7 @@ webview è la UI.
   `settings.json` disabilita il follow dei symlink ed esclude `**/.wine/**` da
   search/files/watcher. Su Linux il prefix wine (`src/adapters/visualstudio/.wine/`)
   espone `z:` → `/`: senza queste regole VS Code scansiona tutto il filesystem.
-  Copiare i file in `.vscode/` quando serve (lo fa automaticamente
-  `tools/setup-vs-wine.mjs`)
+  L'utente lo usa copiando/rinominando la cartella in `.vscode/` quando serve
 
 ## Convenzioni
 

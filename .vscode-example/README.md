@@ -1,9 +1,10 @@
 # .vscode-example — VS Code workspace settings template
 
 Template for the VS Code workspace configuration. `.vscode/` is gitignored;
-copy these files there when you need them:
+use it by **copying and renaming** this folder to `.vscode/` when you need
+it (nothing in the repo applies it automatically):
 
-    cp .vscode-example/* .vscode/
+    cp -r .vscode-example .vscode
 
 ## Why `settings.json` matters (Linux + wine)
 
@@ -24,10 +25,8 @@ The `settings.json` here:
 - excludes `**/.wine/**` from search, the file explorer and the file
   watcher (`search.exclude`, `files.exclude`, `files.watcherExclude`).
 
-Every scan then stays inside the workspace. `tools/setup-vs-wine.mjs` merges
-these keys into `.vscode/settings.json` automatically (idempotent) — this
-example is the single source of truth for the guard. On Windows there is no
-wine prefix: the settings are unnecessary but harmless.
+Every scan then stays inside the workspace. On Windows there is no wine
+prefix: the settings are unnecessary but harmless.
 
 The other files (`launch.json`, `tasks.json`) are the standard development
 configs (F5 Extension Development Host + `pnpm compile` task).

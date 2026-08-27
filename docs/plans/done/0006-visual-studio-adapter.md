@@ -98,10 +98,6 @@
 # dalla radice del repo
 pnpm build                                     # UI → dist/web (prerequisito del vsix)
 node tools/setup-vs-wine.mjs                   # una tantum: prefix wine + patch VSSDK
-                                               # (applica anche .vscode/settings.json dal
-                                               #  template .vscode-example: followSymlinks=false
-                                               #  + exclude **/.wine/** — altrimenti VS Code
-                                               #  segue z: -> / e scansiona tutto il filesystem)
 pnpm package:vs                               # dotnet build → dist/pi-webview-visualstudio.vsix
 pnpm package:addon                            # tutto: UI + vsix VS Code + vsix VS + bundle pi
 dotnet test src/adapters/visualstudio/PiWebview.Vs.slnx   # 33 test C#

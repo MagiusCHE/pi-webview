@@ -46,11 +46,16 @@ const piwVersion: string = (() => {
 
 // Companion check (VS Code + Visual Studio), fire and forget: never block
 // startup. Same centralized module as the pi extension (ensureCompanions in
-// src/bridge/companions.ts); every progress step goes to the console (piw
-// channel) in real time, the final notes too.
+// src/bridge/companions.ts). Steps are BUFFERED: nothing is printed when
+// nothing needs to be installed/updated (total silence for the "all current"
+// case); with at least one action the whole trace + the final notes go to
+// the console (piw channel) in order.
+const steps: string[] = [];
 void ensureCompanions(root, {
-  onStep: (step) => console.log(`piw: ${step}`),
+  onStep: (step) => steps.push(step),
 }).then((notes) => {
+  if (notes.length === 0) return; // nothing to install/update → silent
+  for (const s of steps) console.log(`piw: ${s}`);
   for (const msg of formatCompanionNotes(notes, "it", "piw: ")) {
     console.log(msg);
   }

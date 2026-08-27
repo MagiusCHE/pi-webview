@@ -500,7 +500,9 @@ export interface CompanionNote {
  * reinstalled (used by the explicit /piw reinstall command).
  * `opts.onStep` receives a human-readable progress line for EVERY phase
  * (including silent skips) so the caller can show the user what the check
- * is doing; `opts.ignoreAutoInstall` skips the PI_WEBVIEW_AUTO_INSTALL env
+ * is doing — the caller decides WHEN to surface them (buffer and flush
+ * only when at least one note exists: total silence when nothing to do);
+ * `opts.ignoreAutoInstall` skips the PI_WEBVIEW_AUTO_INSTALL env
  * switch (explicit commands always run).
  * Never throws: every failure becomes an error note.
  */
@@ -737,6 +739,17 @@ export function formatCompanionNotes(
             ? `${prefix}companion Visual Studio installato in ${n.label} (${n.version}). Reload di Visual Studio per attivare la webview.`
             : `${prefix}companion installed in Visual Studio (${n.label}, ${n.version}). Reload Visual Studio to activate the webview.`;
       case "updated":
+        // reinstalled (force): the from/to versions match — avoid the
+        // confusing "0.2.3 → 0.2.3"
+        if (n.fromVersion === n.version) {
+          return n.target === "vscode"
+            ? it
+              ? `${prefix}companion VS Code reinstallato (${n.version}). Reload della finestra VS Code.`
+              : `${prefix}companion reinstalled in VS Code (${n.version}). Reload the window to activate the webview.`
+            : it
+              ? `${prefix}companion Visual Studio reinstallato in ${n.label} (${n.version}). Reload di Visual Studio.`
+              : `${prefix}companion reinstalled in Visual Studio (${n.label}, ${n.version}). Reload Visual Studio to activate the webview.`;
+        }
         return n.target === "vscode"
           ? it
             ? `${prefix}companion VS Code aggiornato ${n.fromVersion} → ${n.version}. Reload della finestra VS Code.`

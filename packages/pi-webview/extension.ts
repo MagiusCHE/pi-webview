@@ -383,22 +383,22 @@ export default async function (pi: PiApi): Promise<void> {
   // Runs at EVERY pi startup (idempotent), not gated by IDE detection.
   // Disable with PI_WEBVIEW_AUTO_INSTALL=0 (checked inside the module).
   const tryAutoInstall = async (): Promise<void> => {
-    // progress trace: console (visible when pi runs from a terminal) + the
-    // diagnostic log file; the UI notify stays for the final summary only
+    // progress steps are BUFFERED: nothing is printed when nothing needs to
+    // be installed/updated (no notes) — total silence for the "all current"
+    // case. With at least one action, the whole trace (console + install
+    // log) is flushed in order before the summary, so the user sees every
+    // phase that led to it.
     const steps: string[] = [];
     const notes = await ensureCompanions(packageRoot, {
-      onStep: (step) => {
-        steps.push(step);
-        console.log(`[pi-webview] ${step}`);
-        appendInstallLog(step);
-      },
+      onStep: (step) => steps.push(step),
     });
+    if (notes.length === 0) return; // nothing to install/update → silent
+    for (const step of steps) {
+      console.log(`[pi-webview] ${step}`);
+      appendInstallLog(step);
+    }
     const msgs = formatCompanionNotes(notes, "en", "pi-webview: ");
-    if (msgs.length === 0 && steps.length === 0) return; // nothing to report
-    const text =
-      msgs.length > 0
-        ? msgs.join(" ")
-        : "pi-webview: companion check completed — nothing to install.";
+    const text = msgs.join("\n");
     if (lastUi) lastUi.notify(text, "info");
     else pendingNotify = text;
   };
@@ -406,11 +406,13 @@ export default async function (pi: PiApi): Promise<void> {
   // at load: BLOCKS pi.dev startup until the check/installs are done (the
   // core awaits the extension factory), so the user always sees what is
   // happening (console + install log) and startup never proceeds with a
-  // pending install. The piw launcher link is ensured right after.
+  // pending install. The piw launcher link is ensured right after (logged
+  // only when it was actually created).
   await tryAutoInstall();
-  appendInstallLog(
-    ensurePiwBin() ? "piw launcher link created" : "piw launcher link already in place",
-  );
+  if (ensurePiwBin()) {
+    console.log("[pi-webview] piw launcher link created");
+    appendInstallLog("piw launcher link created");
+  }
 
   // notify the user as soon as there is a UI context (or immediately, if a
   // session already started before the install finished)
@@ -589,33 +591,35 @@ export default async function (pi: PiApi): Promise<void> {
           case "install": {
             // idempotent: installs only the companions that are missing or
             // outdated (same check as the startup auto-install), and ensures
-            // the `piw` launcher link exists. Every phase is notified in real
-            // time so the user always sees what the command is doing.
+            // the `piw` launcher link exists. Steps are buffered and flushed
+            // in ONE multiline notify (\n-separated) only when at least one
+            // action happened (install/update/error/link created); nothing to
+            // do → total silence.
+            const steps: string[] = [];
             const notes = await ensureCompanions(packageRoot, {
               ignoreAutoInstall: true,
-              onStep: (step) => notify(`pi-webview: ${step}`, "info"),
+              onStep: (step) => steps.push(step),
             });
             const piwLink = ensurePiwBin();
-            const msgs = formatCompanionNotes(notes, "en", "pi-webview: ");
-            const piwMsg = piwLink
-              ? "pi-webview: piw launcher link created."
-              : "pi-webview: piw launcher link already in place.";
-            notify(msgs.length ? `${msgs.join(" ")} ${piwMsg}` : piwMsg, "info");
+            if (notes.length === 0 && !piwLink) return; // nothing to do → silent
+            const lines = [...steps, ...formatCompanionNotes(notes, "en", "pi-webview: ")];
+            if (piwLink) lines.push("pi-webview: piw launcher link created.");
+            notify(lines.join("\n"), "info");
             return;
           }
           case "reinstall": {
             // force: reinstalls every companion even when the installed
             // version matches (repair of a broken install) and re-creates the
             // `piw` launcher link
+            const steps: string[] = [];
             const notes = await ensureCompanions(packageRoot, {
               force: true,
               ignoreAutoInstall: true,
-              onStep: (step) => notify(`pi-webview: ${step}`, "info"),
+              onStep: (step) => steps.push(step),
             });
             ensurePiwBin(true);
-            const msgs = formatCompanionNotes(notes, "en", "pi-webview: ");
             notify(
-              `${msgs.length ? `${msgs.join(" ")} ` : ""}pi-webview: piw launcher link re-created.`,
+              [...steps, ...formatCompanionNotes(notes, "en", "pi-webview: "), "pi-webview: piw launcher link re-created."].join("\n"),
               "info",
             );
             return;

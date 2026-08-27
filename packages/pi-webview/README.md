@@ -86,11 +86,12 @@ pi install npm:@magiusche/pi-webview
 
 > **⚠️ The companions are checked at every pi start** — the check **blocks
 > startup until it finishes** (pi.dev / the webview never start with a pending
-> install), and every phase is traced to the console and to
-> `~/.pi/pi-webview/companion-install.log`, so you always see what is
-> happening. The extension installs/updates them from the bundled VSIXes if
-> missing or outdated — idempotent, silent (no notifications) when nothing
-> needs to be done:
+> install). When something needs to be done (install/update/error) the whole
+> trace is reported — console, `~/.pi/pi-webview/companion-install.log` and a
+> single multiline notification (`/piw install|reinstall` report every step as
+> it happens). When everything is already current the check is **totally
+> silent**: no log lines, no notifications. The extension installs/updates the
+> companions from the bundled VSIXes if missing or outdated — idempotent:
 >
 > - **VS Code** companion: checked always — the `code` CLI is resolved from
 >   `PATH` or from the standard install locations, with a last-resort direct

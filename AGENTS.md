@@ -30,6 +30,8 @@ webview è la UI.
 - `pnpm package:visualstudio` — build UI + vsix del companion Visual Studio (→ `dist/pi-webview-visualstudio.vsix`; su Linux richiede `node tools/setup-vs-wine.mjs` una tantum: prefix wine dedicato nel progetto + patch al VSSDK nel nuget cache)
 - `pnpm package:pi` — assembly del package pi (vsix VS Code + vsix Visual Studio + estensione pi-webview lato pi)
 - `pnpm release -- --version 0.1.1 [--publish] [--tag <dist-tag>]` — prepara (bump versioni in entrambi i package.json, rebuild vsix+bundle+UI, `npm pack` di verifica); con `--publish` esegue anche `npm publish --access public` e crea in automatico il tag git `v<version>` + la GitHub release (idempotente: skip se già esistenti). Senza `--publish` non pubblica mai.
+- **Release — build completa obbligatoria**: quando l'utente chiede una nuova release, compilare sempre tutti gli artefatti sulla macchina corrente, incluso il VSIX Visual Studio tramite Wine quando si opera su Linux. Non riutilizzare artefatti preesistenti o obsoleti e non chiedere se si debba compilare tutto: la richiesta di release autorizza e richiede la build completa.
+- **Version bump — mai manuale**: cambiare la versione esclusivamente tramite `pnpm release -- --version <version> [--publish]`; non modificare mai a mano i campi `version` nei `package.json`.
 - `pnpm format` / `pnpm format:check` — prettier
 - `pnpm typecheck` — `tsc --noEmit`
 - Install: solo pnpm (bloccato da `preinstall` → `tools/check-package-manager.mjs`)
@@ -91,7 +93,7 @@ webview è la UI.
   esplicita dell'utente alla regola globale che vieta le firme AI: vale solo
   per questo repo.
 - **README: ruoli separati, mai duplicare**. La documentazione UTENTE
-  (install, `piw`, install scripts/npm 12, uninstall, companion VS Code) vive
+  (install, `piw`, install scripts/npm 12, uninstall, companion IDE) vive
   SOLO in `packages/pi-webview/README.md` (la pagina npmjs la mostra). Il
   `README.md` root è il landing per sviluppatori (cos'è, stato, quick start
   dev, struttura, architettura) e NON ripete la doc utente: al massimo un link
@@ -99,6 +101,11 @@ webview è la UI.
   Quando serve aggiornare una sezione utente, aggiornare SOLO il README del
   pacchetto; cambi di design del packaging vanno riflessi in entrambi i punti
   dove necessario ma senza duplicare contenuto
+- **README: matrice companion sempre aggiornata**. `README.md` (GitHub) e
+  `packages/pi-webview/README.md` (npmjs) devono indicare chiaramente e in una
+  lista dedicata tutti i companion IDE effettivamente implementati. Aggiornare
+  entrambe le liste ogni volta che un companion viene aggiunto, rimosso o
+  cambia supporto; non presentare come implementati adapter solo pianificati.
 - Nessun secret/dato personale committato: `.env*`, file locali gitignored
 - Nome progetto: `pi-webview`
 - Package manager: **solo pnpm** (bloccato via `preinstall` →

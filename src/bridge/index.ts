@@ -431,11 +431,20 @@ function stderrAllowed(): boolean {
       }
       if (req.type === "listDir") {
         try {
-          const dirs = readdirSync(req.path, { withFileTypes: true })
+          const path = normalize(req.path);
+          const parentPath = dirname(path);
+          const dirs = readdirSync(path, { withFileTypes: true })
             .filter((d) => d.isDirectory() && !d.name.startsWith("."))
-            .map((d) => d.name)
-            .sort((a, b) => a.localeCompare(b));
-          respond(req.id ?? "", { ok: true, data: { path: req.path, dirs } });
+            .map((d) => ({ name: d.name, path: join(path, d.name) }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+          respond(req.id ?? "", {
+            ok: true,
+            data: {
+              path,
+              parent: parentPath === path ? null : parentPath,
+              dirs,
+            },
+          });
         } catch (err) {
           respond(req.id ?? "", {
             ok: false,

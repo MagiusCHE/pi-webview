@@ -90,6 +90,28 @@ public sealed class SessionStoreTests : IDisposable
     }
 
     [Fact]
+    public void List_sessions_windows_ignora_case_e_stile_separatori()
+    {
+        var store = new SessionStore();
+        WriteSession(@"c:\work\pi-webview", "sess.jsonl");
+        var session = Assert.Single(store.ListSessions(_dir, workspace: "C:/Work/pi-webview"));
+        Assert.Equal(@"c:\work\pi-webview", session.Cwd);
+    }
+
+    [Fact]
+    public void List_sessions_usa_cwd_header_se_cartella_codificata_differisce()
+    {
+        var store = new SessionStore();
+        var path = WriteSession(@"C:\Work\pi-webview", "sess.jsonl");
+        var originalDir = Path.GetDirectoryName(path)!;
+        var legacyDir = Path.Combine(_dir, "--legacy-project-folder--");
+        Directory.Move(originalDir, legacyDir);
+
+        var session = Assert.Single(store.ListSessions(_dir, workspace: @"C:\Work\pi-webview"));
+        Assert.Equal("sess.jsonl", Path.GetFileName(session.Path));
+    }
+
+    [Fact]
     public void Fork_cambia_cwd_e_copia_le_entry()
     {
         var store = new SessionStore();

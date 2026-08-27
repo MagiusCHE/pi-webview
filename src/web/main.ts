@@ -62,6 +62,7 @@ const els = {
   sessionBtn: document.getElementById("session-btn") as HTMLButtonElement,
   sessionMenu: document.getElementById("session-menu") as HTMLDivElement,
   sessionFilters: document.getElementById("session-filters") as HTMLDivElement,
+  sessionSearch: document.getElementById("session-search") as HTMLInputElement,
   sessionItems: document.getElementById("session-items") as HTMLDivElement,
   settingsBtn: document.getElementById("btn-settings") as HTMLButtonElement,
   settingsModal: document.getElementById("settings-modal") as HTMLDivElement,
@@ -474,6 +475,7 @@ function applyUiStrings(): void {
   els.btnThinking.title = t("thinkingLevel");
   els.settingsBtn.title = t("settings");
   els.sessionBtn.title = t("sessions");
+  els.sessionSearch.placeholder = t("searchSessions");
   els.lang.title = t("language");
   els.bootLoaderText.textContent = t("loading");
   els.langLabel.textContent = t("language");
@@ -761,9 +763,17 @@ els.settingsModal.addEventListener("click", (e) => {
 
 els.sessionBtn.addEventListener("click", (e) => {
   e.stopPropagation();
-  els.sessionMenu.hidden = !els.sessionMenu.hidden;
+  const opening = els.sessionMenu.hidden;
+  els.sessionMenu.hidden = !opening;
+  if (opening) {
+    els.sessionSearch.value = "";
+    populateSessionMenu();
+    requestAnimationFrame(() => els.sessionSearch.focus());
+  }
   closeSettings();
 });
+
+els.sessionSearch.addEventListener("input", populateSessionMenu);
 
 els.sessionFilters.addEventListener("click", (e) => {
   const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(".filter-btn");
@@ -1200,7 +1210,22 @@ function populateSessionMenu(): void {
     if (currentSessionPath && !currentIsNew && !list.some((s) => s.path === currentSessionPath)) {
       list.unshift({ path: currentSessionPath, name: t("newSession") });
     }
-    for (const s of list) {
+    const query = els.sessionSearch.value.trim().toLocaleLowerCase(currentLocale);
+    const filtered = query
+      ? list.filter((s) => {
+          const directoryName = s.cwd?.split(/[\\/]/).filter(Boolean).pop() ?? "";
+          return [sessionLabel(s), directoryName].some((value) =>
+            value.toLocaleLowerCase(currentLocale).includes(query),
+          );
+        })
+      : list;
+    if (filtered.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "session-empty";
+      empty.textContent = t("noOptions");
+      els.sessionItems.appendChild(empty);
+    }
+    for (const s of filtered) {
       // the current new session lives in the action row: no duplicate
       if (currentIsNew && s.path === currentSessionPath) continue;
       // container: main clickable area (name+meta) + rename/delete actions.
@@ -1455,16 +1480,16 @@ async function fetchCompactionSettings(): Promise<void> {
 
 // --- workspace change (standalone: folder browse + destination choice) -----
 
-async function listDirs(path: string): Promise<string[]> {
-  const res = await ideRequest({ type: "listDir", path });
-  if (!res?.ok) return [];
-  return (res.data as { dirs?: string[] } | undefined)?.dirs ?? [];
+interface DirectoryListing {
+  path: string;
+  parent: string | null;
+  dirs: Array<{ name: string; path: string }>;
 }
 
-function parentDir(path: string): string {
-  const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  if (idx <= 0) return path;
-  return path.slice(0, idx);
+async function listDirs(path: string): Promise<DirectoryListing | null> {
+  const res = await ideRequest({ type: "listDir", path });
+  if (!res?.ok) return null;
+  return res.data as DirectoryListing;
 }
 
 function escapeHtml(text: string): string {
@@ -1534,38 +1559,46 @@ function openFolderBrowser(start: string): Promise<string | null> {
     async function load(): Promise<void> {
       pathEl.textContent = current;
       dirsEl.textContent = "";
-      // ".. (parent folder)" as the first element of the list
-      if (parentDir(current) !== current) {
+      const placeholder = document.createElement("div");
+      placeholder.className = "folder-dirs-empty";
+      placeholder.textContent = t("loading");
+      dirsEl.appendChild(placeholder);
+      const listing = await listDirs(current);
+      dirsEl.textContent = "";
+      if (!listing) {
+        const empty = document.createElement("div");
+        empty.className = "folder-dirs-empty";
+        empty.textContent = "—";
+        dirsEl.appendChild(empty);
+        return;
+      }
+      current = listing.path;
+      pathEl.textContent = current;
+      // Native path operations run in the bridge, on the target OS.
+      if (listing.parent) {
         const up = document.createElement("button");
         up.type = "button";
         up.className = "folder-dir folder-up";
         up.innerHTML = `${folderIcon()} <span>.. (${escapeHtml(t("parentFolder"))})</span>`;
         up.addEventListener("click", () => {
-          current = parentDir(current);
+          current = listing.parent!;
           void load();
         });
         dirsEl.appendChild(up);
       }
-      const placeholder = document.createElement("div");
-      placeholder.className = "folder-dirs-empty";
-      placeholder.textContent = t("loading");
-      dirsEl.appendChild(placeholder);
-      const dirs = await listDirs(current);
-      placeholder.remove();
-      if (dirs.length === 0) {
+      if (listing.dirs.length === 0) {
         const empty = document.createElement("div");
         empty.className = "folder-dirs-empty";
         empty.textContent = "—";
         dirsEl.appendChild(empty);
       }
-      for (const d of dirs) {
+      for (const dir of listing.dirs) {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "folder-dir";
-        btn.innerHTML = `${folderIcon()} <span>${escapeHtml(d)}</span>`;
+        btn.innerHTML = `${folderIcon()} <span>${escapeHtml(dir.name)}</span>`;
         btn.addEventListener("click", () => {
-          const sep = current.endsWith("/") || current.endsWith("\\") ? "" : "/";
-          current = current + sep + d;
+          current = dir.path;
           void load();
         });
         dirsEl.appendChild(btn);

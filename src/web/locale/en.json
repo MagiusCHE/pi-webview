@@ -72,6 +72,7 @@
     "historyHint": "↑/↓ history",
     "historyNav": "↑/↓ browse · TAB insert · ESC cancel",
     "searchModels": "Search model…",
+    "searchSessions": "Search session…",
     "newChat": "New chat in another panel",
     "tool": "tool",
     "historyLimit": "History (messages)",

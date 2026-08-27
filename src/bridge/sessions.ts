@@ -33,13 +33,13 @@ export function listSessions(
     return [];
   }
 
-  // with an active workspace filter, scan ONLY the project folder
-  // (the folder name encodes the workspace: --<path>-- with / → -)
+  // Prefer the project folder encoded by pi. On Windows, path casing and
+  // separators can differ between the IDE, the session header, and the folder
+  // created from path.resolve(). If no encoded folder matches, scan the other
+  // project folders too and let the session header cwd decide below.
   if (workspace) {
-    const target = encodeProjectFolder(workspace);
-    projectDirs = projectDirs.filter(
-      (d) => d === target || decodeProjectFolder(d) === workspace,
-    );
+    const matching = projectDirs.filter((d) => projectFolderMatches(d, workspace));
+    if (matching.length > 0) projectDirs = matching;
   }
 
   const out: SessionInfo[] = [];
@@ -56,8 +56,15 @@ export function listSessions(
       if (!f.endsWith(".jsonl")) continue;
       const path = join(projPath, f);
       const info = cachedSessionInfo(path);
-      // filter by workspace: header.cwd or decoded folder name
-      if (workspace && info.cwd !== workspace && decodedWorkspace !== workspace) continue;
+      // Filter by workspace using Windows path semantics when appropriate.
+      // The cwd header is authoritative when folder-name encoding differs.
+      if (
+        workspace &&
+        !sameWorkspace(info.cwd, workspace) &&
+        !sameWorkspace(decodedWorkspace, workspace)
+      ) {
+        continue;
+      }
       out.push(info);
     }
   }
@@ -241,6 +248,35 @@ export function forkSession(
     if (entry.type !== "session") appendFileSync(newPath, JSON.stringify(entry) + "\n");
   }
   return { path: newPath };
+}
+
+function isWindowsWorkspace(path: string): boolean {
+  return /^[a-zA-Z]:[/\\]/.test(path) || path.includes("\\");
+}
+
+function normalizeWindowsWorkspace(path: string): string {
+  return path
+    .replace(/\//g, "\\")
+    .replace(/[\\]+$/, "")
+    .toLowerCase();
+}
+
+function sameWorkspace(left: string | null | undefined, right: string): boolean {
+  if (!left) return false;
+  if (left === right) return true;
+  if (isWindowsWorkspace(left) && isWindowsWorkspace(right)) {
+    return normalizeWindowsWorkspace(left) === normalizeWindowsWorkspace(right);
+  }
+  return false;
+}
+
+function projectFolderMatches(folder: string, workspace: string): boolean {
+  const target = encodeProjectFolder(workspace);
+  if (folder === target) return true;
+  if (isWindowsWorkspace(workspace) && folder.toLowerCase() === target.toLowerCase()) {
+    return true;
+  }
+  return sameWorkspace(decodeProjectFolder(folder), workspace);
 }
 
 export function decodeProjectFolder(name: string): string | null {

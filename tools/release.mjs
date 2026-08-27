@@ -18,7 +18,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -60,7 +60,7 @@ if (version) {
     const before = json.version;
     json.version = version;
     writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
-    console.log(`✓ ${file.replace(root + "/", "")}: ${before} → ${version}`);
+    console.log(`✓ ${relative(root, file)}: ${before} → ${version}`);
   }
 } else {
   const cur = JSON.parse(readFileSync(pkgPi, "utf-8")).version;

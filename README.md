@@ -1,6 +1,6 @@
 # pi-webview
 
-A rich WebView UI for [pi](https://pi.dev), the coding agent — a modern alternative to running pi in a terminal. Built as a framework-agnostic web app, it works **standalone in the browser** and inside an **IDE webview** (VS Code adapter included) with the same codebase.
+A rich WebView UI for [pi](https://pi.dev), the coding agent — a modern alternative to running pi in a terminal. Built as a framework-agnostic web app, it works **standalone in the browser** and inside supported **IDE webviews** with the same codebase.
 
 ![pi-webview preview](media/pi-webview-preview.jpg)
 
@@ -16,10 +16,16 @@ The terminal TUI of pi limits interaction: no rich markdown, no proper mouse/tex
 
 > ⚠️ **Experimental.** pi-webview is a working prototype, actively developed on Linux. Things can break, change or disappear. Use it for exploration, not production.
 
+### Implemented IDE companions
+
+- **VS Code**
+- **Visual Studio 2022**
+- **Visual Studio 2026**
+
 ### What works today
 
 - **Chat in the browser** (standalone): streaming markdown, thinking blocks with elapsed seconds, collapsible tool cards with command summaries, copy buttons, smart auto-scroll
-- **IDE integration (VS Code)**: the same UI inside a VS Code webview, with editor selection context; native dialogs (`select`/`confirm`/`input` via `showQuickPick`/`showWarningMessage`/`showInputBox`); distributed as a pi package with companion auto-install. Editor selection works only in the **sidebar view** (inhibited in editor-area panels, where focus would clear it)
+- **IDE integration**: the same UI in **VS Code**, **Visual Studio 2022** and **Visual Studio 2026**, distributed as a pi package with companion auto-install. VS Code includes editor selection context and native dialogs (`select`/`confirm`/`input` via `showQuickPick`/`showWarningMessage`/`showInputBox`); editor selection works only in the **sidebar view** (inhibited in editor-area panels, where focus would clear it)
 - **Sessions**: dropdown with current folder (`./…`) / All filter, switch, **fork of sessions from other folders** (same behavior as pi), new session
 - **Composer controls**: model picker, thinking level, project **trust** (writes `~/.pi/agent/trust.json`, with confirmation for full access)
 - **Attachments**: paste and drag & drop of files and images — previews in chat; images sent inline when the model supports vision, otherwise as file paths
@@ -56,7 +62,7 @@ The terminal TUI of pi limits interaction: no rich markdown, no proper mouse/tex
                │ WebSocket (standalone) / postMessage (IDE webview)
 ┌──────────────▼───────────────────────────────────┐
 │ Host adapter (one per environment)               │
-│ standalone bridge · VS Code · others (future)    │
+│ standalone · VS Code · Visual Studio 2022/2026   │
 └──────────────┬───────────────────────────────────┘
                │ JSONL stdio
 ┌──────────────▼───────────────────────────────────┐

@@ -277,3 +277,39 @@ test("listSessions: workspace filter with a windows path", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("listSessions: windows workspace matching ignores case and separator style", () => {
+  const dir = mkdtempSync(join(tmpdir(), "piw-sess-win-case-"));
+  try {
+    const projDir = join(dir, encodeProjectFolder("c:\\work\\pi-webview"));
+    mkdirSync(projDir, { recursive: true });
+    writeFileSync(
+      join(projDir, "sess.jsonl"),
+      header("id-win", "c:\\work\\pi-webview") + "\n",
+    );
+
+    const sessions = listSessions(dir, "C:/Work/pi-webview");
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0]?.id, "id-win");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("listSessions: falls back to the header cwd when the encoded folder differs", () => {
+  const dir = mkdtempSync(join(tmpdir(), "piw-sess-win-fallback-"));
+  try {
+    const legacyDir = join(dir, "--legacy-project-folder--");
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(
+      join(legacyDir, "sess.jsonl"),
+      header("id-fallback", "C:\\Work\\pi-webview") + "\n",
+    );
+
+    const sessions = listSessions(dir, "C:\\Work\\pi-webview");
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0]?.id, "id-fallback");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

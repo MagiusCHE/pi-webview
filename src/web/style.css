@@ -251,12 +251,17 @@ header {
   min-width: 340px;
   max-width: 460px;
   max-height: 60vh;
-  overflow-y: auto;
+  overflow: hidden;
   background: var(--surface-elevated);
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
   z-index: 100;
+}
+.dropdown-menu[hidden] {
+  display: none;
 }
 .session-filters {
   display: flex;
@@ -293,11 +298,21 @@ header {
   color: var(--fg);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
+.session-search-wrap {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.pop-search.session-search {
+  margin: 0;
+}
 .session-items {
   display: flex;
   flex-direction: column;
+  min-height: 0;
   padding: 4px;
   gap: 1px;
+  overflow-y: auto;
 }
 .session-item {
   display: flex;

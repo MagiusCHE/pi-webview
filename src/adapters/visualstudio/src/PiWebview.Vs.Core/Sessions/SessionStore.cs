@@ -39,12 +39,16 @@ public sealed class SessionStore
             return new List<SessionInfo>();
         }
 
+        // Prefer the project folder encoded by pi. Windows path casing and
+        // separators can differ between the IDE, the session header, and the
+        // folder created from the resolved cwd. If no folder matches, scan
+        // the other project folders too and let the header cwd decide below.
         if (workspace is not null)
         {
-            var target = EncodeProjectFolder(workspace);
-            projectDirs = projectDirs
-                .Where(d => d == target || DecodeProjectFolder(d) == workspace)
+            var matching = projectDirs
+                .Where(d => ProjectFolderMatches(d, workspace))
                 .ToArray();
+            if (matching.Length > 0) projectDirs = matching;
         }
 
         var out_ = new List<SessionInfo>();
@@ -64,7 +68,9 @@ public sealed class SessionStore
             foreach (var f in files)
             {
                 var info = CachedSessionInfo(f);
-                if (workspace is not null && info.Cwd != workspace && decodedWorkspace != workspace)
+                if (workspace is not null &&
+                    !SameWorkspace(info.Cwd, workspace) &&
+                    !SameWorkspace(decodedWorkspace, workspace))
                 {
                     continue;
                 }
@@ -369,6 +375,33 @@ public sealed class SessionStore
     // On Windows separators and ':' become '-' (--C--proj--, like pi's real
     // folders); on Linux it equals replace('/', '-'). The round-trip is not
     // faithful (pi's known limit): matching uses the exact target.
+    private static bool IsWindowsWorkspace(string path) =>
+        (path.Length >= 3 && char.IsLetter(path[0]) && path[1] == ':' &&
+         (path[2] == '\\' || path[2] == '/')) || path.Contains('\\');
+
+    private static string NormalizeWindowsWorkspace(string path) =>
+        path.Replace('/', '\\').TrimEnd('\\');
+
+    private static bool SameWorkspace(string? left, string right)
+    {
+        if (left is null) return false;
+        if (string.Equals(left, right, StringComparison.Ordinal)) return true;
+        return IsWindowsWorkspace(left) && IsWindowsWorkspace(right) &&
+            string.Equals(
+                NormalizeWindowsWorkspace(left),
+                NormalizeWindowsWorkspace(right),
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ProjectFolderMatches(string folder, string workspace)
+    {
+        var target = EncodeProjectFolder(workspace);
+        if (string.Equals(folder, target, StringComparison.Ordinal)) return true;
+        if (IsWindowsWorkspace(workspace) &&
+            string.Equals(folder, target, StringComparison.OrdinalIgnoreCase)) return true;
+        return SameWorkspace(DecodeProjectFolder(folder), workspace);
+    }
+
     public static string? DecodeProjectFolder(string name)
     {
         if (!name.StartsWith("--") || !name.EndsWith("--")) return null;

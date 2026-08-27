@@ -1,8 +1,16 @@
 # @magiusche/pi-webview
 
-A rich WebView UI for [pi](https://pi.dev), the coding agent — a modern alternative to running pi in a terminal. Built as a framework-agnostic web app, it works **standalone in the browser** and is designed to run inside an **IDE webview** (VS Code first) with the same codebase.
+A rich WebView UI for [pi](https://pi.dev), the coding agent — a modern alternative to running pi in a terminal. Built as a framework-agnostic web app, it works **standalone in the browser** and inside supported **IDE webviews** with the same codebase.
 
 > ⚠️ **Experimental.** Actively developed. Things can break, change or disappear. Use it for exploration, not production.
+
+## Implemented IDE companions
+
+- **VS Code**
+- **Visual Studio 2022**
+- **Visual Studio 2026**
+
+All three companions are included in the package and are automatically installed or updated when the corresponding IDE is present.
 
 ## Standalone (browser)
 

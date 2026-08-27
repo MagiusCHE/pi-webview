@@ -27,7 +27,8 @@
     `ReloadSignal.cs` (concept 0004, watcher incluso)
 - [x] **`PiWebview.Vs`** (net472, VSIX) — l'host:
   - `PiWebviewPackage.cs` (AsyncPackage, tool window multi-instance, comandi
-    Attach Selection / Focus nel menu Tools, reload signal, SelectionTracker)
+    comando "pi" in **View > Other Windows** (con icona), reload signal,
+    SelectionTracker)
   - `PiToolWindow.cs` + `PiToolWindowControl` (WebView2, virtual host
     `piw.local` → `dist/web`, ponte `WebMessageReceived`/`PostWebMessageAsJson`)
   - `Host/PiWebviewHost.cs` (spawn/restart di pi, cli flags da `pi --help`,
@@ -51,13 +52,25 @@
       invalidi e il filtro workspace non matchava le cartelle reali di pi:
       `--C--proj--`). Test in `tests/sessions.test.ts`.
 
-## Verifiche manuali pendenti
+## Verifiche manuali (esito test amico, VS 2026/18.0 preview, 2026-08-27)
 
-- [ ] **Smoke test in Visual Studio** (manuale, su Windows): installare il
-      vsix con `VSIXInstaller.exe` (VS chiuso), aprire la tool window "pi",
-      verificare spawn di pi, chat, selezione editor, tema, reload signal.
-      Richiede `PI_WEBVIEW_COMPANION=1` non impostato manualmente (lo fa
-      l'host).
+- [x] **Smoke test in Visual Studio** (manuale, su Windows): il package
+      carica, i comandi funzionano, la tool window si apre. Spawn di pi,
+      chat, selezione editor: ok.
+- [x] **Due difetti trovati e corretti** (build 2026-08-27):
+  - le voci `pi: Attach Selection` / `pi: Focus` comparivano nel menu
+    **Strumenti** e la tool window NON compariva in **View > Other Windows**
+    → su VS moderno la voce "Altre finestre" NON è auto-generata dalla
+    registry: nasce SOLO da un bottone VSCT nel gruppo
+    `IDG_VS_WNDO_OTRWNDWS1` (stesso meccanismo dell'estensione di riferimento
+    dliedke/ChatGPTExtension). Il VSCT ora ha un solo bottone "pi" in quel
+    gruppo; i due comandi Tools sono rimossi (la selezione editor è già
+    automatica via SelectionTracker);
+  - **mancava l'icona** → aggiunta `<Bitmaps>` al VSCT con PNG 16×16
+    derivato da `media/icon-mark-128.png`
+    (`Commands/Resources/icon.png`): l'icona del bottone (voce "Altre
+    finestre") è anche l'icona della tool window (titolo + menu). VSCTCompile
+    la incorpora compressa nel `.cto` (verificato: 663 → 907 byte).
 
 ## Fatto (aggiunte dopo la stesura)
 

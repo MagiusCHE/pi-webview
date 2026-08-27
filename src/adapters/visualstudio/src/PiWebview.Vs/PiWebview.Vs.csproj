@@ -112,6 +112,10 @@
              DestinationFile="$(IntermediateOutputPath)$(TargetName).pkgdef" />
     <ItemGroup>
       <Content Include="$(IntermediateOutputPath)$(TargetName).pkgdef" Condition="Exists('$(IntermediateOutputPath)$(TargetName).pkgdef')">
+        <!-- vsix root (matches the Asset Path in source.extension.vsixmanifest
+             and the standard Windows VSSDK layout where PkgdefProjectOutputGroup
+             flattens the pkgdef next to the assembly) -->
+        <Link>$(TargetName).pkgdef</Link>
         <IncludeInVSIX>true</IncludeInVSIX>
       </Content>
     </ItemGroup>

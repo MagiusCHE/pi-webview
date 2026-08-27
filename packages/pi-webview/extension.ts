@@ -148,9 +148,13 @@ async function visualStudioInstances(): Promise<string[]> {
   const vswhere = vswhereCandidates().find((p) => existsSync(p));
   if (!vswhere) return [];
   try {
+    // -prerelease: VS 2026 (18.0) is still a preview — vswhere skips
+    // prerelease instances without it, so the companion would never install.
+    // No -requires: a workload filter hides instances lacking that specific
+    // workload, while VSIXInstaller.exe works for every full VS install.
     const { stdout } = await execFileAsync(
       vswhere,
-      ["-products", "*", "-requires", "Microsoft.VisualStudio.Workload.ManagedDesktop", "-property", "installationPath", "-format", "text"],
+      ["-products", "*", "-prerelease", "-property", "installationPath", "-format", "text"],
       { timeout: 15_000, windowsHide: true },
     );
     return stdout
@@ -227,11 +231,21 @@ async function installVsCompanion(vsixPath: string): Promise<string | null> {
     return null;
   }
   try {
-    // /q = quiet, /a = admin (installs for all users, like code --install-extension)
-    await execFileAsync(vsixInstaller, ["/q", "/a", vsixPath], {
-      timeout: 120_000,
-      windowsHide: true,
-    });
+    // Per-user install first (VSIXInstaller default: no elevation needed,
+    // goes to %LocalAppData%\Microsoft\VisualStudio\…\Extensions). Fall
+    // back to /a (all-users, may raise a UAC prompt) only when the per-user
+    // install fails.
+    try {
+      await execFileAsync(vsixInstaller, ["/q", vsixPath], {
+        timeout: 120_000,
+        windowsHide: true,
+      });
+    } catch {
+      await execFileAsync(vsixInstaller, ["/q", "/a", vsixPath], {
+        timeout: 120_000,
+        windowsHide: true,
+      });
+    }
     // update (not fresh install) → signal the open IDE to reload
     if (installed !== null && vsixVersion !== undefined) {
       writeReloadSignal(vsixVersion);

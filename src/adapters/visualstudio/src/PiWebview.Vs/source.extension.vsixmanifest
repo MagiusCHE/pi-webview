@@ -37,6 +37,14 @@
     <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[17.0,19.0)" DisplayName="Visual Studio core editor" />
   </Prerequisites>
   <Assets>
-    <Asset Type="Microsoft.VisualStudio.VsPackage" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|%CurrentProject%;PkgdefProjectOutputGroup|" />
+    <!-- Concrete relative path (pkgdef at the vsix root, see the csproj
+         Link on the generated pkgdef): the VSSDK PkgdefProjectOutputGroup
+         token (|%CurrentProject%;PkgdefProjectOutputGroup|) is only
+         detokenized by the full VS build pipeline (DetokenizeVsixManifestSource);
+         the dotnet CLI build leaves it unresolved and VS then cannot find the
+         package pkgdef (package silently not registered). Hardcoding the path
+         keeps the Linux/wine build deterministic and matches the layout a
+         standard Windows build produces. -->
+    <Asset Type="Microsoft.VisualStudio.VsPackage" d:Source="File" Path="PiWebview.Vs.pkgdef" />
   </Assets>
 </PackageManifest>

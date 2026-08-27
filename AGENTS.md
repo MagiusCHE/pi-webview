@@ -149,10 +149,12 @@ companion** — modello pi-x-ide, ognuno solo se l'IDE è presente:
   spawna `pi --mode rpc` (env `PI_WEBVIEW_COMPANION=1`) e parla l'IDE bridge
   protocol via postMessage. Sviluppo dell'adapter: F5 con `launch.json`
   (Extension Development Host) dopo `pnpm compile`.
-- **Visual Studio** (solo Windows): rilevamento istanze con `vswhere.exe` +
-  installazione `VSIXInstaller.exe /q /a` sul vsix incluso
-  (`companion/pi-webview-visualstudio.vsix`, build su Linux via wine —
-  `tools/setup-vs-wine.mjs`); skip silenzioso senza Visual Studio.
+- **Visual Studio** (solo Windows): rilevamento istanze con `vswhere.exe`
+  (`-products * -prerelease` — VS 2026/18.0 è preview e senza `-prerelease`
+  l'istanza non viene listata; nessun filtro workload) + installazione
+  `VSIXInstaller.exe` per-user (`/q`, nessuna elevazione) con fallback `/q /a`
+  sul vsix incluso (`companion/pi-webview-visualstudio.vsix`, build su Linux
+  via wine — `tools/setup-vs-wine.mjs`); skip silenzioso senza Visual Studio.
 
 ## Aggiornamento automatico
 

@@ -4,38 +4,38 @@
   <Extern href="stdidcmd.h" />
   <Extern href="vsshlids.h" />
 
-  <Symbols>
-    <GuidSymbol name="guidPiWebviewPkg" value="{7f2e5c1a-3b6d-4e8f-9a2c-1d4e5f6a7b8c}" />
-    <GuidSymbol name="guidPiWebviewCmdSet" value="{a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d}">
-      <IDSymbol name="PiMenuGroup" value="0x1020" />
-      <IDSymbol name="cmdidAttachSelection" value="0x0100" />
-      <IDSymbol name="cmdidFocus" value="0x0101" />
-    </GuidSymbol>
-  </Symbols>
-
   <Commands package="guidPiWebviewPkg">
-    <Groups>
-      <Group guid="guidPiWebviewCmdSet" id="PiMenuGroup" priority="0x0600">
-        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS" />
-      </Group>
-    </Groups>
-
+    <!-- The only entry is in View → Other Windows (IDG_VS_WNDO_OTRWNDWS1):
+         the tool window appears there with its icon, exactly like the
+         reference ChatGPT extension. No Tools menu clutter: the editor
+         selection tracking is automatic (SelectionTracker), there is no
+         manual "attach/focus" trigger. -->
     <Buttons>
-      <Button guid="guidPiWebviewCmdSet" id="cmdidAttachSelection" priority="0x0100" type="Button">
-        <Parent guid="guidPiWebviewCmdSet" id="PiMenuGroup" />
+      <Button guid="guidPiWebviewCmdSet" id="cmdidShowWindow" priority="0x0100" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1" />
+        <Icon guid="guidImages" id="bmpIcon" />
         <Strings>
-          <ButtonText>pi: Attach Selection</ButtonText>
-          <CommandName>piWebview.AttachSelection</CommandName>
-        </Strings>
-      </Button>
-      <Button guid="guidPiWebviewCmdSet" id="cmdidFocus" priority="0x0101" type="Button">
-        <Parent guid="guidPiWebviewCmdSet" id="PiMenuGroup" />
-        <Strings>
-          <ButtonText>pi: Focus</ButtonText>
-          <CommandName>piWebview.Focus</CommandName>
+          <ButtonText>pi</ButtonText>
+          <CommandName>piWebview.ShowWindow</CommandName>
         </Strings>
       </Button>
     </Buttons>
+
+    <!-- 16x16 PNG icon of the tool window (title bar + Other Windows entry);
+         baked into the compiled .cto (Menus.ctmenu resource). -->
+    <Bitmaps>
+      <Bitmap guid="guidImages" href="Resources\icon.png" usedList="bmpIcon" />
+    </Bitmaps>
   </Commands>
+
+  <Symbols>
+    <GuidSymbol name="guidPiWebviewPkg" value="{7f2e5c1a-3b6d-4e8f-9a2c-1d4e5f6a7b8c}" />
+    <GuidSymbol name="guidPiWebviewCmdSet" value="{a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d}">
+      <IDSymbol name="cmdidShowWindow" value="0x0100" />
+    </GuidSymbol>
+    <GuidSymbol name="guidImages" value="{b1e2f3a4-5c6d-4e7f-8a9b-0c1d2e3f4a5b}">
+      <IDSymbol name="bmpIcon" value="1" />
+    </GuidSymbol>
+  </Symbols>
 
 </CommandTable>

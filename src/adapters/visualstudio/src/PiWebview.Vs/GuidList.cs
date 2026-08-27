@@ -17,6 +17,6 @@ internal static class GuidList
 
 internal static class PkgCmdIdList
 {
-    public const uint AttachSelection = 0x0100;
-    public const uint Focus = 0x0101;
+    // "pi" entry in View > Other Windows (Commands.vsct cmdidShowWindow)
+    public const uint ShowWindow = 0x0100;
 }

@@ -1,5 +1,5 @@
 // Entry point of the Visual Studio extension (concept 0005): registers the
-// tool window, the commands (attach selection / focus), the global
+// tool window, the "show window" command (View > Other Windows), the global
 // SelectionTracker and consumes the reload signal (concept 0004).
 
 using System.ComponentModel.Design;
@@ -23,8 +23,8 @@ namespace PiWebview.Vs;
 [ProvideMenuResource("Menus.ctmenu", 1)]
 // Autoload on open solution (proven PiDev pattern): the package activates in
 // background load. Do NOT open the tool window in InitializeAsync → VS
-// freezes at startup (verified 2026-08-25). The window opens on demand:
-// "pi: Focus" command (Tools menu) or View > Other Windows > "pi".
+// freezes at startup (verified 2026-08-25). The window opens on demand from
+// the "pi" entry in View > Other Windows (Commands.vsct button, with icon).
 [ProvideAutoLoad(UIContextGuids80.SolutionExists, PackageAutoLoadFlags.BackgroundLoad)]
 [ProvideToolWindow(
     typeof(PiToolWindow),
@@ -59,9 +59,10 @@ public sealed class PiWebviewPackage : AsyncPackage
         // --- comandi ---------------------------------------------------------
         if (await GetServiceAsync(typeof(IMenuCommandService)) is OleMenuCommandService mcs)
         {
-            AddCommand(mcs, PkgCmdIdList.AttachSelection, (_, _) =>
-                _selectionTracker?.PostSelection());
-            AddCommand(mcs, PkgCmdIdList.Focus, async (_, _) => await ShowPiSafeAsync());
+            // "pi" entry in View > Other Windows (Commands.vsct button): opens
+            // the tool window. The editor selection is tracked automatically
+            // (SelectionTracker) — no manual attach/focus menu triggers.
+            AddCommand(mcs, PkgCmdIdList.ShowWindow, async (_, _) => await ShowPiSafeAsync());
         }
 
         // --- selezione editor (MEF + DTE) ------------------------------------

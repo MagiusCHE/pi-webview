@@ -19,7 +19,11 @@ import { PiProcess } from "./pi-process.ts";
 import { resolvePi } from "./spawn.ts";
 import { cliFlagArgs, fetchAvailableCliFlags } from "./cli-flags.ts";
 import { createMockIde } from "./mock-ide.ts";
-import { ConfigStore, readCompactionSettings } from "./config.ts";
+import {
+  ConfigStore,
+  readCompactionSettings,
+  readThinkingSettings,
+} from "./config.ts";
 import {
   listSessions,
   forkSession,
@@ -432,6 +436,13 @@ function stderrAllowed(): boolean {
       }
       if (req.type === "getCompactionSettings") {
         respond(req.id ?? "", { ok: true, data: readCompactionSettings() });
+        return;
+      }
+      if (req.type === "getThinkingSettings") {
+        respond(req.id ?? "", {
+          ok: true,
+          data: readThinkingSettings(workspaceDir),
+        });
         return;
       }
       if (req.type === "listDir") {

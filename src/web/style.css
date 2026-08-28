@@ -437,15 +437,34 @@ header {
   font-size: 13.5px;
   color: var(--fg);
 }
-/* pi.dev section in the settings: block 2 (/settings, placeholder) and
-   block 3 (launch CLI flags, dynamic) */
-.settings-section {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
+/* 4 blocks in the settings dialog (Info / Webview / pi.dev / CLI flags):
+   the section title sits ON its separator — "Info ──────────" — the flex
+   ::after line fills the remaining width (saves a whole row per block) */
 .settings-section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--fg-tertiary);
+  margin-bottom: 8px;
+}
+.settings-section-title::after {
+  content: "";
+  flex: 1;
+  border-bottom: 1px solid var(--border);
+}
+/* sub-group inside a settings section (e.g. Notifications): a lighter,
+   indented block with its own title, visually nested in the section */
+.settings-subsection {
+  margin-top: 12px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+.settings-subsection-title {
+  font-size: 11.5px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.4px;

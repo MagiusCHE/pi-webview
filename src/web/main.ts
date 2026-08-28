@@ -14,6 +14,7 @@ import type {
   CliFlags,
   CliFlagInfo,
   StartupInfo,
+  ThinkingSettings,
 } from "../ide/protocol.ts";
 import { rpc } from "../ide/protocol.ts";
 import { samePath } from "../ide/paths.ts";
@@ -47,6 +48,7 @@ import {
   stopIcon,
   attachFileIcon,
   newChatIcon,
+  thinkingBlocksIcon,
   settingsIcon,
   chatIcon,
   folderIcon,
@@ -69,6 +71,10 @@ const els = {
   settingsModal: document.getElementById("settings-modal") as HTMLDivElement,
   settingsClose: document.getElementById("btn-settings-close") as HTMLButtonElement,
   settingsModalTitle: document.getElementById("settings-modal-title") as HTMLSpanElement,
+  settingsInfoTitle: document.getElementById("settings-info-title") as HTMLDivElement,
+  settingsWebviewTitle: document.getElementById("settings-webview-title") as HTMLDivElement,
+  settingsNotificationsTitle: document.getElementById("settings-notifications-title") as HTMLDivElement,
+  settingsCliTitle: document.getElementById("settings-cli-title") as HTMLDivElement,
   lang: document.getElementById("lang") as HTMLSelectElement,
   langLabel: document.getElementById("settings-lang-label") as HTMLLabelElement,
   historyInput: document.getElementById("settings-history-limit") as HTMLInputElement,
@@ -90,6 +96,7 @@ const els = {
   cliApplyHint: document.getElementById("cli-apply-hint") as HTMLSpanElement,
   themeRow: document.querySelector(".theme-row") as HTMLDivElement,
   newChat: document.getElementById("btn-new-chat") as HTMLButtonElement,
+  thinkingBlocks: document.getElementById("btn-thinking-blocks") as HTMLButtonElement,
   thread: document.getElementById("thread") as HTMLElement,
   messages: document.getElementById("messages") as HTMLElement,
   statsBadge: document.getElementById("stats-badge") as HTMLDivElement,
@@ -472,6 +479,7 @@ function applyUiStrings(): void {
   els.connectBtn.textContent = t("connect");
   els.send.title = t("send");
   els.newChat.title = t("newChat");
+  updateThinkingBlocksButton();
   els.btnModel.title = t("model");
   els.btnThinking.title = t("thinkingLevel");
   els.settingsBtn.title = t("settings");
@@ -482,6 +490,12 @@ function applyUiStrings(): void {
   els.langLabel.textContent = t("language");
   els.historyLabel.textContent = t("historyLimit");
   els.historyInput.value = String(historyLimit);
+  // settings modal: 4 sections (Info / Webview / pi.dev / CLI flags)
+  els.settingsInfoTitle.textContent = t("settingsSectionInfo");
+  els.settingsWebviewTitle.textContent = t("settingsSectionWebview");
+  els.settingsCliTitle.textContent = t("settingsSectionCli");
+  // Notifications sub-group inside the Webview section
+  els.settingsNotificationsTitle.textContent = t("settingsNotificationsGroup");
   els.themeLabel.textContent = t("theme");
   els.lang.value = currentLocale;
   // notifications settings: the default (for NEW sessions) and the override
@@ -1434,6 +1448,8 @@ async function refreshSessions(): Promise<void> {
     const label = data?.workspace?.split(/[\\/]/).pop();
     if (label) workspaceLabel = label;
   }
+  await fetchThinkingSettings();
+  syncThinkingChat();
   populateSessionMenu();
   await loadHistory();
   // steering: persisted queue restored; if pi is idle, deliver right away
@@ -1476,6 +1492,16 @@ async function loadHistory(): Promise<void> {
   flushLoadingLogs();
   if (sessionLoading) armLoadingQuiet();
   if (!sessionHasMessages) void maybeShowStartupBanner();
+}
+
+async function fetchThinkingSettings(): Promise<void> {
+  hideThinkingBlock = false;
+  const res = await ideRequest({ type: "getThinkingSettings" });
+  if (!res?.ok) return;
+  const settings = res.data as ThinkingSettings | null;
+  if (typeof settings?.hideThinkingBlock === "boolean") {
+    hideThinkingBlock = settings.hideThinkingBlock;
+  }
 }
 
 // pi auto-compaction thresholds (config ~/.pi/config.json): for the tooltip
@@ -1820,6 +1846,8 @@ function switchSession(path: string): void {
       const res = await rpcRequest({ type: "switch_session", sessionPath: path });
       if (res.success) {
         currentSessionPath = path;
+        await fetchThinkingSettings();
+        syncThinkingChat();
         persistSessionPath(); // resume this session on VS Code reloads
         // loading overlay: slow extensions keep logging after the session
         // file is ready — the chat must stay clean until they settle
@@ -2010,6 +2038,71 @@ function makeThinkingHead(withSpinner = true): {
   return { head, label, timer };
 }
 
+// pi's setting is authoritative for a chat's initial state. The header action
+// can override it for the currently displayed chat only.
+let hideThinkingBlock = false;
+let thinkingExpansionOverride: boolean | null = null;
+let thinkingChatKey: string | null = null;
+
+function thinkingBlocksExpandedByDefault(): boolean {
+  return thinkingExpansionOverride ?? !hideThinkingBlock;
+}
+
+function thinkingBodies(): HTMLElement[] {
+  return Array.from(
+    els.thread.querySelectorAll<HTMLElement>(
+      ".thinking-card.thought-card > .thinking-content",
+    ),
+  );
+}
+
+function setThinkingBodyExpanded(body: HTMLElement, expanded: boolean): void {
+  body.hidden = !expanded;
+  const head = body.previousElementSibling;
+  if (head?.classList.contains("thinking-head")) {
+    head.setAttribute("aria-expanded", String(expanded));
+  }
+}
+
+function updateThinkingBlocksButton(): void {
+  const bodies = thinkingBodies();
+  const allExpanded = bodies.length > 0 && bodies.every((body) => !body.hidden);
+  const action = allExpanded ? "collapse" : "expand";
+  els.thinkingBlocks.disabled = bodies.length === 0;
+  els.thinkingBlocks.innerHTML = thinkingBlocksIcon(action);
+  els.thinkingBlocks.title = t(
+    action === "expand" ? "expandAllThinking" : "collapseAllThinking",
+  );
+  els.thinkingBlocks.setAttribute("aria-label", els.thinkingBlocks.title);
+  els.thinkingBlocks.setAttribute("aria-expanded", String(allExpanded));
+}
+
+function activateThinkingCard(card: HTMLElement, body: HTMLElement): void {
+  card.classList.add("thought-card");
+  setThinkingBodyExpanded(body, thinkingBlocksExpandedByDefault());
+}
+
+function wireThinkingHead(head: HTMLElement, body: HTMLElement): void {
+  head.setAttribute("role", "button");
+  head.tabIndex = 0;
+  const toggle = (): void => {
+    setThinkingBodyExpanded(body, body.hidden);
+    updateThinkingBlocksButton();
+  };
+  head.addEventListener("click", toggle);
+  head.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    toggle();
+  });
+}
+
+function syncThinkingChat(): void {
+  const key = currentSessionPath ?? `new:${workspacePath ?? ""}`;
+  if (thinkingChatKey === key) return;
+  thinkingChatKey = key;
+  thinkingExpansionOverride = null;
+}
 
 function startThinkingTimer(): void {
   thinkingStartedAt = performance.now();
@@ -2042,14 +2135,11 @@ function ensureThinkingLoader(): HTMLElement {
     thinkingTimerEl = timer ?? null;
     thinkingContentEl = document.createElement("div");
     thinkingContentEl.className = "thinking-content";
-    thinkingContentEl.hidden = true; // collapsed by default (streaming still live)
-    // local capture: each block toggles its OWN content
-    const contentEl = thinkingContentEl;
-    head.addEventListener("click", () => {
-      contentEl.hidden = !contentEl.hidden;
-    });
+    activateThinkingCard(thinkingEl, thinkingContentEl);
+    wireThinkingHead(head, thinkingContentEl);
     thinkingEl.append(head, thinkingContentEl);
     thinkingSlot.appendChild(thinkingEl);
+    updateThinkingBlocksButton();
     applyToolChain(); // first thinking block: evaluate the 3px gap with the previous one
     startThinkingTimer();
     scrollToBottom();
@@ -2071,6 +2161,7 @@ function finishThinking(): void {
     thinkingEl.remove();
     thinkingEl = null;
     thinkingContentEl = null;
+    updateThinkingBlocksButton();
   }
 }
 
@@ -2153,12 +2244,9 @@ function showWaitingBlock(): void {
   card.appendChild(head);
   const content = document.createElement("div");
   content.className = "thinking-content";
-  content.hidden = true; // collapsed by default (same as the thought)
+  content.hidden = true;
   waitingContentEl = content;
-  // local capture: each block toggles its OWN content (same as the thought)
-  head.addEventListener("click", () => {
-    content.hidden = !content.hidden;
-  });
+  wireThinkingHead(head, content);
   card.appendChild(content);
   wrapper.appendChild(card);
   waitingClock = setInterval(() => {
@@ -2197,6 +2285,7 @@ function promoteWaitingToThinking(): void {
   thinkingSpinnerEl = waitingSpinnerEl;
   thinkingTimerEl = waitingTimerEl;
   thinkingContentEl = waitingContentEl;
+  if (thinkingContentEl) activateThinkingCard(card, thinkingContentEl);
   thinkingStartedAt = waitingStartedAt;
   if (thinkingTimer) clearInterval(thinkingTimer);
   thinkingTimer = setInterval(() => {
@@ -2216,6 +2305,7 @@ function promoteWaitingToThinking(): void {
   waitingSpinnerEl = null;
   waitingLabelEl = null;
   waitingContentEl = null;
+  updateThinkingBlocksButton();
   applyToolChain();
   scrollToBottom();
 }
@@ -2899,12 +2989,11 @@ function finalizeMessage(msg: FinalizedMessage): void {
       const body = document.createElement("div");
       body.className = "thinking-content";
       body.textContent = msg.thinking.trim();
-      body.hidden = true; // collapsed by default
-      head.addEventListener("click", () => {
-        body.hidden = !body.hidden;
-      });
+      activateThinkingCard(card, body);
+      wireThinkingHead(head, body);
       card.append(head, body);
       thinkingSlot?.appendChild(card);
+      updateThinkingBlocksButton();
       thinkingContentRendered = true;
     }
     if (thinkingSlot && !thinkingSlot.hasChildNodes()) thinkingSlot.remove();
@@ -3011,10 +3100,8 @@ function buildThinkingCard(content: string, durationMs = 0): HTMLElement {
   const body = document.createElement("div");
   body.className = "thinking-content";
   body.textContent = content;
-  body.hidden = true;
-  head.addEventListener("click", () => {
-    body.hidden = !body.hidden;
-  });
+  activateThinkingCard(card, body);
+  wireThinkingHead(head, body);
   card.append(head, body);
   return card;
 }
@@ -4248,6 +4335,7 @@ function renderHistory(messages: unknown[]): void {
     }
     if (ts > 0) lastTs = ts; // base for the next thinking duration
   }
+  updateThinkingBlocksButton();
   const main = els.messages;
   main.scrollTop = main.scrollHeight;
 }
@@ -4259,10 +4347,19 @@ const SCROLL_BTN_MARGIN = 220;
 
 els.scrollBottom.innerHTML = scrollDownIcon();
 els.newChat.innerHTML = newChatIcon();
+updateThinkingBlocksButton();
 els.settingsBtn.innerHTML = settingsIcon();
 els.scrollBottom.title = t("scrollToBottom");
 els.scrollBottom.addEventListener("click", () => {
   els.messages.scrollTo({ top: els.messages.scrollHeight, behavior: "smooth" });
+});
+els.thinkingBlocks.addEventListener("click", () => {
+  const bodies = thinkingBodies();
+  if (bodies.length === 0) return;
+  const expand = bodies.some((body) => body.hidden);
+  thinkingExpansionOverride = expand;
+  for (const body of bodies) setThinkingBodyExpanded(body, expand);
+  updateThinkingBlocksButton();
 });
 els.messages.addEventListener(
   "scroll",
@@ -6185,19 +6282,18 @@ function renderDemo(): void {
 
   const asst = addMsg("assistant");
 
-  // thinking BEFORE the text (collapsed by default)
+  // Thinking precedes the text and follows pi's default visibility setting.
   const thought = document.createElement("div");
   thought.className = "thinking-card";
   const { head } = makeThinkingHead(false);
   const tb = document.createElement("div");
   tb.className = "thinking-content";
   tb.textContent = t("demoThought");
-  tb.hidden = true;
-  head.addEventListener("click", () => {
-    tb.hidden = !tb.hidden;
-  });
+  activateThinkingCard(thought, tb);
+  wireThinkingHead(head, tb);
   thought.append(head, tb);
   asst.appendChild(thought);
+  updateThinkingBlocksButton();
 
   const txt = document.createElement("div");
   txt.className = "md";

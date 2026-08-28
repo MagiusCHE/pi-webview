@@ -124,7 +124,11 @@ function nativeNotify(
   }
   toast();
 }
-import { ConfigStore, readCompactionSettings } from "../../bridge/config.ts";
+import {
+  ConfigStore,
+  readCompactionSettings,
+  readThinkingSettings,
+} from "../../bridge/config.ts";
 import { cliFlagArgs, fetchAvailableCliFlags } from "../../bridge/cli-flags.ts";
 import {
   listSessions,
@@ -507,6 +511,9 @@ export abstract class PiWebviewHost {
         return;
       case "getCompactionSettings":
         this.respond(req.id, true, readCompactionSettings());
+        return;
+      case "getThinkingSettings":
+        this.respond(req.id, true, readThinkingSettings(this.workspace()));
         return;
       case "listSessions":
         this.respond(req.id, true, {

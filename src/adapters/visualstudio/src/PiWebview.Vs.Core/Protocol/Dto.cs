@@ -273,6 +273,12 @@ public sealed class CompactionSettings
     public int KeepRecentTokens { get; set; } = 20000;
 }
 
+public sealed class ThinkingSettings
+{
+    [System.Text.Json.Serialization.JsonPropertyName("hideThinkingBlock")]
+    public bool HideThinkingBlock { get; set; }
+}
+
 public sealed class SteerQueueItem
 {
     [System.Text.Json.Serialization.JsonPropertyName("text")]

@@ -48,6 +48,12 @@
         title="Nuova chat in un altro pannello"
       ></button>
       <button
+        id="btn-thinking-blocks"
+        class="icon-btn"
+        title="Espandi tutti i blocchi di pensiero"
+        disabled
+      ></button>
+      <button
         id="btn-settings"
         class="icon-btn"
         title="Impostazioni"
@@ -66,62 +72,76 @@
             ✕
           </button>
         </div>
-        <div class="settings-row">
-          <label id="settings-lang-label" for="lang">Lingua</label>
-          <select id="lang" class="field-select">
-            <option value="it">Italiano</option>
-            <option value="en">English</option>
-          </select>
-        </div>
-        <div class="settings-row">
-          <label id="settings-theme-label">Tema</label>
-          <div class="theme-row" role="group" aria-label="Tema">
-            <button data-theme-pref="system" class="theme-btn" title="Tema: sistema">
-              🖥️
-            </button>
-            <button data-theme-pref="light" class="theme-btn" title="Tema: chiaro">
-              ☀️
-            </button>
-            <button data-theme-pref="dark" class="theme-btn" title="Tema: scuro">
-              🌙
-            </button>
+        <!-- 1. info (version etc.) -->
+        <div class="settings-section">
+          <div class="settings-section-title" id="settings-info-title">Info</div>
+          <div class="settings-row">
+            <label id="settings-version-label">Versione piw</label>
+            <span id="settings-version" class="settings-version">–</span>
           </div>
         </div>
-        <div class="settings-row">
-          <label id="settings-history-label" for="settings-history-limit">
-            Storico (messaggi)
-          </label>
-          <input
-            id="settings-history-limit"
-            class="field-number"
-            type="number"
-            min="5"
-            max="1000"
-            step="5"
-          />
+        <!-- 2. webview settings (typical webview options) -->
+        <div class="settings-section">
+          <div class="settings-section-title" id="settings-webview-title">Webview</div>
+          <div class="settings-row">
+            <label id="settings-lang-label" for="lang">Lingua</label>
+            <select id="lang" class="field-select">
+              <option value="it">Italiano</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <label id="settings-theme-label">Tema</label>
+            <div class="theme-row" role="group" aria-label="Tema">
+              <button data-theme-pref="system" class="theme-btn" title="Tema: sistema">
+                🖥️
+              </button>
+              <button data-theme-pref="light" class="theme-btn" title="Tema: chiaro">
+                ☀️
+              </button>
+              <button data-theme-pref="dark" class="theme-btn" title="Tema: scuro">
+                🌙
+              </button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label id="settings-history-label" for="settings-history-limit">
+              Storico (messaggi)
+            </label>
+            <input
+              id="settings-history-limit"
+              class="field-number"
+              type="number"
+              min="5"
+              max="1000"
+              step="5"
+            />
+          </div>
+          <div class="settings-row">
+            <label id="settings-stats-bar-label" for="stats-bar-pos">Posizione barra stato</label>
+            <select id="stats-bar-pos" class="field-select" title="Stats bar position"></select>
+          </div>
+          <!-- sub-group: notifications (default + per-session override) -->
+          <div class="settings-subsection">
+            <div class="settings-subsection-title" id="settings-notifications-title">Notifiche</div>
+            <div class="settings-row">
+              <label id="settings-notifications-label" for="notifications">Nuove sessioni</label>
+              <select id="notifications" class="field-select" title="Notifications"></select>
+            </div>
+            <div class="settings-row">
+              <label id="settings-notifications-session-label" for="notifications-session">Questa sessione</label>
+              <select id="notifications-session" class="field-select" title="Notifications (this session)"></select>
+            </div>
+          </div>
         </div>
-        <div class="settings-row">
-          <label id="settings-version-label">Versione</label>
-          <span id="settings-version" class="settings-version">–</span>
-        </div>
-        <div class="settings-row">
-          <label id="settings-notifications-label" for="notifications">Notifiche</label>
-          <select id="notifications" class="field-select" title="Notifications"></select>
-        </div>
-        <div class="settings-row">
-          <label id="settings-notifications-session-label" for="notifications-session">Questa sessione</label>
-          <select id="notifications-session" class="field-select" title="Notifications (this session)"></select>
-        </div>
-        <div class="settings-row">
-          <label id="settings-stats-bar-label" for="stats-bar-pos">Posizione barra stato</label>
-          <select id="stats-bar-pos" class="field-select" title="Stats bar position"></select>
-        </div>
-        <!-- pi.dev settings: block 2 (via /settings, from pi.dev) → placeholder;
-             block 3 (launch CLI flags) → dynamic rows from the flags
-             registered by pi+extensions + Apply button -->
+        <!-- 3. pi.dev settings (via /settings, from pi.dev) → placeholder -->
         <div class="settings-section">
           <div class="settings-section-title" id="settings-pidev-title">pi.dev</div>
           <div class="settings-note" id="settings-pidev-note">…</div>
+        </div>
+        <!-- 4. command-line switches (launch flags for this session) -->
+        <div class="settings-section">
+          <div class="settings-section-title" id="settings-cli-title">Switch da riga di comando</div>
           <div id="cli-flags" class="settings-cli-flags"></div>
           <div class="settings-row" id="cli-apply-row" hidden>
             <button id="cli-apply" class="btn-primary" type="button">Applica</button>

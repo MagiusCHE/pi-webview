@@ -157,6 +157,7 @@ export type IdeRequest =
   | { type: "pathExists"; path: string; id?: string }
   | { type: "getSessionInfo"; path: string; id?: string }
   | { type: "getCompactionSettings"; id?: string }
+  | { type: "getThinkingSettings"; id?: string }
   | { type: "renameSession"; path: string; name: string; id?: string }
   | { type: "deleteSession"; path: string; id?: string }
   | { type: "storeSteerQueue"; items: SteerQueueItem[]; id?: string }
@@ -173,6 +174,10 @@ export interface CompactionSettings {
   enabled: boolean;
   reserveTokens: number;
   keepRecentTokens: number;
+}
+
+export interface ThinkingSettings {
+  hideThinkingBlock: boolean;
 }
 
 export interface SessionInfo {

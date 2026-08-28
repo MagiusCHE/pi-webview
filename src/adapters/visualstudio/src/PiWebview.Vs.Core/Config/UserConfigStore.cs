@@ -3,6 +3,7 @@
 // src/bridge/config.ts. Atomic write (tmp + rename).
 
 using System.Text.Json;
+using PiWebview.Vs.Platform;
 using PiWebview.Vs.Protocol;
 
 namespace PiWebview.Vs.Config;
@@ -91,6 +92,40 @@ public sealed class UserConfigStore
         Locale = c.Locale,
         HistoryLimit = c.HistoryLimit,
     };
+}
+
+/// <summary>Mirrors pi's SettingsManager.getHideThinkingBlock(): global
+/// settings first, then the trusted project override.</summary>
+public static class PiThinkingSettingsReader
+{
+    public static ThinkingSettings Read(string? workspace, string? agentDir = null)
+    {
+        agentDir ??= Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pi", "agent");
+        var hide = ReadValue(Path.Combine(agentDir, "settings.json")) ?? false;
+        if (workspace is { Length: > 0 } &&
+            TrustStore.GetTrust(workspace, agentDir).Status == "trusted")
+        {
+            hide = ReadValue(Path.Combine(workspace, ".pi", "settings.json")) ?? hide;
+        }
+        return new ThinkingSettings { HideThinkingBlock = hide };
+    }
+
+    private static bool? ReadValue(string path)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            return doc.RootElement.TryGetProperty("hideThinkingBlock", out var value) &&
+                   value.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? value.GetBoolean()
+                : null;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 }
 
 /// <summary>Compaction section of pi's config (~/.pi/config.json) —

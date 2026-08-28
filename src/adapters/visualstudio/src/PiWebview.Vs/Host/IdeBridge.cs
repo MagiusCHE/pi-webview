@@ -54,6 +54,9 @@ public static class IdeBridge
                 case "getCompactionSettings":
                     host.PostIdeResponse(Ok(req, CompactionSettingsReader.Read()));
                     return;
+                case "getThinkingSettings":
+                    host.PostIdeResponse(Ok(req, PiThinkingSettingsReader.Read(host.Workspace())));
+                    return;
                 case "listSessions":
                 {
                     var ws = host.Workspace();

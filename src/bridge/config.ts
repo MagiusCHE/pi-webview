@@ -7,7 +7,8 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import type { CompactionSettings, UserConfig } from "../ide/protocol.ts";
+import type { CompactionSettings, ThinkingSettings, UserConfig } from "../ide/protocol.ts";
+import { getTrust } from "./trust.ts";
 
 export const DEFAULT_CONFIG: UserConfig = {
   theme: "system",
@@ -35,6 +36,35 @@ export function readCompactionSettings(): CompactionSettings {
   } catch {
     return { ...DEFAULT_COMPACTION };
   }
+}
+
+function readHideThinkingBlock(path: string): boolean | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as {
+      hideThinkingBlock?: unknown;
+    };
+    return typeof parsed.hideThinkingBlock === "boolean"
+      ? parsed.hideThinkingBlock
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Mirrors SettingsManager.getHideThinkingBlock(): global settings first, then
+// the trusted project override. The value belongs to pi, not pi-webview.
+export function readThinkingSettings(
+  workspace?: string,
+  agentDir: string = join(homedir(), ".pi", "agent"),
+): ThinkingSettings {
+  let hideThinkingBlock =
+    readHideThinkingBlock(join(agentDir, "settings.json")) ?? false;
+  if (workspace && getTrust(workspace, agentDir).status === "trusted") {
+    hideThinkingBlock =
+      readHideThinkingBlock(join(workspace, ".pi", "settings.json")) ??
+      hideThinkingBlock;
+  }
+  return { hideThinkingBlock };
 }
 
 export function userConfigDir(platform: NodeJS.Platform = process.platform): string {

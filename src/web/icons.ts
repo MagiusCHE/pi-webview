@@ -50,6 +50,18 @@ export function newChatIcon(): string {
   return `<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" aria-hidden="true">${NEW_CHAT}</svg>`;
 }
 
+// Lucide "chevrons-up-down" / "chevrons-down-up": expand or collapse all
+// thinking blocks in the displayed chat.
+const THINKING_EXPAND =
+  '<path d="m7 15 5 5 5-5M7 9l5-5 5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+const THINKING_COLLAPSE =
+  '<path d="m7 20 5-5 5 5M7 4l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+
+export function thinkingBlocksIcon(action: "expand" | "collapse"): string {
+  const path = action === "expand" ? THINKING_EXPAND : THINKING_COLLAPSE;
+  return `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">${path}</svg>`;
+}
+
 // Material "edit" (matita) per rinomina sessione
 const PENCIL =
   '<path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>';

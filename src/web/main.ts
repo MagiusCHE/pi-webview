@@ -958,7 +958,19 @@ async function startNewSession(): Promise<void> {
   populateSessionMenu();
 }
 
-// session pick: same folder → switch; elsewhere → fork (like pi)
+async function forkSessionIntoCurrentWorkspace(path: string): Promise<void> {
+  const res = await ideRequest({ type: "forkSession", sourcePath: path });
+  if (!res?.ok) return;
+  const forkPath = (res.data as { path?: string } | undefined)?.path;
+  if (forkPath) {
+    switchSession(forkPath);
+    void refreshSessions();
+  }
+}
+
+// Session pick: same folder → switch. For a session in another folder the IDE
+// keeps pi's fork-only behavior; standalone also lets the user move the bridge
+// cwd to the session workspace and resume the ORIGINAL session there.
 async function pickSession(path: string): Promise<void> {
   if (switchingSession) return;
   const s = sessions.find((x) => x.path === path);
@@ -967,21 +979,24 @@ async function pickSession(path: string): Promise<void> {
     switchSession(path);
     return;
   }
-  // session of another folder: ask fork confirmation (custom modal, not
-  // window.confirm: it does not work in VS Code webviews)
-  const ok = await showConfirm(t("forkConfirm"));
-  if (ok) {
-    const res = await ideRequest({ type: "forkSession", sourcePath: path });
-    if (res?.ok) {
-      const forkPath = (res.data as { path?: string } | undefined)?.path;
-      if (forkPath) {
-        switchSession(forkPath);
-        void refreshSessions();
-      }
+  if (runtime.mode === "standalone" && s?.cwd) {
+    const action = await askCrossWorkspaceSessionAction(s.cwd);
+    if (action === "resume") {
+      await resumeSessionInWorkspace(path, s.cwd);
+    } else if (action === "fork") {
+      await forkSessionIntoCurrentWorkspace(path);
+    } else if (action === "new") {
+      await startNewSession();
+    } else {
+      els.sessionMenu.hidden = true;
     }
-  } else {
-    els.sessionMenu.hidden = true;
+    return;
   }
+  // IDE webviews cannot move the host workspace: preserve the existing fork
+  // confirmation (custom modal; window.confirm does not work in webviews).
+  const ok = await showConfirm(t("forkConfirm"));
+  if (ok) await forkSessionIntoCurrentWorkspace(path);
+  else els.sessionMenu.hidden = true;
 }
 
 document.addEventListener("click", (e) => {
@@ -1616,6 +1631,104 @@ function openFolderBrowser(start: string): Promise<string | null> {
     document.body.appendChild(backdrop);
     void load();
   });
+}
+
+type CrossWorkspaceSessionAction = "resume" | "fork" | "new";
+
+// Standalone only: a session outside the current workspace can stay original
+// by moving the bridge cwd to its folder, or follow the existing fork/new
+// alternatives. IDE webviews never open this dialog because their workspace
+// belongs to the host.
+function askCrossWorkspaceSessionAction(
+  folder: string,
+): Promise<CrossWorkspaceSessionAction | null> {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    const card = document.createElement("div");
+    card.className = "modal";
+    const icon = document.createElement("div");
+    icon.className = "modal-icon";
+    icon.innerHTML = trustIcon("warn-filled");
+    const msg = document.createElement("div");
+    msg.className = "modal-message";
+    msg.textContent = `${t("crossWorkspaceSessionAsk")}\n\n${folder}`;
+    const actions = document.createElement("div");
+    actions.className = "modal-actions session-workspace-actions";
+    const resumeBtn = document.createElement("button");
+    resumeBtn.type = "button";
+    resumeBtn.className = "btn primary";
+    resumeBtn.textContent = t("switchToSessionWorkspace");
+    const forkBtn = document.createElement("button");
+    forkBtn.type = "button";
+    forkBtn.className = "btn";
+    forkBtn.textContent = t("forkInCurrentWorkspace");
+    const newBtn = document.createElement("button");
+    newBtn.type = "button";
+    newBtn.className = "btn";
+    newBtn.textContent = t("newSessionCurrentWorkspace");
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "btn";
+    cancelBtn.textContent = t("cancel");
+    actions.append(resumeBtn, forkBtn, newBtn, cancelBtn);
+    card.append(icon, msg, actions);
+    backdrop.appendChild(card);
+
+    const done = (value: CrossWorkspaceSessionAction | null): void => {
+      backdrop.remove();
+      document.removeEventListener("keydown", esc);
+      resolve(value);
+    };
+    const esc = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") done(null);
+    };
+    document.addEventListener("keydown", esc);
+    resumeBtn.addEventListener("click", () => done("resume"));
+    forkBtn.addEventListener("click", () => done("fork"));
+    newBtn.addEventListener("click", () => done("new"));
+    cancelBtn.addEventListener("click", () => done(null));
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop) done(null);
+    });
+
+    document.body.appendChild(backdrop);
+  });
+}
+
+async function resumeSessionInWorkspace(path: string, folder: string): Promise<void> {
+  if (switchingSession) return;
+  switchingSession = true;
+  els.sessionBtn.disabled = true;
+  els.sessionMenu.hidden = true;
+  beginSessionLoading();
+  let loaded = false;
+  try {
+    const res = await ideRequest({
+      type: "setWorkspace",
+      path: folder,
+      action: "resume",
+      sessionPath: path,
+    });
+    if (!res?.ok) return;
+    const workspace =
+      (res.data as { workspace?: string } | undefined)?.workspace ?? folder;
+    workspacePath = workspace;
+    workspaceLabel = workspace.split(/[\\/]/).pop() ?? "";
+    currentSessionPath = path;
+    els.thread.textContent = "";
+    sessionHasMessages = false;
+    await refreshSessions();
+    loaded = true;
+  } catch {
+    // The bridge could not switch/restart: close the loading overlay without
+    // leaving a rejected click handler.
+  } finally {
+    if (!loaded) endSessionLoading();
+    switchingSession = false;
+    els.sessionBtn.disabled = false;
+    populateSessionMenu();
+  }
 }
 
 // 3-choice dialog: fork the session into the new folder, new session,

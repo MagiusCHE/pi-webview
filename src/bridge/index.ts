@@ -344,13 +344,18 @@ function stderrAllowed(): boolean {
       send({ channel: "rpc", payload: { type: "pi_restarted" } });
     };
 
-    // workspace change: restart pi with the new cwd
-    const switchWorkspace = (newCwd: string): Promise<void> =>
+    // Workspace change: restart pi with the new cwd. `sessionPath` is used by
+    // the standalone cross-workspace resume action: pi starts directly on the
+    // selected session, with no temporary new session and no fork.
+    const switchWorkspace = (
+      newCwd: string,
+      sessionPath?: string,
+    ): Promise<void> =>
       new Promise((resolve) => {
         workspaceDir = newCwd;
-        currentSessionPath = undefined;
+        currentSessionPath = sessionPath;
         pi.dispose();
-        pi = makePi(newCwd);
+        pi = makePi(newCwd, sessionPath);
         pi.start();
         resolve();
       });
@@ -459,6 +464,15 @@ function stderrAllowed(): boolean {
           if (req.action === "fork" && req.sessionPath) {
             const res = forkSession(req.sessionPath, req.path);
             sessionPath = (res as { path?: string }).path;
+          } else if (req.action === "resume") {
+            if (!req.sessionPath) {
+              respond(req.id ?? "", {
+                ok: false,
+                error: "workspace resume requires a session path",
+              });
+              return;
+            }
+            sessionPath = req.sessionPath;
           }
         } catch (err) {
           respond(req.id ?? "", {
@@ -467,7 +481,10 @@ function stderrAllowed(): boolean {
           });
           return;
         }
-        void switchWorkspace(req.path)
+        void switchWorkspace(
+          req.path,
+          req.action === "resume" ? sessionPath : undefined,
+        )
           .then(() =>
             respond(req.id ?? "", { ok: true, data: { workspace: req.path, sessionPath } }),
           )

@@ -138,7 +138,7 @@ export type IdeRequest =
   | {
       type: "setWorkspace";
       path: string;
-      action: "fork" | "new";
+      action: "fork" | "new" | "resume";
       sessionPath?: string;
       id?: string;
     }

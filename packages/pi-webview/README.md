@@ -174,7 +174,7 @@ The companion spawns `pi --mode rpc` and bridges the UI via `postMessage` (same 
 ## Features
 
 - **Full chat UI** — streaming markdown (`marked` + `DOMPurify`), thinking blocks with spinner and elapsed time, collapsible tool cards with command summaries, copy buttons
-- **Sessions** — switch, filter by folder, fork of sessions from other folders (same behavior as pi), new session
+- **Sessions** — switch, filter by folder, fork of sessions from other folders (same behavior as pi), new session; in standalone browser mode, a session from another workspace can instead move the current workspace to its original folder and resume there without a fork
 - **Composer controls** — model picker, thinking level, project trust (writes `~/.pi/agent/trust.json`, with confirmation for full access)
 - **Attachments** — paste or drag & drop of files and images, with inline previews
 - **Editor selection context** — when pi-webview runs in the **sidebar view**, selecting text in the editor shows a discreet one-line selection block (attach context for your messages). **In editor-area panels** ("new chat in a new panel") the selection mode is **inhibited**: a webview panel steals editor focus, which would clear the attached selection — so the block is hidden there and selection works only from the sidebar.

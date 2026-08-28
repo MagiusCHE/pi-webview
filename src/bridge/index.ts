@@ -9,21 +9,32 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
-import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, extname, join, normalize } from "node:path";
 import { randomBytes } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
-import type { CliFlags, Frame, IdeRequest, IdeResponse, RpcEvent } from "../ide/protocol.ts";
+import type {
+  CliFlags,
+  Frame,
+  IdeRequest,
+  IdeResponse,
+  RpcEvent,
+} from "../ide/protocol.ts";
 import { PiProcess } from "./pi-process.ts";
 import { resolvePi } from "./spawn.ts";
 import { cliFlagArgs, fetchAvailableCliFlags } from "./cli-flags.ts";
 import { createMockIde } from "./mock-ide.ts";
-import {
-  ConfigStore,
-  readCompactionSettings,
-  readThinkingSettings,
-} from "./config.ts";
+import { ConfigStore, readCompactionSettings, readThinkingSettings } from "./config.ts";
 import {
   listSessions,
   forkSession,
@@ -36,12 +47,9 @@ import {
   writeSessionCliFlags,
 } from "./sessions.ts";
 import { getTrust, setTrust } from "./trust.ts";
+import { getPiSettings, setPiSettingFile } from "./pi-settings.ts";
 import { readStartupInfo } from "./startup-info.ts";
-import {
-  saveAttachment,
-  pathExists,
-  attachFromPath,
-} from "./attachments.ts";
+import { saveAttachment, pathExists, attachFromPath } from "./attachments.ts";
 import { fetchProviderBalance } from "./balance.ts";
 import { clearLock } from "./lock.ts";
 
@@ -73,9 +81,9 @@ function packageVersion(): string | null {
   let dir = __dirname;
   for (let i = 0; i < 4; i++) {
     try {
-      const json = JSON.parse(
-        readFileSync(join(dir, "package.json"), "utf-8"),
-      ) as { version?: unknown };
+      const json = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8")) as {
+        version?: unknown;
+      };
       if (typeof json.version === "string") return json.version;
     } catch {
       // keep climbing up
@@ -222,17 +230,17 @@ function main(): void {
   };
 
   // --- HTTP server (health, config, optional static serve) -----------------
-// stderr forwarding quota (terminal parity, no thread flooding)
-let stderrWindowStart = 0;
-let stderrCount = 0;
-function stderrAllowed(): boolean {
-  const now = Date.now();
-  if (now - stderrWindowStart > 5000) {
-    stderrWindowStart = now;
-    stderrCount = 0;
+  // stderr forwarding quota (terminal parity, no thread flooding)
+  let stderrWindowStart = 0;
+  let stderrCount = 0;
+  function stderrAllowed(): boolean {
+    const now = Date.now();
+    if (now - stderrWindowStart > 5000) {
+      stderrWindowStart = now;
+      stderrCount = 0;
+    }
+    return stderrCount++ < 25;
   }
-  return stderrCount++ < 25;
-}
   const http = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (url.pathname === "/health") {
@@ -291,8 +299,7 @@ function stderrAllowed(): boolean {
       send({ channel: "ide", payload: { ...payload, id } });
 
     let workspaceDir = process.cwd();
-    let currentSessionPath =
-      intent.kind === "session" ? intent.sessionPath : undefined;
+    let currentSessionPath = intent.kind === "session" ? intent.sessionPath : undefined;
     const makePi = (
       cwd: string,
       sessionPath?: string,
@@ -315,7 +322,9 @@ function stderrAllowed(): boolean {
           onNotify: (n) => {
             const seq = ++notifySeq;
             console.error(`[bridge] notify #${seq} title=${n.title}`);
-            bridgeLog(`bridge notify #${seq} title=${n.title} body=${(n.body ?? "").slice(0, 60)}`);
+            bridgeLog(
+              `bridge notify #${seq} title=${n.title} body=${(n.body ?? "").slice(0, 60)}`,
+            );
             send({
               channel: "rpc",
               payload: { type: "pi_notify", title: n.title, body: n.body },
@@ -351,10 +360,7 @@ function stderrAllowed(): boolean {
     // Workspace change: restart pi with the new cwd. `sessionPath` is used by
     // the standalone cross-workspace resume action: pi starts directly on the
     // selected session, with no temporary new session and no fork.
-    const switchWorkspace = (
-      newCwd: string,
-      sessionPath?: string,
-    ): Promise<void> =>
+    const switchWorkspace = (newCwd: string, sessionPath?: string): Promise<void> =>
       new Promise((resolve) => {
         workspaceDir = newCwd;
         currentSessionPath = sessionPath;
@@ -492,12 +498,12 @@ function stderrAllowed(): boolean {
           });
           return;
         }
-        void switchWorkspace(
-          req.path,
-          req.action === "resume" ? sessionPath : undefined,
-        )
+        void switchWorkspace(req.path, req.action === "resume" ? sessionPath : undefined)
           .then(() =>
-            respond(req.id ?? "", { ok: true, data: { workspace: req.path, sessionPath } }),
+            respond(req.id ?? "", {
+              ok: true,
+              data: { workspace: req.path, sessionPath },
+            }),
           )
           .catch((err: unknown) =>
             respond(req.id ?? "", {
@@ -518,6 +524,33 @@ function stderrAllowed(): boolean {
           ok: true,
           data: { sessions, workspace: workspaceDir },
         });
+        return;
+      }
+      if (req.type === "getSettings") {
+        respond(req.id ?? "", {
+          ok: true,
+          data: getPiSettings(
+            {
+              workspace: workspaceDir,
+              workspaceTrusted: getTrust(workspaceDir).status === "trusted",
+            },
+            req.key,
+          ),
+        });
+        return;
+      }
+      if (req.type === "setSetting") {
+        const res = setPiSettingFile(req.key, req.value, {
+          workspace: workspaceDir,
+          workspaceTrusted: getTrust(workspaceDir).status === "trusted",
+          scope: req.scope,
+        });
+        if (!res.ok) {
+          respond(req.id ?? "", { ok: false, error: res.error ?? "set_setting failed" });
+          return;
+        }
+        respond(req.id ?? "", { ok: true, data: { needsRestart: true } });
+        restartPi(currentSessionPath, readSessionCliFlags(currentSessionPath ?? ""));
         return;
       }
       if (req.type === "getTrust") {

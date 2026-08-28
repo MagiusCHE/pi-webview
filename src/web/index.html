@@ -118,30 +118,57 @@
             />
           </div>
           <div class="settings-row">
-            <label id="settings-stats-bar-label" for="stats-bar-pos">Posizione barra stato</label>
-            <select id="stats-bar-pos" class="field-select" title="Stats bar position"></select>
+            <label id="settings-stats-bar-label" for="stats-bar-pos"
+              >Posizione barra stato</label
+            >
+            <select
+              id="stats-bar-pos"
+              class="field-select"
+              title="Stats bar position"
+            ></select>
           </div>
           <!-- sub-group: notifications (default + per-session override) -->
           <div class="settings-subsection">
-            <div class="settings-subsection-title" id="settings-notifications-title">Notifiche</div>
-            <div class="settings-row">
-              <label id="settings-notifications-label" for="notifications">Nuove sessioni</label>
-              <select id="notifications" class="field-select" title="Notifications"></select>
+            <div class="settings-subsection-title" id="settings-notifications-title">
+              Notifiche
             </div>
             <div class="settings-row">
-              <label id="settings-notifications-session-label" for="notifications-session">Questa sessione</label>
-              <select id="notifications-session" class="field-select" title="Notifications (this session)"></select>
+              <label id="settings-notifications-label" for="notifications"
+                >Nuove sessioni</label
+              >
+              <select
+                id="notifications"
+                class="field-select"
+                title="Notifications"
+              ></select>
+            </div>
+            <div class="settings-row">
+              <label id="settings-notifications-session-label" for="notifications-session"
+                >Questa sessione</label
+              >
+              <select
+                id="notifications-session"
+                class="field-select"
+                title="Notifications (this session)"
+              ></select>
             </div>
           </div>
         </div>
-        <!-- 3. pi.dev settings (via /settings, from pi.dev) → placeholder -->
+        <!-- 3. pi.dev settings (via /settings, from pi.dev) → dynamic facade -->
         <div class="settings-section">
           <div class="settings-section-title" id="settings-pidev-title">pi.dev</div>
           <div class="settings-note" id="settings-pidev-note">…</div>
+          <div id="settings-pidev-body" class="settings-pidev-body"></div>
+          <div class="settings-row" id="pidev-apply-row" hidden>
+            <button id="pidev-apply" class="btn-primary" type="button">Applica</button>
+            <span class="settings-hint" id="pidev-apply-hint">…</span>
+          </div>
         </div>
         <!-- 4. command-line switches (launch flags for this session) -->
         <div class="settings-section">
-          <div class="settings-section-title" id="settings-cli-title">Switch da riga di comando</div>
+          <div class="settings-section-title" id="settings-cli-title">
+            Switch da riga di comando
+          </div>
           <div id="cli-flags" class="settings-cli-flags"></div>
           <div class="settings-row" id="cli-apply-row" hidden>
             <button id="cli-apply" class="btn-primary" type="button">Applica</button>
@@ -191,13 +218,7 @@
       <div class="input-box">
         <!-- separate STOP: straddling the bottom-right corner of the
              input box, visible only while processing (plan 0004) -->
-        <button
-          id="stats-stop"
-          class="stats-stop"
-          type="button"
-          title=""
-          hidden
-        ></button>
+        <button id="stats-stop" class="stats-stop" type="button" title="" hidden></button>
         <!-- slash command autocomplete dropdown (plan 0003): ONLY extension
              commands; opens upward above the input box -->
         <div id="cmd-dropdown" class="cmd-dropdown" hidden>
@@ -230,13 +251,7 @@
             title=""
           ></button>
           <span class="send-group">
-            <button
-              id="btn-stop"
-              class="stop-btn"
-              type="button"
-              title=""
-              hidden
-            ></button>
+            <button id="btn-stop" class="stop-btn" type="button" title="" hidden></button>
             <button id="btn-send" class="send-btn" title="Invia">↑</button>
           </span>
         </div>

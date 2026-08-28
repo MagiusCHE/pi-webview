@@ -624,7 +624,9 @@ export default async function (pi: PiApi): Promise<void> {
               ...companionReloadHints(notes, "en", "pi-webview: "),
             ];
             if (recap.length === 0)
-              recap.push("pi-webview: nothing to install — all companions already current.");
+              recap.push(
+                "pi-webview: nothing to install — all companions already current.",
+              );
             if (piwLink) recap.push("pi-webview: piw launcher link created.");
             notify(recap.join("\n"), "info");
             return;
@@ -668,7 +670,9 @@ export default async function (pi: PiApi): Promise<void> {
                 } else {
                   await runCli(cli, ["--uninstall-extension", COMPANION_ID], 30_000);
                   removedVsCode = true;
-                  lines.push(`pi-webview: companion ${COMPANION_ID} removed from VS Code.`);
+                  lines.push(
+                    `pi-webview: companion ${COMPANION_ID} removed from VS Code.`,
+                  );
                 }
               } else {
                 // no code CLI: remove the companion folder directly (best effort)
@@ -678,7 +682,9 @@ export default async function (pi: PiApi): Promise<void> {
                 } else {
                   rmSync(folder, { recursive: true, force: true });
                   removedVsCode = true;
-                  lines.push(`pi-webview: companion ${COMPANION_ID} removed from VS Code.`);
+                  lines.push(
+                    `pi-webview: companion ${COMPANION_ID} removed from VS Code.`,
+                  );
                 }
               }
             } catch (err) {
@@ -751,7 +757,9 @@ export default async function (pi: PiApi): Promise<void> {
             }
             // final recap: single reload hint per IDE that was touched
             if (removedVsCode)
-              lines.push("pi-webview: reload the VS Code window to finish the uninstall.");
+              lines.push(
+                "pi-webview: reload the VS Code window to finish the uninstall.",
+              );
             if (removedVs)
               lines.push("pi-webview: reload Visual Studio to finish the uninstall.");
             notify(lines.join("\n"), "info");

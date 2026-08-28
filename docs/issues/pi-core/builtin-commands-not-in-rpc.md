@@ -7,6 +7,7 @@
 ## Problema 1 — `get_commands` non include i built-in
 
 `get_commands` (rpc-mode) restituisce solo:
+
 - comandi **estensione** (`extensionRunner.getRegisteredCommands()`),
 - **template** prompt,
 - **skill** (`skill:<name>`).
@@ -20,6 +21,7 @@ lista dei built-in se non copiandola a mano.
 ## Problema 2 — i built-in non vengono eseguiti via `prompt`
 
 In RPC mode, `session.prompt()` intercetta solo:
+
 - **comandi estensione** (`_tryExecuteExtensionCommand`),
 - **skill/template** (espansione).
 

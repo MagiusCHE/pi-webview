@@ -76,7 +76,9 @@ try {
   console.log("\n→ build companion Visual Studio (vsix)…");
   execSync("node tools/build-vs-vsix.mjs", { cwd: root, stdio: "inherit" });
 } catch {
-  console.warn("VS companion build skipped (wine toolchain missing? see tools/setup-vs-wine.mjs)");
+  console.warn(
+    "VS companion build skipped (wine toolchain missing? see tools/setup-vs-wine.mjs)",
+  );
 }
 console.log("→ build pacchetto pi (bundle + copia vsix)…");
 execSync("node tools/build-addon.mjs", { cwd: root, stdio: "inherit" });
@@ -150,10 +152,10 @@ if (publish) {
     } catch {
       // not in a git repo: proceed anyway
     }
-    execSync(
-      `git tag -a ${releaseName} -m "@magiusche/pi-webview ${piJson.version}"`,
-      { cwd: root, stdio: "inherit" },
-    );
+    execSync(`git tag -a ${releaseName} -m "@magiusche/pi-webview ${piJson.version}"`, {
+      cwd: root,
+      stdio: "inherit",
+    });
     console.log(`✓ git tag created: ${releaseName}`);
   }
 
@@ -162,7 +164,9 @@ if (publish) {
     run(`git push origin ${releaseName}`);
     console.log(`✓ tag pushed: ${releaseName}`);
   } catch (err) {
-    console.warn(`⚠ tag push failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(
+      `⚠ tag push failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 
   // GitHub release (idempotent)

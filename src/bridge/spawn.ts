@@ -199,11 +199,7 @@ async function probeShell(): Promise<PiResolution | null> {
   // interactive-login FIRST: users add their PATH dirs in .bashrc/.zshrc,
   // which plain `-lc` skips because of the common "non-interactive → return"
   // guard at the top of the rc file. -lic loads profile AND rc.
-  const variants: string[][] = [
-    ["-lic"],
-    ["-ic"],
-    ["-lc"],
-  ];
+  const variants: string[][] = [["-lic"], ["-ic"], ["-lc"]];
   for (const flags of variants) {
     for (const shell of shells) {
       try {

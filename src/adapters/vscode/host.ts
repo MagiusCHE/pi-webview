@@ -4,7 +4,14 @@
 
 import * as vscode from "vscode";
 import { execFile } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PiProcess } from "../../bridge/pi-process.ts";
@@ -93,8 +100,7 @@ function nativeNotify(
   const isTurnComplete = title === "π";
   const taskDone = locale === "en" ? "Task completed!" : "Task completato!";
   const summary = isTurnComplete ? `π pi-webview: ${taskDone}` : title || "pi";
-  const toast = () =>
-    void vscode.window.showInformationMessage(`${summary}: ${body}`);
+  const toast = () => void vscode.window.showInformationMessage(`${summary}: ${body}`);
   if (setting === "vscode") {
     toast();
     return;
@@ -102,9 +108,7 @@ function nativeNotify(
   if (process.platform === "linux") {
     // turn-complete: header = the meaningful title, message as the body,
     // with the pi-webview icon (media/icon.png of the extension)
-    const args = isTurnComplete
-      ? ["-a", summary, body]
-      : ["-a", "pi", summary, body];
+    const args = isTurnComplete ? ["-a", summary, body] : ["-a", "pi", summary, body];
     const withIcon = iconPath ? ["-i", iconPath, ...args] : args;
     execFile("notify-send", withIcon, { timeout: 5000 }, (err) => {
       if (err) toast(); // notify-send missing/failed: in-app toast as fallback
@@ -114,7 +118,10 @@ function nativeNotify(
   if (process.platform === "darwin") {
     execFile(
       "osascript",
-      ["-e", `display notification ${JSON.stringify(body)} with title ${JSON.stringify(summary)}`],
+      [
+        "-e",
+        `display notification ${JSON.stringify(body)} with title ${JSON.stringify(summary)}`,
+      ],
       { timeout: 5000 },
       (err) => {
         if (err) toast();
@@ -142,12 +149,9 @@ import {
   writeSessionSettings,
 } from "../../bridge/sessions.ts";
 import { getTrust, setTrust } from "../../bridge/trust.ts";
+import { getPiSettings, setPiSettingFile } from "../../bridge/pi-settings.ts";
 import { readStartupInfo } from "../../bridge/startup-info.ts";
-import {
-  saveAttachment,
-  pathExists,
-  attachFromPath,
-} from "../../bridge/attachments.ts";
+import { saveAttachment, pathExists, attachFromPath } from "../../bridge/attachments.ts";
 import { fetchProviderBalance } from "../../bridge/balance.ts";
 import type {
   Frame,
@@ -222,10 +226,7 @@ export abstract class PiWebviewHost {
     if (this.cachedFlags) return this.cachedFlags;
     const piCmd = resolvePi();
     if (!piCmd.found) return [];
-    this.cachedFlags = await fetchAvailableCliFlags(
-      piCmd.path ?? piCmd.command,
-      logLine,
-    );
+    this.cachedFlags = await fetchAvailableCliFlags(piCmd.path ?? piCmd.command, logLine);
     return this.cachedFlags;
   }
 
@@ -239,8 +240,7 @@ export abstract class PiWebviewHost {
    *  override first (saved inside the session jsonl), then the default
    *  (`notifications`, for NEW sessions) */
   protected effectiveNotifications(): "desktop" | "vscode" | "off" {
-    const override = readSessionSettings(this.currentSessionPath ?? "")
-      .notifications;
+    const override = readSessionSettings(this.currentSessionPath ?? "").notifications;
     return override ?? this.config.get().notifications ?? "desktop";
   }
 
@@ -260,7 +260,9 @@ export abstract class PiWebviewHost {
    *  shell probe) — skips the PATH/fallback search. */
   protected startPi(sessionPath?: string, piOverride?: string): void {
     logLine(`startPi session=${sessionPath ?? ""} pid=${process.pid}`);
-    let piCmd = piOverride ? { command: piOverride, found: true, path: piOverride } : resolvePi();
+    let piCmd = piOverride
+      ? { command: piOverride, found: true, path: piOverride }
+      : resolvePi();
     logLine(
       `resolvePi: found=${piCmd.found} command=${piCmd.command} path=${piCmd.path ?? ""} PATH=${(process.env.PATH ?? "").slice(0, 400)}`,
     );
@@ -380,7 +382,8 @@ export abstract class PiWebviewHost {
                 body,
                 setting,
                 this.config.get().locale,
-                vscode.Uri.joinPath(this.context.extensionUri, "media", "icon.png").fsPath,
+                vscode.Uri.joinPath(this.context.extensionUri, "media", "icon.png")
+                  .fsPath,
               ),
             );
           } else {
@@ -512,6 +515,39 @@ export abstract class PiWebviewHost {
       case "getCompactionSettings":
         this.respond(req.id, true, readCompactionSettings());
         return;
+      case "getSettings": {
+        const ws = this.workspace();
+        this.respond(
+          req.id,
+          true,
+          getPiSettings(
+            {
+              workspace: ws,
+              workspaceTrusted: ws ? getTrust(ws).status === "trusted" : undefined,
+            },
+            req.key,
+          ),
+        );
+        return;
+      }
+      case "setSetting": {
+        const ws = this.workspace();
+        const trusted = ws ? getTrust(ws).status === "trusted" : undefined;
+        const res = setPiSettingFile(req.key, req.value, {
+          workspace: ws,
+          workspaceTrusted: trusted,
+          scope: req.scope,
+        });
+        if (!res.ok) {
+          this.respond(req.id, false, res.error ?? "set_setting failed");
+          return;
+        }
+        // propagation "restart": write done → restart pi transparently
+        // (connection_closed reason restart + pi_restarted → re-init)
+        this.respond(req.id, true, { needsRestart: true });
+        this.restartPi();
+        return;
+      }
       case "getThinkingSettings":
         this.respond(req.id, true, readThinkingSettings(this.workspace()));
         return;
@@ -529,9 +565,8 @@ export abstract class PiWebviewHost {
         this.respond(req.id, true, {
           source: "vscode",
           version:
-            vscode.extensions
-              .getExtension("magiusche.pi-webview-ide")
-              ?.packageJSON?.version ?? null,
+            vscode.extensions.getExtension("magiusche.pi-webview-ide")?.packageJSON
+              ?.version ?? null,
         });
         return;
       case "getCliFlags":
@@ -650,9 +685,9 @@ export abstract class PiWebviewHost {
         return;
       case "getSteerQueue":
         this.respond(req.id, true, {
-          items: this.context.workspaceState.get<SteerQueueItem[]>(
-            "pi-webview.steerQueue",
-          ) ?? [],
+          items:
+            this.context.workspaceState.get<SteerQueueItem[]>("pi-webview.steerQueue") ??
+            [],
         });
         return;
       case "notifyDesktop":
@@ -824,7 +859,10 @@ export abstract class PiWebviewHost {
     this.lastSelection = null;
     this.post({
       channel: "ide",
-      payload: { type: "selection_cleared", reason: "empty-selection" } satisfies IdeEvent,
+      payload: {
+        type: "selection_cleared",
+        reason: "empty-selection",
+      } satisfies IdeEvent,
     });
   }
 

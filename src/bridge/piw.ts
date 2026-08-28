@@ -25,7 +25,11 @@ import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { resolvePi } from "./spawn.ts";
 import { readLock, writeLock, clearLock, pidAlive, healthCheck } from "./lock.ts";
-import { ensureCompanions, formatCompanionNotes, companionReloadHints } from "./companions.ts";
+import {
+  ensureCompanions,
+  formatCompanionNotes,
+  companionReloadHints,
+} from "./companions.ts";
 
 // dist/piw.js → root of the installed package
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");

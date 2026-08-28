@@ -39,11 +39,11 @@
     `WindowActivated` → `selection_changed`/`selection_cleared`/`at_mentioned`,
     debounce 150ms, semantica "non azzerare sul focus non-editor")
 - [x] **Build VSIX verificata**: `PiWebview.Vs.vsix` con `dist/web` inclusa,
-  InstallationTarget `[17.0,19.0)` (VS 2022 e 2026), `ProductArchitecture`
-  amd64+arm64. Toolchain: metapackage VS SDK 17.14 + `Microsoft.VSSDK.BuildTools`
-  18.4.33 (trova VS 2026 via vswhere) + `VSSDKBuildToolsAutoSetup=true`.
-  La UI va buildata prima (`pnpm build`): il csproj dà errore chiaro se
-  `dist/web/index.html` manca.
+      InstallationTarget `[17.0,19.0)` (VS 2022 e 2026), `ProductArchitecture`
+      amd64+arm64. Toolchain: metapackage VS SDK 17.14 + `Microsoft.VSSDK.BuildTools`
+      18.4.33 (trova VS 2026 via vswhere) + `VSSDKBuildToolsAutoSetup=true`.
+      La UI va buildata prima (`pnpm build`): il csproj dà errore chiaro se
+      `dist/web/index.html` manca.
 - [x] **Test C#** (`PiWebview.Vs.Core.Tests`, xunit): 33 test verdi — fixture
       del protocollo, JSONL, SessionStore (fork/rename/delete/cli-flags/filtro
       workspace), Trust, Config, Attachments, ReloadSignal, PiResolver.
@@ -95,6 +95,7 @@
       icona 32x32 generata da `media/icon-mark-128.png` nel vsix
       (`<Icon>icon.png</Icon>`), strings utente localizzate via
       `HostText.T(it, en)` con locale dalla config condivisa.
+
 ## Futuro (opzionale, NON in questo piano)
 
 - **Tema v2** (concept 0005 D6): mappare `VSColorTheme.ThemeChanged` →

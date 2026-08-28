@@ -57,11 +57,7 @@ test("grep: pattern + path come argomenti", () => {
 
 test("path relativi al workspace (./…) quando dentro il progetto", () => {
   const ws = "/home/user/proj";
-  const s = toolSummary(
-    "read",
-    JSON.stringify({ path: "/home/user/proj/src/x.ts" }),
-    ws,
-  );
+  const s = toolSummary("read", JSON.stringify({ path: "/home/user/proj/src/x.ts" }), ws);
   assert.equal(s.args, "./src/x.ts");
   // outside the workspace: stays absolute
   const s2 = toolSummary("read", JSON.stringify({ path: "/etc/hosts" }), ws);

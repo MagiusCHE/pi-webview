@@ -108,15 +108,26 @@ render a righe, trasparente per il TUI.
 emette:
 
 ```json
-{ "type": "extension_ui_request", "id": "…", "method": "custom_open",
-  "title": "<opzionale>", "lines": ["…", "→ session-1"], "width": 60 }
+{
+  "type": "extension_ui_request",
+  "id": "…",
+  "method": "custom_open",
+  "title": "<opzionale>",
+  "lines": ["…", "→ session-1"],
+  "width": 60
+}
 ```
 
 **2. Aggiornamenti** — a ogni `tui.requestRender()` (e dopo ogni input):
 
 ```json
-{ "type": "extension_ui_request", "id": "…", "method": "custom_render",
-  "lines": ["…"], "width": 60 }
+{
+  "type": "extension_ui_request",
+  "id": "…",
+  "method": "custom_render",
+  "lines": ["…"],
+  "width": 60
+}
 ```
 
 **3. Input dal client** (tastiera / click su riga):

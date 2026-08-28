@@ -26,7 +26,16 @@
 // Idempotent: safe to re-run. Needs wine + winetricks on PATH.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, copyFileSync, readFileSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  copyFileSync,
+  readFileSync,
+  writeFileSync,
+  symlinkSync,
+  rmSync,
+} from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -52,7 +61,9 @@ function setupPrefix() {
   step("wine prefix (.NET Framework 4.8, project-local)");
   if (!existsSync(prefix)) {
     mkdirSync(prefixDir, { recursive: true });
-    sh("winetricks", ["-q", "-f", `--prefix=${prefix}`, "dotnet48"], { env: { ...process.env, WINEPREFIX: prefix } });
+    sh("winetricks", ["-q", "-f", `--prefix=${prefix}`, "dotnet48"], {
+      env: { ...process.env, WINEPREFIX: prefix },
+    });
   } else {
     console.log("prefix already present, skipping (delete it to rebuild)");
   }
@@ -109,7 +120,9 @@ exec wine "$real" "\${out[@]}"
 function setupVssdk() {
   step(`VSSDK.BuildTools ${VSSDK_VERSION} patches (${vssdkDir})`);
   if (!existsSync(vssdkDir)) {
-    console.error(`VSSDK nuget package not found at ${vssdkDir}. Run 'dotnet restore' first.`);
+    console.error(
+      `VSSDK nuget package not found at ${vssdkDir}. Run 'dotnet restore' first.`,
+    );
     process.exit(1);
   }
   const toolsDir = join(vssdkDir, "tools", "vssdk");
@@ -117,7 +130,10 @@ function setupVssdk() {
   // case-sensitivity: the targets reference Microsoft.VSSDK.targets, the
   // package ships Microsoft.VsSDK.targets (different case, same file)
   symlinkIfMissing("Microsoft.VsSDK.targets", join(toolsDir, "Microsoft.VSSDK.targets"));
-  symlinkIfMissing("Microsoft.VsSDK.Suppressions.targets", join(toolsDir, "Microsoft.VsSdk.Suppressions.targets"));
+  symlinkIfMissing(
+    "Microsoft.VsSDK.Suppressions.targets",
+    join(toolsDir, "Microsoft.VsSdk.Suppressions.targets"),
+  );
 
   // the VSCT MSBuild task builds the tool dir with Path.Combine:
   // "$(NuGetPackageRoot)build\..\tools\VSSDK\bin" — on Linux the backslash
@@ -157,7 +173,11 @@ function setupVssdk() {
         // prefix line only (the rest is stable)
         const content = readFileSync(shimPath, "utf8");
         if (content.includes("export WINEPREFIX")) {
-          writeFileSync(shimPath, content.replace(/export WINEPREFIX=.*/, `export WINEPREFIX=${prefix}`), { mode: 0o755 });
+          writeFileSync(
+            shimPath,
+            content.replace(/export WINEPREFIX=.*/, `export WINEPREFIX=${prefix}`),
+            { mode: 0o755 },
+          );
           continue;
         }
         writeFileSync(shimPath, wrapperShim(realTool, realName), { mode: 0o755 });
@@ -172,14 +192,23 @@ function setupVssdk() {
 
   // Newtonsoft.Json.dll → netstandard2.0 (13.0.3): the shipped build needs
   // System.Security.Permissions which fails to load under the dotnet CLI
-  const nsJson = join(nugetCache, "newtonsoft.json", "13.0.3", "lib", "netstandard2.0", "Newtonsoft.Json.dll");
+  const nsJson = join(
+    nugetCache,
+    "newtonsoft.json",
+    "13.0.3",
+    "lib",
+    "netstandard2.0",
+    "Newtonsoft.Json.dll",
+  );
   const targets = [
     join(vssdkDir, "Newtonsoft.Json.dll"),
     join(realBin, "lib", "Newtonsoft.Json.dll"),
     join(vssdkDir, "..", "VSSDK", "Newtonsoft.Json.dll"),
   ];
   if (!existsSync(nsJson)) {
-    console.warn(`newtonsoft.json 13.0.3 netstandard2.0 not found (${nsJson}) — run 'dotnet restore'`);
+    console.warn(
+      `newtonsoft.json 13.0.3 netstandard2.0 not found (${nsJson}) — run 'dotnet restore'`,
+    );
   } else {
     for (const t of targets) {
       if (!existsSync(t)) continue;
@@ -192,7 +221,9 @@ function setupVssdk() {
 function main() {
   setupPrefix();
   setupVssdk();
-  console.log("\nDone. Build the adapter with:\n  pnpm build && dotnet build src/adapters/visualstudio/PiWebview.Vs.slnx");
+  console.log(
+    "\nDone. Build the adapter with:\n  pnpm build && dotnet build src/adapters/visualstudio/PiWebview.Vs.slnx",
+  );
 }
 
 main();

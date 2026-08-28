@@ -21,6 +21,7 @@ scans follow `z:` out of the workspace and index the **entire filesystem**
 `/etc`, `/proc`, …).
 
 The `settings.json` here:
+
 - disables symlink follow (`search.followSymlinks: false`), and
 - excludes `**/.wine/**` from search, the file explorer and the file
   watcher (`search.exclude`, `files.exclude`, `files.watcherExclude`).

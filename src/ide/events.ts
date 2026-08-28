@@ -79,7 +79,8 @@ export function handleRpcEvent(state: StreamState, evt: RpcEvent): UiAction {
         .filter((t): t is ToolCallInfo => t !== undefined);
       // provider/turn failure: the authoritative final message carries the
       // error (message.errorMessage / stopReason "error") — surface it.
-      const rawMsg = evt.message as { errorMessage?: unknown; stopReason?: unknown } | undefined;
+      const rawMsg = evt.message as
+        { errorMessage?: unknown; stopReason?: unknown } | undefined;
       const errorMessage =
         typeof rawMsg?.errorMessage === "string" && rawMsg.errorMessage.length > 0
           ? rawMsg.errorMessage
@@ -177,8 +178,7 @@ function handleDelta(state: StreamState, delta: AssistantDelta): UiAction {
       // the tool NAME is already here (partial.content[index]), no need to
       // wait for toolcall_end: the card is born right away with the real name
       const partial = delta.partial as
-        | { content?: Array<{ type?: string; id?: string; name?: string }> }
-        | undefined;
+        { content?: Array<{ type?: string; id?: string; name?: string }> } | undefined;
       const content = partial?.content?.[index];
       // pi 0.84.3+ (fix #7953): id and toolName also arrive at the TOP level
       // of the RPC event (assistantMessageEvent) — fallback for robustness

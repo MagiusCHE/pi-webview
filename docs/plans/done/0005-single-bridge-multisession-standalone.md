@@ -94,19 +94,19 @@ con **un solo bridge in ascolto sul sistema**, in modo che:
 Il lock non viene mai forzato: viene **validato a ogni avvio** (il file può
 restare appeso senza danno).
 
-| Caso | Rilevamento | Azione |
-|---|---|---|
-| Ctrl+C / SIGTERM | pulizia pulita nel signal handler | lock rimosso |
-| Bridge crashato (pid morto) | `process.kill(pid, 0)` → ESRCH | lock ignorato e sovrascritto |
-| Crash + pid riusato da altro processo | pid vivo ma `/health?token=<token>` non risponde col token giusto | lock scartato |
-| Porta occupata da servizio estraneo | health check fallito | lock scartato, nuovo bridge |
+| Caso                                  | Rilevamento                                                       | Azione                       |
+| ------------------------------------- | ----------------------------------------------------------------- | ---------------------------- |
+| Ctrl+C / SIGTERM                      | pulizia pulita nel signal handler                                 | lock rimosso                 |
+| Bridge crashato (pid morto)           | `process.kill(pid, 0)` → ESRCH                                    | lock ignorato e sovrascritto |
+| Crash + pid riusato da altro processo | pid vivo ma `/health?token=<token>` non risponde col token giusto | lock scartato                |
+| Porta occupata da servizio estraneo   | health check fallito                                              | lock scartato, nuovo bridge  |
 
 La coppia **pid + health check con token segreto** copre il caso del pid riusato
 (niente falsi positivi).
 
 ## Impatto su VS Code
 
-- `PiProcess` è condiviso: il bridge multi-canale lo *usa*, non lo cambia →
+- `PiProcess` è condiviso: il bridge multi-canale lo _usa_, non lo cambia →
   zero impatto sul comportamento IDE.
 - UI: un `if` su `runtime` per il pulsante "nuova chat" → l'IDE resta identico.
 - `protocol.ts`: l'intento canale è solo nel connettore WS (standalone);

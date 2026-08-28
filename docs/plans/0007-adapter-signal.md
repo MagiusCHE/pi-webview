@@ -276,12 +276,12 @@ questo limite deve essere esplicitato nella documentazione utente.
 
 ## Stima preliminare
 
-| Livello | Contenuto | Stima indicativa |
-| --- | --- | --- |
-| Spike | validazione Signal send/receive | 1–2 giorni |
-| PoC | testo, singola chat, singola sessione | 1–3 giorni |
-| MVP | sessioni, allowlist, retry, comandi minimi | circa 1 settimana |
-| Completo | dialoghi, allegati, multiutente, packaging | 2–4 settimane |
+| Livello  | Contenuto                                  | Stima indicativa  |
+| -------- | ------------------------------------------ | ----------------- |
+| Spike    | validazione Signal send/receive            | 1–2 giorni        |
+| PoC      | testo, singola chat, singola sessione      | 1–3 giorni        |
+| MVP      | sessioni, allowlist, retry, comandi minimi | circa 1 settimana |
+| Completo | dialoghi, allegati, multiutente, packaging | 2–4 settimane     |
 
 Le stime dipendono soprattutto dalla stabilità e dal modello operativo del
 backend Signal scelto, non dal protocollo piw già disponibile.

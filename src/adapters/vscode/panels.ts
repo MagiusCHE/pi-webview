@@ -53,10 +53,10 @@ export class PiPanel extends PiWebviewHost {
     this.webview = this.panel.webview;
     try {
       this.panel.webview.html = this.webviewHtml(this.panel.webview);
-    // panel in EDITOR AREA: the attached selection is unreliable (panel
-    // focus clears the active-editor context) → disable the selection block
-    // in this webview (panel_mode event)
-    this.post({ channel: "rpc", payload: { type: "panel_mode", enabled: true } });
+      // panel in EDITOR AREA: the attached selection is unreliable (panel
+      // focus clears the active-editor context) → disable the selection block
+      // in this webview (panel_mode event)
+      this.post({ channel: "rpc", payload: { type: "panel_mode", enabled: true } });
     } catch (err) {
       // UI not loadable (e.g. dist/web missing in the vsix): NEVER leave an
       // orphan empty panel — dispose and rethrow (openNew/restore show the
@@ -214,7 +214,12 @@ export class PiPanelManager {
     this.update(index, ""); // placeholder: the session comes from the webview
     try {
       // opens in the active/first-unlocked group (never ALWAYS a new group)
-      const panel = new PiPanel(this.context, index, undefined, this.firstUnlockedColumn());
+      const panel = new PiPanel(
+        this.context,
+        index,
+        undefined,
+        this.firstUnlockedColumn(),
+      );
       this.panels.push(panel);
       panel.reveal();
     } catch (err) {

@@ -73,7 +73,9 @@ export class PiProcess {
       : process.platform === "win32"
         ? spawn("cmd", ["/c", this.command, ...args], childOpts)
         : spawn(this.command, args, childOpts);
-    this.cb.log?.(`spawn: ${direct ? `${direct.node} ${direct.script}` : this.command} ${args.join(" ")}`);
+    this.cb.log?.(
+      `spawn: ${direct ? `${direct.node} ${direct.script}` : this.command} ${args.join(" ")}`,
+    );
     this.child = child;
     this.booted = false;
     // Boot watchdog: pi frozen (no output for 45s, e.g. stalled on missing
@@ -81,12 +83,16 @@ export class PiProcess {
     // 'exit' flow (backoff 1s, cap 5) and each attempt gets a new watchdog.
     this.bootWatchdog = setTimeout(() => {
       if (this.stopping || this.booted || !this.child) return;
-      this.cb.log?.(`pi unresponsive: no output in the first 45s of boot — kill + restart`);
+      this.cb.log?.(
+        `pi unresponsive: no output in the first 45s of boot — kill + restart`,
+      );
       const pid = this.child.pid;
       if (pid !== undefined) {
         if (process.platform === "win32") {
           // kill the whole tree (cmd → node → pi)
-          const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+          const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+            stdio: "ignore",
+          });
           killer.on("error", () => {});
         } else {
           this.child.kill();
@@ -238,7 +244,9 @@ export class PiProcess {
     if (this.child) {
       const pid = this.child.pid;
       if (process.platform === "win32" && pid !== undefined) {
-        const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+        const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+          stdio: "ignore",
+        });
         killer.on("error", () => {});
       } else {
         this.child.kill();

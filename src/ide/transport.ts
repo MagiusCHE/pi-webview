@@ -74,9 +74,7 @@ export function createWebView2Transport(): Transport | null {
     let frame: Frame;
     try {
       frame =
-        typeof e.data === "string"
-          ? (JSON.parse(e.data) as Frame)
-          : (e.data as Frame);
+        typeof e.data === "string" ? (JSON.parse(e.data) as Frame) : (e.data as Frame);
       if (!frame || typeof frame !== "object") return;
     } catch {
       return;

@@ -64,9 +64,7 @@ test("createWebView2Transport: frame in uscita come oggetto, in arrivo come JSON
   t.send(frame);
   assert.deepEqual(api.sent, [frame]);
 
-  api.emit(
-    JSON.stringify({ channel: "ide", payload: { id: "x", ok: true } }),
-  );
+  api.emit(JSON.stringify({ channel: "ide", payload: { id: "x", ok: true } }));
   assert.deepEqual(received, { channel: "ide", payload: { id: "x", ok: true } });
 
   api.emit({ channel: "rpc", payload: { type: "ready" } });

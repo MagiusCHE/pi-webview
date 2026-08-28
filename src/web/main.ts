@@ -15,6 +15,8 @@ import type {
   CliFlagInfo,
   StartupInfo,
   ThinkingSettings,
+  PiSetting,
+  PiSettingsResult,
 } from "../ide/protocol.ts";
 import { rpc } from "../ide/protocol.ts";
 import { samePath } from "../ide/paths.ts";
@@ -72,24 +74,42 @@ const els = {
   settingsClose: document.getElementById("btn-settings-close") as HTMLButtonElement,
   settingsModalTitle: document.getElementById("settings-modal-title") as HTMLSpanElement,
   settingsInfoTitle: document.getElementById("settings-info-title") as HTMLDivElement,
-  settingsWebviewTitle: document.getElementById("settings-webview-title") as HTMLDivElement,
-  settingsNotificationsTitle: document.getElementById("settings-notifications-title") as HTMLDivElement,
+  settingsWebviewTitle: document.getElementById(
+    "settings-webview-title",
+  ) as HTMLDivElement,
+  settingsNotificationsTitle: document.getElementById(
+    "settings-notifications-title",
+  ) as HTMLDivElement,
   settingsCliTitle: document.getElementById("settings-cli-title") as HTMLDivElement,
   lang: document.getElementById("lang") as HTMLSelectElement,
   langLabel: document.getElementById("settings-lang-label") as HTMLLabelElement,
   historyInput: document.getElementById("settings-history-limit") as HTMLInputElement,
   historyLabel: document.getElementById("settings-history-label") as HTMLLabelElement,
-  notificationsLabel: document.getElementById("settings-notifications-label") as HTMLLabelElement,
+  notificationsLabel: document.getElementById(
+    "settings-notifications-label",
+  ) as HTMLLabelElement,
   notifications: document.getElementById("notifications") as HTMLSelectElement,
-  notificationsSessionLabel: document.getElementById("settings-notifications-session-label") as HTMLLabelElement,
-  notificationsSession: document.getElementById("notifications-session") as HTMLSelectElement,
-  statsBarPosLabel: document.getElementById("settings-stats-bar-label") as HTMLLabelElement,
+  notificationsSessionLabel: document.getElementById(
+    "settings-notifications-session-label",
+  ) as HTMLLabelElement,
+  notificationsSession: document.getElementById(
+    "notifications-session",
+  ) as HTMLSelectElement,
+  statsBarPosLabel: document.getElementById(
+    "settings-stats-bar-label",
+  ) as HTMLLabelElement,
   statsBarPos: document.getElementById("stats-bar-pos") as HTMLSelectElement,
   themeLabel: document.getElementById("settings-theme-label") as HTMLLabelElement,
-  settingsVersionLabel: document.getElementById("settings-version-label") as HTMLLabelElement,
+  settingsVersionLabel: document.getElementById(
+    "settings-version-label",
+  ) as HTMLLabelElement,
   settingsVersion: document.getElementById("settings-version") as HTMLSpanElement,
   pidevTitle: document.getElementById("settings-pidev-title") as HTMLDivElement,
   pidevNote: document.getElementById("settings-pidev-note") as HTMLDivElement,
+  pidevBody: document.getElementById("settings-pidev-body") as HTMLDivElement,
+  pidevApplyRow: document.getElementById("pidev-apply-row") as HTMLDivElement,
+  pidevApply: document.getElementById("pidev-apply") as HTMLButtonElement,
+  pidevApplyHint: document.getElementById("pidev-apply-hint") as HTMLSpanElement,
   cliFlags: document.getElementById("cli-flags") as HTMLDivElement,
   cliApplyRow: document.getElementById("cli-apply-row") as HTMLDivElement,
   cliApply: document.getElementById("cli-apply") as HTMLButtonElement,
@@ -494,6 +514,7 @@ function applyUiStrings(): void {
   els.settingsInfoTitle.textContent = t("settingsSectionInfo");
   els.settingsWebviewTitle.textContent = t("settingsSectionWebview");
   els.settingsCliTitle.textContent = t("settingsSectionCli");
+  els.pidevApply.textContent = t("apply");
   // Notifications sub-group inside the Webview section
   els.settingsNotificationsTitle.textContent = t("settingsNotificationsGroup");
   els.themeLabel.textContent = t("theme");
@@ -519,10 +540,7 @@ function applyUiStrings(): void {
   els.notifications.value = notificationsDefault;
   // per-session select: first option = follow the default (value "")
   els.notificationsSessionLabel.textContent = t("settingsNotificationsSession");
-  if (
-    els.notificationsSession.options.length !==
-    notifyOptions.length + 1
-  ) {
+  if (els.notificationsSession.options.length !== notifyOptions.length + 1) {
     els.notificationsSession.textContent = "";
     const inherit = document.createElement("option");
     inherit.value = "";
@@ -568,7 +586,11 @@ function applyUiStrings(): void {
  *  composer, or as a second row inside the header (topbar). */
 function applyStatsBarPosition(pos: StatsBarPosition): void {
   statsBarPosition = pos;
-  document.body.classList.remove("stats-bar-above", "stats-bar-below", "stats-bar-topbar");
+  document.body.classList.remove(
+    "stats-bar-above",
+    "stats-bar-below",
+    "stats-bar-topbar",
+  );
   document.body.classList.add(`stats-bar-${pos}`);
   // DOM placement: above/below the composer, or as the last header row
   if (pos === "topbar") els.header.appendChild(els.statsBadge);
@@ -638,10 +660,13 @@ function handleIdeResponse(res: IdeResponse): void {
 // version row: the source depends on the runtime — in the IDE webview it is
 // the addon, standalone it is the piw package (both answer getVersion)
 function refreshVersionInfo(): void {
-  els.settingsVersionLabel.textContent =
-    runtime.isIDE ? t("settingsVersionAddon") : t("settingsVersionPiw");
+  els.settingsVersionLabel.textContent = runtime.isIDE
+    ? t("settingsVersionAddon")
+    : t("settingsVersionPiw");
   void ideRequest({ type: "getVersion" }).then((res) => {
-    const v = res?.ok ? (res.data as { version?: string | null } | undefined)?.version : null;
+    const v = res?.ok
+      ? (res.data as { version?: string | null } | undefined)?.version
+      : null;
     els.settingsVersion.textContent = v ?? "–";
   });
 }
@@ -656,7 +681,9 @@ let cliDirty = false;
 // ones must not get dirty with defaults (false checkboxes / empty inputs)
 function currentCliValues(): CliFlags {
   const values: CliFlags = {};
-  for (const input of els.cliFlags.querySelectorAll<HTMLInputElement>("input[data-flag]")) {
+  for (const input of els.cliFlags.querySelectorAll<HTMLInputElement>(
+    "input[data-flag]",
+  )) {
     const name = input.dataset.flag ?? "";
     if (!name) continue;
     if (input.type === "checkbox") {
@@ -728,6 +755,213 @@ function refreshCliFlags(): void {
   });
 }
 
+// --- pi.dev settings (V1-bis of plan 0003) ---------------------------------
+// The pi.dev section of the panel is populated dynamically from get_settings
+// (facade, src/bridge/pi-settings.ts): the host provides the schema + the
+// file-backed values; session values (source "pi-rpc") are filled from the
+// local get_state state.
+//
+// The section is a STAGED FORM: editing a control only records the change in
+// pendingPiSettings and reveals the section "Applica" button — nothing is
+// sent to pi.dev before it. Closing the panel without "Applica" discards the
+// pending changes (they are lost, by design). "Applica" then:
+//  - pi-rpc keys → the pi RPC is called directly (live session state);
+//  - pi-settings-file keys → confirm (propagation "restart", same warning as
+//    the CLI flags "Applica"), then set_setting → the host writes the file
+//    and restarts pi (connection_closed + pi_restarted → re-init).
+
+let piSettings: PiSetting[] = [];
+/** staged changes in the pi.dev section (key → value), applied only by "Applica" */
+const pendingPiSettings = new Map<string, unknown>();
+let applyingPiSettings = false;
+
+function sessionValueFor(key: string): unknown {
+  switch (key) {
+    case "model":
+      return currentModel?.name ?? currentModel?.id ?? "";
+    case "thinkingLevel":
+      return thinkingLevel;
+    case "steeringMode":
+      return steeringMode;
+    case "followUpMode":
+      return followUpMode;
+    case "autoCompaction":
+      return autoCompactionEnabled;
+    default:
+      return undefined;
+  }
+}
+
+async function fetchPiSettings(): Promise<void> {
+  pendingPiSettings.clear();
+  els.pidevApplyRow.hidden = true;
+  els.pidevApplyHint.textContent = "";
+  els.pidevBody.textContent = "";
+  const res = await ideRequest({ type: "getSettings" });
+  const data = res?.ok ? (res.data as PiSettingsResult | undefined) : undefined;
+  const settings = data?.settings ?? [];
+  if (settings.length === 0) {
+    els.pidevNote.hidden = false;
+    return;
+  }
+  els.pidevNote.hidden = true;
+  piSettings = settings.map((s) =>
+    s.source === "pi-rpc" && s.value === undefined
+      ? { ...s, value: sessionValueFor(s.key) }
+      : s,
+  );
+  renderPiSettings();
+}
+
+/** value shown by the control: the staged one while pending, else the fetched */
+function displayValue(setting: PiSetting): unknown {
+  return pendingPiSettings.has(setting.key)
+    ? pendingPiSettings.get(setting.key)
+    : setting.value;
+}
+
+/** record a staged change (or drop it when the control returns to the base value) */
+function stageSetting(setting: PiSetting, value: unknown): void {
+  if (value === displayValue(setting)) {
+    pendingPiSettings.delete(setting.key);
+  } else {
+    pendingPiSettings.set(setting.key, value);
+  }
+  const dirty = pendingPiSettings.size > 0;
+  els.pidevApplyRow.hidden = !dirty;
+  els.pidevApplyHint.textContent = dirty ? t("piSettingApplyHint") : "";
+}
+
+function renderPiSettings(): void {
+  els.pidevBody.textContent = "";
+  for (const setting of piSettings) {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+    const label = document.createElement("label");
+    label.textContent = t(setting.label);
+    if (setting.description) label.title = t(setting.description);
+    row.appendChild(label);
+    row.appendChild(settingControl(setting));
+    els.pidevBody.appendChild(row);
+  }
+}
+
+function settingControl(setting: PiSetting): HTMLElement {
+  const stage = (value: unknown): void => {
+    stageSetting(setting, value);
+  };
+  if (setting.type === "boolean") {
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.className = "field-checkbox";
+    input.checked = displayValue(setting) === true;
+    input.disabled = !setting.writable;
+    if (input.disabled) input.title = t("settingsPiDevManaged");
+    input.addEventListener("change", () => stage(input.checked));
+    return input;
+  }
+  if (setting.type === "enum") {
+    const select = document.createElement("select");
+    select.className = "field-select";
+    select.disabled = !setting.writable;
+    if (select.disabled) select.title = t("settingsPiDevManaged");
+    for (const opt of setting.options ?? []) {
+      const o = document.createElement("option");
+      o.value = opt.value;
+      o.textContent = t(opt.label);
+      select.appendChild(o);
+    }
+    const current = displayValue(setting);
+    select.value = current === undefined ? "" : String(current);
+    select.addEventListener("change", () => stage(select.value));
+    return select;
+  }
+  const input = document.createElement("input");
+  input.type = setting.type === "number" ? "number" : "text";
+  input.className = "field-input";
+  if (setting.type === "number") {
+    if (setting.min !== undefined) input.min = String(setting.min);
+    if (setting.max !== undefined) input.max = String(setting.max);
+    if (setting.step !== undefined) input.step = String(setting.step);
+  }
+  const current = displayValue(setting);
+  input.value = current === undefined ? "" : String(current);
+  input.disabled = !setting.writable;
+  if (input.disabled) input.title = t("settingsPiDevManaged");
+  input.addEventListener("change", () =>
+    stage(setting.type === "number" ? Number(input.value) : input.value),
+  );
+  return input;
+}
+
+/** live write of a session (pi-rpc) key — no restart, no confirm */
+function applyRpcSetting(setting: PiSetting, value: unknown): void {
+  switch (setting.key) {
+    case "steeringMode":
+      if (value === "one-at-a-time" || value === "all") {
+        steeringMode = value;
+        void rpcRequest(rpc.setSteeringMode(value));
+      }
+      break;
+    case "followUpMode":
+      if (value === "one-at-a-time" || value === "all") {
+        followUpMode = value;
+        void rpcRequest(rpc.setFollowUpMode(value));
+      }
+      break;
+    case "autoCompaction":
+      autoCompactionEnabled = value === true;
+      void rpcRequest(rpc.setAutoCompaction(autoCompactionEnabled));
+      break;
+  }
+}
+
+/** section "Applica": confirm once (restart keys) → apply RPC keys → write file keys */
+async function applyPendingSettings(): Promise<void> {
+  if (applyingPiSettings || pendingPiSettings.size === 0) return;
+  const pending = [...pendingPiSettings.entries()];
+  const needsRestart = pending.some(([key]) => {
+    const s = piSettings.find((p) => p.key === key);
+    return s?.source !== "pi-rpc" && s?.propagation === "restart";
+  });
+  if (needsRestart) {
+    const ok = await showConfirm(t("piSettingRestartWarn"));
+    if (!ok) return; // keep the staged values: the user can still apply or close (discard)
+    if (working) stopWorking(); // dequeue + abort, then the host restarts pi
+  }
+  applyingPiSettings = true;
+  els.pidevApply.disabled = true;
+  els.pidevApplyHint.textContent = t("piSettingApplying");
+  try {
+    for (const [key, value] of pending) {
+      const setting = piSettings.find((p) => p.key === key);
+      if (!setting) continue;
+      if (setting.source === "pi-rpc") {
+        applyRpcSetting(setting, value);
+        setting.value = value; // mirror into the local schema for the re-render
+      } else {
+        const res = await ideRequest({ type: "setSetting", key, value });
+        if (!res?.ok) {
+          console.warn("[pi-webview] set_setting failed:", res?.error);
+          continue;
+        }
+        setting.value = value;
+      }
+    }
+  } finally {
+    applyingPiSettings = false;
+    pendingPiSettings.clear();
+    els.pidevApply.disabled = false;
+    els.pidevApplyRow.hidden = true;
+    els.pidevApplyHint.textContent = "";
+    renderPiSettings();
+  }
+}
+
+els.pidevApply.addEventListener("click", () => {
+  void applyPendingSettings();
+});
+
 // Apply: with an in-flight run → confirm + dequeue+stop (like STOP),
 // then setCliFlags → the companion restarts pi transparently (connection_closed
 // reason restart + pi_restarted → re-init without reload)
@@ -756,11 +990,20 @@ function openSettings(): void {
   els.settingsBtn.setAttribute("aria-expanded", "true");
   refreshVersionInfo();
   refreshCliFlags();
+  void fetchPiSettings();
 }
 
 function closeSettings(): void {
   els.settingsModal.hidden = true;
   els.settingsBtn.setAttribute("aria-expanded", "false");
+  // staged pi.dev changes are discarded: they apply only via the section
+  // "Applica" button (closing without it = changes lost, by design)
+  if (pendingPiSettings.size > 0) {
+    pendingPiSettings.clear();
+    els.pidevApplyRow.hidden = true;
+    els.pidevApplyHint.textContent = "";
+    renderPiSettings();
+  }
 }
 
 els.settingsBtn.addEventListener("click", (e) => {
@@ -895,8 +1138,7 @@ async function renameSessionFlow(path: string): Promise<void> {
   const s = sessions.find((x) => x.path === path);
   if (!s) return;
   // initial value: assigned name or current label (first message)
-  const initial =
-    s.name && !hasCjk(s.name) ? s.name : sessionLabel(s);
+  const initial = s.name && !hasCjk(s.name) ? s.name : sessionLabel(s);
   const next = await showPrompt(initial, t("renameSession"));
   if (next === null) return; // cancelled
   const newName = next.trim();
@@ -1237,7 +1479,11 @@ function populateSessionMenu(): void {
     // the current session may not be in the list (just created, not saved);
     // if it is NEW it is already represented by the highlighted action row above
     const list = [...sessions];
-    if (currentSessionPath && !currentIsNew && !list.some((s) => s.path === currentSessionPath)) {
+    if (
+      currentSessionPath &&
+      !currentIsNew &&
+      !list.some((s) => s.path === currentSessionPath)
+    ) {
       list.unshift({ path: currentSessionPath, name: t("newSession") });
     }
     const query = els.sessionSearch.value.trim().toLocaleLowerCase(currentLocale);
@@ -1387,6 +1633,8 @@ async function refreshSessions(): Promise<void> {
               model?: unknown;
               thinkingLevel?: string;
               steeringMode?: string;
+              followUpMode?: string;
+              autoCompactionEnabled?: boolean;
             }
           | undefined;
         if (data?.sessionFile) {
@@ -1416,6 +1664,15 @@ async function refreshSessions(): Promise<void> {
           (data.steeringMode === "one-at-a-time" || data.steeringMode === "all")
         ) {
           steeringMode = data.steeringMode;
+        }
+        if (
+          typeof data?.followUpMode === "string" &&
+          (data.followUpMode === "one-at-a-time" || data.followUpMode === "all")
+        ) {
+          followUpMode = data.followUpMode;
+        }
+        if (typeof data?.autoCompactionEnabled === "boolean") {
+          autoCompactionEnabled = data.autoCompactionEnabled;
         }
         break; // pi ready
       }
@@ -2596,9 +2853,7 @@ function inlineDialogCard(
       wrapper.remove();
       return;
     }
-    const cards = Array.from(
-      wrapper.parentElement?.querySelectorAll(".tool-card") ?? [],
-    );
+    const cards = Array.from(wrapper.parentElement?.querySelectorAll(".tool-card") ?? []);
     let target: HTMLElement | null = null;
     for (const c of cards) {
       if (c.querySelector(".tool-name")?.textContent === "ask_user") {
@@ -2612,9 +2867,7 @@ function inlineDialogCard(
       target.dataset.answered = "true";
       if (args) {
         const text = answer || "—";
-        args.textContent = wasAnswered
-          ? `${args.textContent} · ${text}`
-          : ` ${text}`;
+        args.textContent = wasAnswered ? `${args.textContent} · ${text}` : ` ${text}`;
         args.title = answer;
       }
       wrapper.remove();
@@ -2778,9 +3031,7 @@ function updateStatsTitle(): void {
   const parts: string[] = [];
   if (contextStats) {
     parts.push(
-      contextStats.percent != null
-        ? `${Math.round(contextStats.percent)}%`
-        : "…",
+      contextStats.percent != null ? `${Math.round(contextStats.percent)}%` : "…",
     );
   }
   parts.push(t("clickToCompact"));
@@ -2824,12 +3075,8 @@ function renderContextGauge(): void {
   // after the compact pi does not know the tokens until a response arrives:
   // percent null → ring at 0, label with only the window (…/200K)
   const pct =
-    contextStats?.percent != null
-      ? Math.min(100, Math.max(0, contextStats.percent))
-      : 0;
-  els.ctxFill.style.strokeDashoffset = String(
-    GAUGE_CIRCUMFERENCE * (1 - pct / 100),
-  );
+    contextStats?.percent != null ? Math.min(100, Math.max(0, contextStats.percent)) : 0;
+  els.ctxFill.style.strokeDashoffset = String(GAUGE_CIRCUMFERENCE * (1 - pct / 100));
   els.ctxLabel.textContent = contextStats
     ? contextStats.tokens != null
       ? `${fmtK(contextStats.tokens)}/${fmtK(contextStats.contextWindow)}`
@@ -3347,9 +3594,7 @@ function collapseAskUserAnswer(answer: string): boolean {
 // body of the card → splits into N cards and registers the state for the answers
 function prepareAskUserCards(): void {
   let card: HTMLElement | null = null;
-  for (const c of Array.from(
-    els.thread.querySelectorAll<HTMLElement>(".tool-card"),
-  )) {
+  for (const c of Array.from(els.thread.querySelectorAll<HTMLElement>(".tool-card"))) {
     if (c.querySelector(".tool-name")?.textContent === "ask_user") card = c;
   }
   if (!card) return;
@@ -3535,9 +3780,16 @@ function renderRpcEvent(evt: RpcEvent): void {
     return;
   }
   if (evt.type === "message_start") {
-    const msg = (evt as {
-      message?: { role?: string; customType?: string; content?: unknown; display?: unknown };
-    }).message;
+    const msg = (
+      evt as {
+        message?: {
+          role?: string;
+          customType?: string;
+          content?: unknown;
+          display?: unknown;
+        };
+      }
+    ).message;
     const role = msg?.role;
     if (role === "user") {
       // steering injected (or normally sent message: already rendered)
@@ -3822,7 +4074,8 @@ function renderRpcEvent(evt: RpcEvent): void {
               : JSON.stringify(action.toolCall.args ?? {});
           let lines = writeLinesFromArgs(argsJson);
           if (lines <= 0) lines = writeLinesFromArgs(toolsText);
-          if (lines <= 0 && toolsPre) lines = writeLinesFromArgs(toolsPre.textContent ?? "");
+          if (lines <= 0 && toolsPre)
+            lines = writeLinesFromArgs(toolsPre.textContent ?? "");
           renderWriteLines(toolsEl, lines);
         }
       }
@@ -4194,7 +4447,10 @@ function renderHistory(messages: unknown[]): void {
       bubble.className = "bubble user";
       bubble.textContent = stripEditorSelectionContext(contentToText(msg.content));
       wrapper.appendChild(bubble);
-    } else if (msg.role === "custom" && (msg as { display?: unknown }).display !== false) {
+    } else if (
+      msg.role === "custom" &&
+      (msg as { display?: unknown }).display !== false
+    ) {
       // legacy "pi-webview-startup" custom messages (older extension versions
       // wrote them into the session): the banner is pure UI now, never
       // persisted — skip silently
@@ -4531,6 +4787,8 @@ let steerShadow: QueuedMessage[] = []; // to deliver (dequeue brings it back to 
 let steerPending: QueuedMessage[] = []; // sent to pi, waiting for injection
 let steerSeq = 0;
 let steeringMode: "one-at-a-time" | "all" = "one-at-a-time";
+let followUpMode: "one-at-a-time" | "all" = "one-at-a-time";
+let autoCompactionEnabled = true;
 let thinkingLevel = "";
 let currentModel: { provider?: string; name?: string; id?: string } | null = null;
 
@@ -5037,6 +5295,12 @@ els.trust.addEventListener("click", (e) => {
 
 function sendOrStop(): void {
   if (!transport) return;
+  // /settings is the same special case as pi.dev TUI: opens the panel
+  // instead of sending the text to the model
+  if (els.input.value.trim().toLowerCase() === "/settings") {
+    if (els.settingsModal.hidden) openSettings();
+    return;
+  }
   // processing (or compaction) in progress → STEERING: the message enters
   // the local queue (dequeue brings it back to the editor), never auto-abort
   if (working || compacting) {
@@ -5096,10 +5360,7 @@ function sendOrStop(): void {
     wrapper.appendChild(bubble);
   }
   const visibleMessage = [text, ...fileMentions].filter(Boolean).join("\n\n");
-  const message = attachEditorSelectionContext(
-    visibleMessage,
-    visibleEditorSelection(),
-  );
+  const message = attachEditorSelectionContext(visibleMessage, visibleEditorSelection());
   transport.send({
     channel: "rpc",
     payload: rpc.prompt(
@@ -5138,10 +5399,7 @@ function submitSteering(): void {
     .filter(Boolean)
     .join("\n\n");
   if (!visibleMessage && imageAtts.length === 0) return;
-  const message = attachEditorSelectionContext(
-    visibleMessage,
-    visibleEditorSelection(),
-  );
+  const message = attachEditorSelectionContext(visibleMessage, visibleEditorSelection());
   steerShadow.push({
     id: `st-${++steerSeq}`,
     text: message,
@@ -5235,15 +5493,9 @@ function renderSteerPanel(): void {
     const n = /^st-(\d+)$/.exec(m.id);
     return n ? Number(n[1]) : 0;
   };
-  const merged = [...steerShadow, ...steerPending].sort(
-    (a, b) => seqOf(a) - seqOf(b),
-  );
+  const merged = [...steerShadow, ...steerPending].sort((a, b) => seqOf(a) - seqOf(b));
   for (const m of merged) {
-    appendSteerRow(
-      panel,
-      stripEditorSelectionContext(m.text),
-      steerPending.includes(m),
-    );
+    appendSteerRow(panel, stripEditorSelectionContext(m.text), steerPending.includes(m));
   }
 }
 
@@ -5268,9 +5520,7 @@ function appendSteerRow(panel: HTMLElement, text: string, sending: boolean): voi
 // to pi do not.
 function dequeueSteering(): void {
   if (steerShadow.length === 0) return;
-  const texts = steerShadow
-    .map((m) => stripEditorSelectionContext(m.text))
-    .join("\n\n");
+  const texts = steerShadow.map((m) => stripEditorSelectionContext(m.text)).join("\n\n");
   steerShadow = [];
   persistSteerQueue();
   const current = els.input.value;
@@ -5335,8 +5585,7 @@ async function reconcileStuckPending(): Promise<void> {
     const res = await rpcRequest(rpc.getState(), "st-reconcile", 4000);
     if (!res.success) return;
     const data = res.data as
-      | { pendingMessageCount?: number; isStreaming?: boolean }
-      | undefined;
+      { pendingMessageCount?: number; isStreaming?: boolean } | undefined;
     if (!data) return;
     if (data.isStreaming === false && (data.pendingMessageCount ?? 0) === 0) {
       const lost = steerPending;
@@ -5449,9 +5698,11 @@ let cmdMatches: SlashCommand[] = [];
 async function fetchSlashCommands(): Promise<void> {
   try {
     const res = await rpcRequest(rpc.getCommands(), `cmds-${++cmdSeq}`, 8000);
-    const cmds = (res.data as
-      | { commands?: Array<{ name?: string; description?: string; source?: string }> }
-      | undefined)?.commands;
+    const cmds = (
+      res.data as
+        | { commands?: Array<{ name?: string; description?: string; source?: string }> }
+        | undefined
+    )?.commands;
     slashCommands = (cmds ?? [])
       .filter(
         (c) =>
@@ -5489,9 +5740,7 @@ function updateCmdDropdown(): void {
   const q = raw.slice(1).toLowerCase();
   void (async () => {
     if (slashCommands.length === 0) await fetchSlashCommands();
-    const matches = slashCommands.filter(
-      (c) => !q || c.name.toLowerCase().includes(q),
-    );
+    const matches = slashCommands.filter((c) => !q || c.name.toLowerCase().includes(q));
     cmdMatches = matches;
     cmdSelected = 0;
     if (matches.length === 0) {
@@ -5573,9 +5822,7 @@ function openCmdPalette(): void {
     let sel = 0;
     const render = () => {
       const q = search.value.toLowerCase();
-      const matches = slashCommands.filter(
-        (c) => !q || c.name.toLowerCase().includes(q),
-      );
+      const matches = slashCommands.filter((c) => !q || c.name.toLowerCase().includes(q));
       list.textContent = "";
       if (matches.length === 0) {
         const e = document.createElement("div");
@@ -5889,8 +6136,7 @@ function hasFiles(e: DragEvent): boolean {
   // (file explorer, editor tabs) arrive as text/uri-list with vscode-file://
   // URIs instead — treated as files too.
   return (
-    types.includes("Files") ||
-    types.some((t) => t.toLowerCase() === "text/uri-list")
+    types.includes("Files") || types.some((t) => t.toLowerCase() === "text/uri-list")
   );
 }
 
@@ -5911,9 +6157,7 @@ async function attachPathFromDrop(path: string): Promise<void> {
         | undefined)
     : undefined;
   if (!data?.path || !data.name) {
-    addStatusLine(
-      tpl(t("dropFailed"), { name: path.split(/[\\/]/).pop() ?? path }),
-    );
+    addStatusLine(tpl(t("dropFailed"), { name: path.split(/[\\/]/).pop() ?? path }));
     return;
   }
   addAttachment({
@@ -6014,7 +6258,7 @@ els.attachBtn.addEventListener("click", () => {
       const res = await ideRequest({ type: "pickFile" });
       const paths =
         res?.ok && Array.isArray((res.data as { paths?: string[] } | undefined)?.paths)
-          ? ((res.data as { paths: string[] }).paths)
+          ? (res.data as { paths: string[] }).paths
           : [];
       for (const p of paths) void attachPathFromDrop(p);
     } finally {
@@ -6150,9 +6394,7 @@ els.input.addEventListener("keydown", (e) => {
       const n = cmdMatches.length;
       if (n > 0) {
         cmdSelected =
-          e.key === "ArrowDown"
-            ? (cmdSelected + 1) % n
-            : (cmdSelected - 1 + n) % n;
+          e.key === "ArrowDown" ? (cmdSelected + 1) % n : (cmdSelected - 1 + n) % n;
         renderCmdSelection();
       }
       return;

@@ -16,11 +16,15 @@ persistito perché il modello vision ha restituito una **descrizione vuota**.
 Log errore dell'estensione (`~/.pi/agent/logs/pi-vision-handoff/errors.log`):
 
 ```json
-{"timestamp":"2026-08-23T20:18:29.186Z","phase":"batch",
- "reason":"vision model returned an empty description",
- "visionModel":"deepseek/deepseek-v4-flash-vision-exp",
- "imageHashes":["37e797d3c476e4dee36a9208f638fd8a"],
- "imageCount":1,"config":{"thinking":false,"thinkingLevel":"medium"}}
+{
+  "timestamp": "2026-08-23T20:18:29.186Z",
+  "phase": "batch",
+  "reason": "vision model returned an empty description",
+  "visionModel": "deepseek/deepseek-v4-flash-vision-exp",
+  "imageHashes": ["37e797d3c476e4dee36a9208f638fd8a"],
+  "imageCount": 1,
+  "config": { "thinking": false, "thinkingLevel": "medium" }
+}
 ```
 
 Nella sessione, i blocchi persistiti ci sono SOLO per immagini con descrizione

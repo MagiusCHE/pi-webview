@@ -12,13 +12,13 @@ export function isWindowsPath(path: string): boolean {
 }
 
 export function normalizePathForMatch(path: string): string {
-  return path.replace(/\//g, "\\").replace(/[\\]+$/, "").toLowerCase();
+  return path
+    .replace(/\//g, "\\")
+    .replace(/[\\]+$/, "")
+    .toLowerCase();
 }
 
-export function samePath(
-  left: string | null | undefined,
-  right: string,
-): boolean {
+export function samePath(left: string | null | undefined, right: string): boolean {
   if (!left) return false;
   if (left === right) return true;
   if (isWindowsPath(left) && isWindowsPath(right)) {

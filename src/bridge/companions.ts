@@ -595,7 +595,10 @@ export async function ensureCompanions(
         step("VS Code: no code CLI — direct vsix extraction", true);
         const direct = await installVsCodeCompanionDirect(vsCodeVsix, vsixVersion, force);
         if (direct) {
-          step(`VS Code: ${direct.kind === "error" ? "error" : "installed"} (${vsixVersion})`, true);
+          step(
+            `VS Code: ${direct.kind === "error" ? "error" : "installed"} (${vsixVersion})`,
+            true,
+          );
           notes.push(direct);
         }
       }
@@ -673,11 +676,17 @@ export async function ensureCompanions(
             };
             let error: string | undefined;
             try {
-              step(`Visual Studio ${label}: installing ${vsVsixVersion}${installed === null ? "" : ` (${installed} → ${vsVsixVersion})`} (per-user)…`, true);
+              step(
+                `Visual Studio ${label}: installing ${vsVsixVersion}${installed === null ? "" : ` (${installed} → ${vsVsixVersion})`} (per-user)…`,
+                true,
+              );
               await tryInstall(false);
             } catch (err1) {
               // per-user install failed outright → retry all-users
-              step(`Visual Studio ${label}: per-user install failed — retrying all-users (UAC may prompt)…`, true);
+              step(
+                `Visual Studio ${label}: per-user install failed — retrying all-users (UAC may prompt)…`,
+                true,
+              );
               try {
                 await tryInstall(true);
               } catch (err2) {

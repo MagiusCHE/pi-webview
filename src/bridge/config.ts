@@ -7,7 +7,11 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import type { CompactionSettings, ThinkingSettings, UserConfig } from "../ide/protocol.ts";
+import type {
+  CompactionSettings,
+  ThinkingSettings,
+  UserConfig,
+} from "../ide/protocol.ts";
 import { getTrust } from "./trust.ts";
 
 export const DEFAULT_CONFIG: UserConfig = {
@@ -17,7 +21,11 @@ export const DEFAULT_CONFIG: UserConfig = {
 };
 
 // default thresholds of pi's automatic compaction (config ~/.pi/config.json)
-const DEFAULT_COMPACTION = { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000 };
+const DEFAULT_COMPACTION = {
+  enabled: true,
+  reserveTokens: 16384,
+  keepRecentTokens: 20000,
+};
 
 // Reads the `compaction` section of the pi user config (~/.pi/config.json):
 // the property pi.dev uses for auto-compaction (threshold = contextWindow − reserveTokens)
@@ -57,12 +65,10 @@ export function readThinkingSettings(
   workspace?: string,
   agentDir: string = join(homedir(), ".pi", "agent"),
 ): ThinkingSettings {
-  let hideThinkingBlock =
-    readHideThinkingBlock(join(agentDir, "settings.json")) ?? false;
+  let hideThinkingBlock = readHideThinkingBlock(join(agentDir, "settings.json")) ?? false;
   if (workspace && getTrust(workspace, agentDir).status === "trusted") {
     hideThinkingBlock =
-      readHideThinkingBlock(join(workspace, ".pi", "settings.json")) ??
-      hideThinkingBlock;
+      readHideThinkingBlock(join(workspace, ".pi", "settings.json")) ?? hideThinkingBlock;
   }
   return { hideThinkingBlock };
 }

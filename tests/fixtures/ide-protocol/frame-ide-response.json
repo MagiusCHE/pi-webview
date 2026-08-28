@@ -1,4 +1,8 @@
 {
   "channel": "ide",
-  "payload": { "id": "ide-1", "ok": true, "data": { "theme": "system", "locale": "it", "historyLimit": 30 } }
+  "payload": {
+    "id": "ide-1",
+    "ok": true,
+    "data": { "theme": "system", "locale": "it", "historyLimit": 30 }
+  }
 }

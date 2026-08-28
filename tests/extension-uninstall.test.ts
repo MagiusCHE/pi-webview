@@ -8,9 +8,7 @@ import assert from "node:assert/strict";
 import { findInstalledRef } from "../packages/pi-webview/extension.ts";
 
 const win = process.platform === "win32";
-const AGENT = win
-  ? "C:\\Users\\me\\.pi\\agent"
-  : "/home/me/.pi/agent";
+const AGENT = win ? "C:\\Users\\me\\.pi\\agent" : "/home/me/.pi/agent";
 const ROOT = win
   ? "C:\\Users\\me\\source\\repos\\pi-webview\\packages\\pi-webview"
   : "/home/me/source/repos/pi-webview/packages/pi-webview";
@@ -33,10 +31,7 @@ test("findInstalledRef: matches a local path entry resolved against the agent di
   const rel = win
     ? "..\\..\\source\\repos\\pi-webview\\packages\\pi-webview"
     : "../../source/repos/pi-webview/packages/pi-webview";
-  assert.equal(
-    findInstalledRef(["npm:pi-agent-extensions", rel], ROOT, AGENT),
-    rel,
-  );
+  assert.equal(findInstalledRef(["npm:pi-agent-extensions", rel], ROOT, AGENT), rel);
 });
 
 test("findInstalledRef: returns null when this package is not listed", () => {
@@ -45,11 +40,7 @@ test("findInstalledRef: returns null when this package is not listed", () => {
 
 test("findInstalledRef: skips git entries and unrelated paths", () => {
   assert.equal(
-    findInstalledRef(
-      ["git:https://example.com/other.git", "npm:other-pkg"],
-      ROOT,
-      AGENT,
-    ),
+    findInstalledRef(["git:https://example.com/other.git", "npm:other-pkg"], ROOT, AGENT),
     null,
   );
 });

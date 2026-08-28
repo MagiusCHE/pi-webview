@@ -7,7 +7,10 @@
     "ranges": [
       {
         "text": "var x = 1;",
-        "selection": { "start": { "line": 10, "character": 4 }, "end": { "line": 10, "character": 14 } }
+        "selection": {
+          "start": { "line": 10, "character": 4 },
+          "end": { "line": 10, "character": 14 }
+        }
       }
     ]
   }

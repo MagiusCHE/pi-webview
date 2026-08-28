@@ -78,6 +78,15 @@ export const rpc = {
   getAvailableThinkingLevels(): RpcCommand {
     return { type: "get_available_thinking_levels" };
   },
+  setSteeringMode(mode: "all" | "one-at-a-time"): RpcCommand {
+    return { type: "set_steering_mode", mode };
+  },
+  setFollowUpMode(mode: "all" | "one-at-a-time"): RpcCommand {
+    return { type: "set_follow_up_mode", mode };
+  },
+  setAutoCompaction(enabled: boolean): RpcCommand {
+    return { type: "set_auto_compaction", enabled };
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -158,6 +167,15 @@ export type IdeRequest =
   | { type: "getSessionInfo"; path: string; id?: string }
   | { type: "getCompactionSettings"; id?: string }
   | { type: "getThinkingSettings"; id?: string }
+  | { type: "getSettings"; key?: string; id?: string }
+  | {
+      type: "setSetting";
+      key: string;
+      value: unknown;
+      /** force the write target for settings with scope "both" */
+      scope?: "global" | "project";
+      id?: string;
+    }
   | { type: "renameSession"; path: string; name: string; id?: string }
   | { type: "deleteSession"; path: string; id?: string }
   | { type: "storeSteerQueue"; items: SteerQueueItem[]; id?: string }
@@ -178,6 +196,55 @@ export interface CompactionSettings {
 
 export interface ThinkingSettings {
   hideThinkingBlock: boolean;
+}
+
+// --- pi.dev settings facade (V1-bis of plan 0003) --------------------------
+// The webview never talks to pi's settings files directly: it asks the host
+// (get_settings), which builds the schema+values from a shared table
+// (src/bridge/pi-settings.ts). pi.dev has no settings RPC, so the host
+// simulates the facade; when pi.dev implements get_settings/set_settings it
+// becomes a pass-through and the webview stays unchanged.
+
+export type PiSettingSource = "pi-rpc" | "pi-settings-file" | "stub";
+
+/** where set_setting is allowed to write (see plan 0003, "Scope di scrittura") */
+export type PiSettingScope = "global" | "project" | "both" | "session";
+
+export interface PiSettingOption {
+  value: string;
+  label: string;
+}
+
+export interface PiSetting {
+  /** facade key (for pi-settings-file: the actual settings.json field name) */
+  key: string;
+  /** i18n key (it/en) for the row label */
+  label: string;
+  /** i18n key for the description tooltip */
+  description?: string;
+  type: "boolean" | "number" | "enum" | "string";
+  options?: PiSettingOption[];
+  min?: number;
+  max?: number;
+  step?: number;
+  /** current value. Absent for source "pi-rpc": the webview fills it from
+   *  get_state (the host has no RPC client — the webview talks to pi
+   *  directly via the rpc channel). */
+  value?: unknown;
+  /** false → control disabled (stub or not yet writable) */
+  writable: boolean;
+  source: PiSettingSource;
+  scope: PiSettingScope;
+  /** what happens after a successful set (file-backed keys) */
+  propagation?: "restart" | "none";
+}
+
+export interface PiSettingsResult {
+  settings: PiSetting[];
+  /** current pi workspace (for project-scoped settings) */
+  workspace?: string;
+  /** true → the workspace is trusted and can carry a project override */
+  workspaceTrusted?: boolean;
 }
 
 export interface SessionInfo {

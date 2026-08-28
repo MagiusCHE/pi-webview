@@ -21,7 +21,15 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const vsProj = join(root, "src", "adapters", "visualstudio", "src", "PiWebview.Vs", "PiWebview.Vs.csproj");
+const vsProj = join(
+  root,
+  "src",
+  "adapters",
+  "visualstudio",
+  "src",
+  "PiWebview.Vs",
+  "PiWebview.Vs.csproj",
+);
 const outVsix = join(root, "dist", "pi-webview-visualstudio.vsix");
 const version = JSON.parse(readFileSync(join(root, "package.json"), "utf-8")).version;
 
@@ -32,17 +40,33 @@ if (!existsSync(join(root, "dist", "web", "index.html"))) {
 
 console.log(`→ dotnet build PiWebview.Vs (Debug, VsixVersion=${version})…`);
 try {
-  execSync(`dotnet build "${vsProj}" -c Debug -nologo -v minimal -p:VsixVersion=${version}`, {
-    cwd: root,
-    stdio: "inherit",
-  });
+  execSync(
+    `dotnet build "${vsProj}" -c Debug -nologo -v minimal -p:VsixVersion=${version}`,
+    {
+      cwd: root,
+      stdio: "inherit",
+    },
+  );
 } catch {
-  console.error("dotnet build failed. On Linux run `node tools/setup-vs-wine.mjs` first (wine toolchain).");
+  console.error(
+    "dotnet build failed. On Linux run `node tools/setup-vs-wine.mjs` first (wine toolchain).",
+  );
   process.exit(1);
 }
 
 // the vsix is produced in the project bin dir; copy it to dist/ (gitignored)
-const built = join(root, "src", "adapters", "visualstudio", "src", "PiWebview.Vs", "bin", "Debug", "net472", "PiWebview.Vs.vsix");
+const built = join(
+  root,
+  "src",
+  "adapters",
+  "visualstudio",
+  "src",
+  "PiWebview.Vs",
+  "bin",
+  "Debug",
+  "net472",
+  "PiWebview.Vs.vsix",
+);
 if (!existsSync(built)) {
   console.error(`vsix not found at ${built}`);
   process.exit(1);

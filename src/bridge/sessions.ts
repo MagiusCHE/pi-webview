@@ -311,11 +311,7 @@ function readSessionCustomEntry<T>(path: string, customType: string): T | undefi
 
 /** appends a custom entry (parentId = id of the last entry, like pi does
  *  with appendCustomEntry) */
-function appendSessionCustomEntry(
-  path: string,
-  customType: string,
-  data: unknown,
-): void {
+function appendSessionCustomEntry(path: string, customType: string, data: unknown): void {
   if (!existsSync(path)) return;
   try {
     // parentId = id of the last entry (the current leaf), like pi does with
@@ -368,8 +364,7 @@ export interface SessionSettings {
 
 export function readSessionSettings(path: string): SessionSettings {
   return (
-    readSessionCustomEntry<SessionSettings>(path, SESSION_SETTINGS_CUSTOM_TYPE) ??
-    {}
+    readSessionCustomEntry<SessionSettings>(path, SESSION_SETTINGS_CUSTOM_TYPE) ?? {}
   );
 }
 

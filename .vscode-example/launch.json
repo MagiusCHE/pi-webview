@@ -5,10 +5,7 @@
       "name": "Extension Development Host",
       "type": "extensionHost",
       "request": "launch",
-      "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}",
-        "${workspaceFolder}"
-      ],
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${workspaceFolder}"],
       "outFiles": ["${workspaceFolder}/dist/extension/**/*.js"],
       "preLaunchTask": "build-extension"
     }

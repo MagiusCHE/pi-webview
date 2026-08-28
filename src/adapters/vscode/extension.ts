@@ -27,9 +27,7 @@ function checkReloadSignal(context: vscode.ExtensionContext): void {
     const signal = JSON.parse(readFileSync(RELOAD_SIGNAL, "utf-8")) as {
       version?: string;
     };
-    const installedVersion = context.extension.packageJSON.version as
-      | string
-      | undefined;
+    const installedVersion = context.extension.packageJSON.version as string | undefined;
     rmSync(RELOAD_SIGNAL, { force: true });
     if (!signal.version || !installedVersion) return;
     if (signal.version === installedVersion) return; // already on the new version

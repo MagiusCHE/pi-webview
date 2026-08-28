@@ -1,4 +1,8 @@
 {
   "channel": "ide",
-  "payload": { "type": "storeSteerQueue", "items": [ { "text": "primo" }, { "text": "secondo" } ], "id": "ide-3" }
+  "payload": {
+    "type": "storeSteerQueue",
+    "items": [{ "text": "primo" }, { "text": "secondo" }],
+    "id": "ide-3"
+  }
 }

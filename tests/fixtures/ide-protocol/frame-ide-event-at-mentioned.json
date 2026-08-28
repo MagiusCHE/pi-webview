@@ -1,4 +1,8 @@
 {
   "channel": "ide",
-  "payload": { "type": "at_mentioned", "filePath": "C:\\proj\\README.md", "rangeText": "@README.md" }
+  "payload": {
+    "type": "at_mentioned",
+    "filePath": "C:\\proj\\README.md",
+    "rangeText": "@README.md"
+  }
 }

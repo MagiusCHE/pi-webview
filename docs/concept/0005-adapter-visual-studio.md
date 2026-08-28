@@ -31,7 +31,7 @@ lifecycle.
   `ToolWindowPane` è l'equivalente più vicino).
 - La UI buildata (`dist/web`) viene copiata nell'output/vsix e servita con
   `CoreWebView2.SetVirtualHostNameToFolderMapping("piw.local", <dist/web>,
-  HostResourceAccessKind.Allow)` → `Navigate("https://piw.local/index.html")`.
+HostResourceAccessKind.Allow)` → `Navigate("https://piw.local/index.html")`.
 - Ponte: `WebMessageReceived` (UI → host) e `PostWebMessageAsJson`
   (host → UI), frame JSON identici a quelli del postMessage VS Code.
 
@@ -133,15 +133,15 @@ src/adapters/visualstudio/
 
 ## Sforzo stimato
 
-| Pezzo                                   | Stima            |
-| --------------------------------------- | ---------------- |
-| Trasporto `webview2` + environment (TS) | ~60 righe        |
-| DTO C# + fixtures condivise             | ~400 righe       |
-| `PiProcess` C#                          | ~300 righe       |
-| ToolWindow + WebView2 + bridge host     | ~400 righe       |
-| SelectionTracker + at_mention           | ~300 righe       |
-| Config + reload signal + bash detection | ~250 righe       |
-| Packaging VSIX + docs                   | ~200 righe       |
+| Pezzo                                   | Stima                                          |
+| --------------------------------------- | ---------------------------------------------- |
+| Trasporto `webview2` + environment (TS) | ~60 righe                                      |
+| DTO C# + fixtures condivise             | ~400 righe                                     |
+| `PiProcess` C#                          | ~300 righe                                     |
+| ToolWindow + WebView2 + bridge host     | ~400 righe                                     |
+| SelectionTracker + at_mention           | ~300 righe                                     |
+| Config + reload signal + bash detection | ~250 righe                                     |
+| Packaging VSIX + docs                   | ~200 righe                                     |
 | **Totale**                              | **~1.900–2.200 righe C# + ~60 TS, 0 cambi UI** |
 
 ## Rischi

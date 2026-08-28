@@ -10,7 +10,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { findVsixManifestVersion, findVsixManifestVersions, pickHighestVersion } from "../src/bridge/companions.ts";
+import {
+  findVsixManifestVersion,
+  findVsixManifestVersions,
+  pickHighestVersion,
+} from "../src/bridge/companions.ts";
 
 const VS_ID = "PiWebview.Vs.4d433864-8ac9-420a-bc57-700940833fc6";
 const MANIFEST = (version: string) =>

@@ -3,11 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  isWindowsPath,
-  normalizePathForMatch,
-  samePath,
-} from "../src/ide/paths.ts";
+import { isWindowsPath, normalizePathForMatch, samePath } from "../src/ide/paths.ts";
 
 test("samePath: identical paths", () => {
   assert.equal(samePath("C:\\Users\\x\\proj", "C:\\Users\\x\\proj"), true);

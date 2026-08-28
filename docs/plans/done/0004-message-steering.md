@@ -24,12 +24,12 @@ STESSA semantica di consegna in tutti i rami previsti da pi.dev, più:
 
 ### Invii e code
 
-| Invio | Effetto |
-|---|---|
-| **Enter** durante elaborazione | accoda uno **stearing** |
-| **Alt+Enter** durante elaborazione | accoda un **follow-up** |
-| **Escape** | **dequeue** (tutto in coda → editor) + abort |
-| **Alt+↑** (`app.message.dequeue`) | dequeue senza abort |
+| Invio                              | Effetto                                      |
+| ---------------------------------- | -------------------------------------------- |
+| **Enter** durante elaborazione     | accoda uno **stearing**                      |
+| **Alt+Enter** durante elaborazione | accoda un **follow-up**                      |
+| **Escape**                         | **dequeue** (tutto in coda → editor) + abort |
+| **Alt+↑** (`app.message.dequeue`)  | dequeue senza abort                          |
 
 Due code separate: `steeringQueue` e `followUpQueue`
 (`PendingMessageQueue` in `pi-agent-core/dist/agent.js`).
@@ -39,8 +39,8 @@ Due code separate: `steeringQueue` e `followUpQueue`
 L'agente **sonda** la coda stearing in punti precisi:
 
 1. **all'inizio del run** ("l'utente potrebbe aver digitato mentre aspettava");
-2. **a ogni fine turno** — *dopo che il turno corrente ha eseguito i suoi
-   tool call, prima della prossima chiamata LLM*: i messaggi accodati vengono
+2. **a ogni fine turno** — _dopo che il turno corrente ha eseguito i suoi
+   tool call, prima della prossima chiamata LLM_: i messaggi accodati vengono
    emessi come messaggi utente (`message_start`/`message_end`) e iniettati nel
    contesto prima della risposta successiva — è il vero "stearing".
 
@@ -90,8 +90,8 @@ messaggio" il vincolo si allenta: **la consegna usa la coda nativa di pi**
 - **Consegna follow-up**: ad `agent_settled` (pi ha finito) → `prompt` normale.
 - **Modalità**: `steeringMode`/`followUpMode` lette da `get_state`:
   `"one-at-a-time"` → 1 messaggio per punto di consegna; `"all"` → tutti.
-- **Pannello a due gruppi**: *"da inviare"* (coda ombra, righe read-only) e
-  *"inviato a pi"* (coda nativa, read-only, sparisce all'iniezione — via
+- **Pannello a due gruppi**: _"da inviare"_ (coda ombra, righe read-only) e
+  _"inviato a pi"_ (coda nativa, read-only, sparisce all'iniezione — via
   `queue_update`/`message_start`). Trasparenza su cosa è ancora recuperabile
   col dequeue.
 - **Race nota**: tra il nostro `turn_end` (evento) e il poll della coda da
@@ -152,9 +152,13 @@ messaggio" il vincolo si allenta: **la consegna usa la coda nativa di pi**
 ### Stato (main.ts)
 
 ```ts
-interface QueuedMessage { id: string; text: string; images?: ImageContent[] }
-let steerShadow: QueuedMessage[] = [];   // da consegnare (dequeue/persistenza)
-let steerPending: QueuedMessage[] = [];  // consegnato a pi, in attesa di iniezione
+interface QueuedMessage {
+  id: string;
+  text: string;
+  images?: ImageContent[];
+}
+let steerShadow: QueuedMessage[] = []; // da consegnare (dequeue/persistenza)
+let steerPending: QueuedMessage[] = []; // consegnato a pi, in attesa di iniezione
 ```
 
 Persistenza: testo di `steerShadow` in workspaceState
@@ -174,7 +178,7 @@ memoria.
 - **`turn_end`** (evento, nuovo handler): se `steerShadow` non vuota e pi
   ancora in streaming → consegna secondo `steeringMode`:
   - `"one-at-a-time"` (default): il primo item → `prompt(streamingBehavior:
-    "steer")`, spostalo in `steerPending`;
+"steer")`, spostalo in `steerPending`;
   - `"all"`: tutti gli item → un `prompt` ciascuno, tutti in `steerPending`.
 - **`agent_settled`**: se `steerShadow`/`steerPending` non vuote → consegna i
   follow-up (o i residui) con `prompt` normale; poi la coda si svuota e il

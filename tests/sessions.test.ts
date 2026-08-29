@@ -16,6 +16,9 @@ import {
   forkSession,
   getSessionInfo,
   encodeProjectFolder,
+  readSessionModel,
+  sessionModelArgs,
+  renameSessionFile,
 } from "../src/bridge/sessions.ts";
 
 const header = (id: string, cwd: string) =>
@@ -81,9 +84,14 @@ test("listSessions: workspace filter (header.cwd and folder name)", () => {
     mkdirSync(proj2, { recursive: true });
 
     writeFileSync(join(proj1, "a.jsonl"), header("id-1", "/work/projone") + "\n");
-    writeFileSync(join(proj2, "b.jsonl"), header("id-2", "/work/projtwo") + "\n");
+    const withHeader = join(proj2, "b.jsonl");
+    const folderOnly = join(proj2, "c.jsonl");
+    writeFileSync(withHeader, header("id-2", "/work/projtwo") + "\n");
     // without header.cwd: match via decoded folder name
-    writeFileSync(join(proj2, "c.jsonl"), "{type-less\n");
+    writeFileSync(folderOnly, "{type-less\n");
+    const base = Date.UTC(2026, 6, 1, 12);
+    utimesSync(withHeader, new Date(base + 1_000), new Date(base + 1_000));
+    utimesSync(folderOnly, new Date(base), new Date(base));
 
     const filtered = listSessions(root, "/work/projtwo");
     assert.equal(filtered.length, 2);
@@ -238,6 +246,81 @@ test("getSessionInfo: info aggiornata di una singola sessione", () => {
     assert.equal(info.firstMessage, "primo messaggio");
     assert.equal(info.messageCount, 1);
     assert.ok(typeof info.mtime === "number");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("renameSessionFile preserves the active branch parent", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-webview-sessions-"));
+  try {
+    const path = join(root, "rename.jsonl");
+    writeFileSync(
+      path,
+      header("session-1", "/work/project") +
+        "\n" +
+        JSON.stringify({ type: "message", id: "leaf", message: { role: "user" } }) +
+        "\n",
+    );
+    renameSessionFile(path, "New name");
+    const entry = JSON.parse(readFileSync(path, "utf8").trimEnd().split("\n").at(-1)!);
+    assert.equal(entry.type, "session_info");
+    assert.equal(entry.parentId, "leaf");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("session model follows the active branch and becomes explicit resume args", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-webview-sessions-"));
+  try {
+    const path = join(root, "branch.jsonl");
+    writeFileSync(
+      path,
+      [
+        header("session-1", "/work/project"),
+        JSON.stringify({
+          type: "message",
+          id: "base",
+          message: { role: "assistant", provider: "deepseek", model: "deepseek-v4" },
+        }),
+        JSON.stringify({
+          type: "model_change",
+          id: "detached",
+          parentId: "base",
+          provider: "openai",
+          modelId: "detached-model",
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "active",
+          parentId: "base",
+          message: { role: "assistant", provider: "anthropic", model: "active-model" },
+        }),
+        JSON.stringify({
+          type: "custom",
+          id: "leaf",
+          parentId: "active",
+          customType: "test",
+          data: {},
+        }),
+      ].join("\n") + "\n",
+    );
+
+    assert.deepEqual(readSessionModel(path), {
+      provider: "anthropic",
+      id: "active-model",
+    });
+    assert.deepEqual(sessionModelArgs(path), [
+      "--provider",
+      "anthropic",
+      "--model",
+      "active-model",
+    ]);
+    assert.deepEqual(getSessionInfo(path).model, {
+      provider: "anthropic",
+      id: "active-model",
+    });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

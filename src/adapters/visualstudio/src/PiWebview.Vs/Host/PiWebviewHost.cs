@@ -134,8 +134,16 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
             ? new[] { "--session", sessionPath }
             : Array.Empty<string>();
         if (sessionArgs.Length > 0) _currentSessionPath = sessionPath;
+        var savedModel = sessionPath is not null && File.Exists(sessionPath)
+            ? _sessions.GetSessionInfo(sessionPath).Model
+            : null;
+        var modelArgs = savedModel is not null
+            ? new[] { "--provider", savedModel.Provider, "--model", savedModel.Id }
+            : Array.Empty<string>();
 
-        var args = sessionArgs.Concat(CliFlagArgs()).ToList();
+        // Explicit model arguments prevent pi from silently falling back to
+        // the default when a resumed session has a saved model.
+        var args = sessionArgs.Concat(modelArgs).Concat(CliFlagArgs()).ToList();
 
         var env = new Dictionary<string, string>();
         foreach (System.Collections.DictionaryEntry e in Environment.GetEnvironmentVariables())

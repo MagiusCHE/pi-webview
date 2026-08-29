@@ -45,9 +45,10 @@ import {
   writeSessionSettings,
   readSessionCliFlags,
   writeSessionCliFlags,
+  sessionModelArgs,
 } from "./sessions.ts";
 import { getTrust, setTrust } from "./trust.ts";
-import { getPiSettings, setPiSettingFile } from "./pi-settings.ts";
+import { getPiSettings, setPiSettingFile, setPiSettingsFile } from "./pi-settings.ts";
 import { readStartupInfo } from "./startup-info.ts";
 import { saveAttachment, pathExists, attachFromPath } from "./attachments.ts";
 import { fetchProviderBalance } from "./balance.ts";
@@ -336,6 +337,7 @@ function main(): void {
           cwd,
           args: [
             ...(sessionPath ? ["--session", sessionPath] : []),
+            ...(sessionPath ? sessionModelArgs(sessionPath) : []),
             ...cliFlagArgs(flags),
           ],
         },
@@ -539,14 +541,17 @@ function main(): void {
         });
         return;
       }
-      if (req.type === "setSetting") {
-        const res = setPiSettingFile(req.key, req.value, {
+      if (req.type === "setSetting" || req.type === "setSettings") {
+        const ctx = {
           workspace: workspaceDir,
           workspaceTrusted: getTrust(workspaceDir).status === "trusted",
-          scope: req.scope,
-        });
+        };
+        const res =
+          req.type === "setSettings"
+            ? setPiSettingsFile(req.settings, ctx)
+            : setPiSettingFile(req.key, req.value, { ...ctx, scope: req.scope });
         if (!res.ok) {
-          respond(req.id ?? "", { ok: false, error: res.error ?? "set_setting failed" });
+          respond(req.id ?? "", { ok: false, error: res.error ?? "set_settings failed" });
           return;
         }
         respond(req.id ?? "", { ok: true, data: { needsRestart: true } });

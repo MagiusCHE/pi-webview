@@ -5,7 +5,7 @@
 //    Studio) into the package
 
 import { build } from "esbuild";
-import { cpSync, mkdirSync, existsSync } from "node:fs";
+import { cpSync, mkdirSync, existsSync, rmSync } from "node:fs";
 
 if (!existsSync("dist/pi-webview-ide.vsix")) {
   console.error("VS Code companion vsix missing: run `pnpm package:vscode` first");
@@ -62,11 +62,15 @@ await build({
   logLevel: "info",
 });
 
+rmSync("packages/pi-webview/dist/web", { recursive: true, force: true });
 cpSync("dist/web", "packages/pi-webview/dist/web", { recursive: true });
 cpSync("media/icon.png", "packages/pi-webview/dist/web/icon.png");
 cpSync("dist/pi-webview-ide.vsix", "packages/pi-webview/companion/pi-webview-ide.vsix");
+const bundledVsVsix = "packages/pi-webview/companion/pi-webview-visualstudio.vsix";
 if (existsSync(vsVsix)) {
-  cpSync(vsVsix, "packages/pi-webview/companion/pi-webview-visualstudio.vsix");
+  cpSync(vsVsix, bundledVsVsix);
+} else {
+  rmSync(bundledVsVsix, { force: true });
 }
 
 console.log("✓ package pi assemblato → packages/pi-webview/");

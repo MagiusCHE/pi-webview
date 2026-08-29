@@ -147,9 +147,14 @@ import {
   writeSessionCliFlags,
   readSessionSettings,
   writeSessionSettings,
+  sessionModelArgs,
 } from "../../bridge/sessions.ts";
 import { getTrust, setTrust } from "../../bridge/trust.ts";
-import { getPiSettings, setPiSettingFile } from "../../bridge/pi-settings.ts";
+import {
+  getPiSettings,
+  setPiSettingFile,
+  setPiSettingsFile,
+} from "../../bridge/pi-settings.ts";
 import { readStartupInfo } from "../../bridge/startup-info.ts";
 import { saveAttachment, pathExists, attachFromPath } from "../../bridge/attachments.ts";
 import { fetchProviderBalance } from "../../bridge/balance.ts";
@@ -328,6 +333,9 @@ export abstract class PiWebviewHost {
       sessionPath && existsSync(sessionPath) ? ["--session", sessionPath] : [];
     // when resuming a session, it (possibly forked) becomes the current one
     if (sessionArgs.length > 0) this.currentSessionPath = sessionPath;
+    // A resumed session must keep its saved model. Explicit arguments prevent
+    // pi from silently falling back to the default when restoring it.
+    const activeSessionModelArgs = sessionPath ? sessionModelArgs(sessionPath) : [];
     // CLI flags from settings (block 3: e.g. --session-control)
     const activeCliFlagArgs = cliFlagArgs(this.cliFlagValues());
     // actual command line used to launch pi (for error messages: suggested
@@ -337,6 +345,7 @@ export abstract class PiWebviewHost {
       "--mode",
       "rpc",
       ...sessionArgs,
+      ...activeSessionModelArgs,
       ...activeCliFlagArgs,
     ].join(" ");
 
@@ -427,7 +436,7 @@ export abstract class PiWebviewHost {
       // directory even if the session belongs to another folder
       {
         env: { ...process.env, PI_WEBVIEW_COMPANION: "1" },
-        args: [...sessionArgs, ...activeCliFlagArgs],
+        args: [...sessionArgs, ...activeSessionModelArgs, ...activeCliFlagArgs],
         ...(this.workspace() ? { cwd: this.workspace() } : {}),
       },
     );
@@ -530,19 +539,20 @@ export abstract class PiWebviewHost {
         );
         return;
       }
-      case "setSetting": {
+      case "setSetting":
+      case "setSettings": {
         const ws = this.workspace();
         const trusted = ws ? getTrust(ws).status === "trusted" : undefined;
-        const res = setPiSettingFile(req.key, req.value, {
-          workspace: ws,
-          workspaceTrusted: trusted,
-          scope: req.scope,
-        });
+        const ctx = { workspace: ws, workspaceTrusted: trusted };
+        const res =
+          req.type === "setSettings"
+            ? setPiSettingsFile(req.settings, ctx)
+            : setPiSettingFile(req.key, req.value, { ...ctx, scope: req.scope });
         if (!res.ok) {
-          this.respond(req.id, false, res.error ?? "set_setting failed");
+          this.respond(req.id, false, res.error ?? "set_settings failed");
           return;
         }
-        // propagation "restart": write done → restart pi transparently
+        // propagation "restart": all writes are done → restart pi once
         // (connection_closed reason restart + pi_restarted → re-init)
         this.respond(req.id, true, { needsRestart: true });
         this.restartPi();

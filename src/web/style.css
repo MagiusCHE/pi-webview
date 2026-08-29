@@ -434,6 +434,7 @@ header {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
   font-size: 13.5px;
   color: var(--fg);
 }
@@ -497,8 +498,8 @@ header {
   padding: 5px 16px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--accent-text);
-  background: var(--accent);
+  color: var(--accent-fg);
+  background: var(--accent-solid);
   border: none;
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -516,6 +517,8 @@ header {
   color: var(--fg-tertiary);
 }
 .settings-row label {
+  flex: 1 1 38%;
+  min-width: 0;
   color: var(--fg-secondary);
 }
 .settings-version {
@@ -535,6 +538,72 @@ header {
 }
 .field-select:focus {
   border-color: var(--accent);
+}
+.settings-model-picker {
+  position: relative;
+  flex: 0 1 62%;
+  width: 62%;
+  min-width: 0;
+}
+.settings-model-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  background: var(--input-bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  cursor: pointer;
+  outline: none;
+}
+.settings-model-trigger:focus {
+  border-color: var(--accent);
+}
+.settings-model-trigger:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.settings-model-trigger-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-model-chevron {
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+}
+.settings-model-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 210;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 4px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+}
+.settings-model-menu[hidden] {
+  display: none;
+}
+.settings-model-menu .pop-list {
+  max-height: 40vh;
+}
+.settings-model-menu .pop-item {
+  min-width: 0;
 }
 .field-number {
   width: 90px;
@@ -1802,6 +1871,15 @@ footer {
   flex-direction: column;
   gap: 12px;
   text-align: left;
+}
+.settings-modal-dialog {
+  width: 88vw;
+  max-width: 40rem;
+  max-height: 88vh;
+  margin: 3vh 3vw;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .modal-head {
   display: flex;

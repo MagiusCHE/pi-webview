@@ -11,6 +11,7 @@ import { join } from "node:path";
 import {
   getPiSettings,
   setPiSettingFile,
+  setPiSettingsFile,
   isFileSetting,
   defaultAgentDir,
   type PiSettingsContext,
@@ -100,8 +101,9 @@ test("get_settings: session keys have no value (webview fills from get_state)", 
     steering.options?.map((o) => o.value),
     ["one-at-a-time", "all"],
   );
-  const model = res.settings.find((s) => s.key === "model");
-  assert.equal(model?.writable, false);
+  const defaultModel = res.settings.find((s) => s.key === "defaultModel");
+  assert.equal(defaultModel?.source, "pi-settings-file");
+  assert.equal(defaultModel?.type, "model");
 });
 
 test("set_setting file: validates the value (rejects wrong type)", () => {
@@ -127,6 +129,34 @@ test("set_setting file: read-modify-write preserves unknown fields", () => {
     };
     assert.equal(after.hideThinkingBlock, true);
     assert.equal(after.otherSetting, 42);
+  } finally {
+    rmSync(agent, { recursive: true, force: true });
+  }
+});
+
+test("set_settings file: writes model pair and other defaults in one merge", () => {
+  const agent = tmpAgent();
+  try {
+    writeSettings(agent, { keep: true });
+    const res = setPiSettingsFile(
+      [
+        {
+          key: "defaultModel",
+          value: { provider: "deepseek", id: "deepseek-v4" },
+          scope: "global",
+        },
+        { key: "defaultThinkingLevel", value: "high", scope: "global" },
+      ],
+      { agentDir: agent },
+    );
+    assert.equal(res.ok, true);
+    const after = JSON.parse(readFileSync(join(agent, "settings.json"), "utf8"));
+    assert.deepEqual(after, {
+      keep: true,
+      defaultProvider: "deepseek",
+      defaultModel: "deepseek-v4",
+      defaultThinkingLevel: "high",
+    });
   } finally {
     rmSync(agent, { recursive: true, force: true });
   }

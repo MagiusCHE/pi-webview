@@ -40,9 +40,11 @@ public sealed class SessionStoreTests : IDisposable
             ["timestamp"] = DateTime.UtcNow.ToString("o"),
             ["cwd"] = workspace,
         };
+        var messageId = Guid.NewGuid().ToString();
         var msg = new Dictionary<string, object?>
         {
             ["type"] = "message",
+            ["id"] = messageId,
             ["timestamp"] = DateTime.UtcNow.ToString("o"),
             ["message"] = new Dictionary<string, object?> { ["role"] = "user", ["content"] = "ciao" },
         };
@@ -50,6 +52,7 @@ public sealed class SessionStoreTests : IDisposable
         {
             ["type"] = "session_info",
             ["id"] = Guid.NewGuid().ToString(),
+            ["parentId"] = messageId,
             ["timestamp"] = DateTime.UtcNow.ToString("o"),
             ["name"] = name,
         };
@@ -124,7 +127,7 @@ public sealed class SessionStoreTests : IDisposable
         // non-header entries copied
         Assert.Contains("\"role\":\"user\"", content);
         // only one header
-        Assert.Single(content.Split('\n').Where(l => l.Contains("\"type\":\"session\"")));
+        Assert.Single(content.Split('\n'), l => l.Contains("\"type\":\"session\""));
     }
 
     [Fact]
@@ -133,9 +136,14 @@ public sealed class SessionStoreTests : IDisposable
         var store = new SessionStore();
         var path = WriteSession(@"C:\proj", "sess.jsonl", "vecchio");
         Assert.Equal("vecchio", store.GetSessionInfo(path).Name);
+        using var previousDoc = JsonDocument.Parse(File.ReadAllLines(path).Last());
+        var previous = previousDoc.RootElement.GetProperty("id").GetString();
         store.RenameSessionFile(path, "nuovo nome");
         Assert.Equal("nuovo nome", store.GetSessionInfo(path).Name);
-        Assert.Equal(4, File.ReadAllLines(path).Length);
+        var lines = File.ReadAllLines(path);
+        Assert.Equal(4, lines.Length);
+        using var appended = JsonDocument.Parse(lines.Last());
+        Assert.Equal(previous, appended.RootElement.GetProperty("parentId").GetString());
     }
 
     [Fact]

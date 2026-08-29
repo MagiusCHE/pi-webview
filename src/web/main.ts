@@ -17,6 +17,7 @@ import type {
   ThinkingSettings,
   PiSetting,
   PiSettingsResult,
+  PiModelSettingValue,
 } from "../ide/protocol.ts";
 import { rpc } from "../ide/protocol.ts";
 import { samePath } from "../ide/paths.ts";
@@ -771,9 +772,15 @@ function refreshCliFlags(): void {
 //    and restarts pi (connection_closed + pi_restarted → re-init).
 
 let piSettings: PiSetting[] = [];
+let availablePiModels: Array<{
+  provider: string;
+  id: string;
+  name?: string;
+}> = [];
 /** staged changes in the pi.dev section (key → value), applied only by "Applica" */
 const pendingPiSettings = new Map<string, unknown>();
 let applyingPiSettings = false;
+let settingsModelPickerAbort = new AbortController();
 
 function sessionValueFor(key: string): unknown {
   switch (key) {
@@ -810,6 +817,19 @@ async function fetchPiSettings(): Promise<void> {
       ? { ...s, value: sessionValueFor(s.key) }
       : s,
   );
+  if (piSettings.some((setting) => setting.type === "model")) {
+    const modelsRes = await rpcRequest(rpc.getAvailableModels()).catch(() => null);
+    availablePiModels =
+      (modelsRes?.success
+        ? (
+            modelsRes.data as
+              | {
+                  models?: Array<{ provider: string; id: string; name?: string }>;
+                }
+              | undefined
+          )?.models
+        : undefined) ?? [];
+  }
   renderPiSettings();
 }
 
@@ -820,9 +840,19 @@ function displayValue(setting: PiSetting): unknown {
     : setting.value;
 }
 
+function settingValueEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") {
+    return false;
+  }
+  const a = left as Partial<PiModelSettingValue>;
+  const b = right as Partial<PiModelSettingValue>;
+  return a.provider === b.provider && a.id === b.id;
+}
+
 /** record a staged change (or drop it when the control returns to the base value) */
 function stageSetting(setting: PiSetting, value: unknown): void {
-  if (value === displayValue(setting)) {
+  if (settingValueEqual(value, setting.value)) {
     pendingPiSettings.delete(setting.key);
   } else {
     pendingPiSettings.set(setting.key, value);
@@ -833,8 +863,26 @@ function stageSetting(setting: PiSetting, value: unknown): void {
 }
 
 function renderPiSettings(): void {
+  settingsModelPickerAbort.abort();
+  settingsModelPickerAbort = new AbortController();
   els.pidevBody.textContent = "";
+  let group: string | undefined;
+  let target: HTMLElement = els.pidevBody;
   for (const setting of piSettings) {
+    if (setting.group !== group) {
+      group = setting.group;
+      target = els.pidevBody;
+      if (group) {
+        const subsection = document.createElement("div");
+        subsection.className = "settings-subsection";
+        const title = document.createElement("div");
+        title.className = "settings-subsection-title";
+        title.textContent = t(group);
+        subsection.appendChild(title);
+        els.pidevBody.appendChild(subsection);
+        target = subsection;
+      }
+    }
     const row = document.createElement("div");
     row.className = "settings-row";
     const label = document.createElement("label");
@@ -842,7 +890,7 @@ function renderPiSettings(): void {
     if (setting.description) label.title = t(setting.description);
     row.appendChild(label);
     row.appendChild(settingControl(setting));
-    els.pidevBody.appendChild(row);
+    target.appendChild(row);
   }
 }
 
@@ -850,6 +898,147 @@ function settingControl(setting: PiSetting): HTMLElement {
   const stage = (value: unknown): void => {
     stageSetting(setting, value);
   };
+  if (setting.type === "model") {
+    const picker = document.createElement("div");
+    picker.className = "settings-model-picker";
+
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "settings-model-trigger";
+    trigger.disabled = !setting.writable || availablePiModels.length === 0;
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
+    if (!setting.writable) trigger.title = t("settingsPiDevManaged");
+
+    const triggerLabel = document.createElement("span");
+    triggerLabel.className = "settings-model-trigger-label";
+    const chevron = document.createElement("span");
+    chevron.className = "settings-model-chevron";
+    chevron.textContent = "⌄";
+    trigger.append(triggerLabel, chevron);
+
+    const menu = document.createElement("div");
+    menu.className = "settings-model-menu";
+    menu.hidden = true;
+    const search = document.createElement("input");
+    search.type = "text";
+    search.className = "pop-search";
+    search.placeholder = t("searchModels");
+    search.spellcheck = false;
+    const list = document.createElement("div");
+    list.className = "pop-list";
+    list.setAttribute("role", "listbox");
+    menu.append(search, list);
+    picker.append(trigger, menu);
+
+    const initial = displayValue(setting) as Partial<PiModelSettingValue> | undefined;
+    let selected =
+      availablePiModels.find(
+        (model) => model.provider === initial?.provider && model.id === initial.id,
+      ) ?? null;
+
+    const updateTrigger = (): void => {
+      const label = selected
+        ? [selected.provider, selected.name ?? selected.id].join(" · ")
+        : initial?.provider && initial.id
+          ? tpl(t("piSettingModelUnavailable"), {
+              model: `${initial.provider}/${initial.id}`,
+            })
+          : "—";
+      triggerLabel.textContent = label;
+      trigger.title =
+        trigger.disabled && !setting.writable ? t("settingsPiDevManaged") : label;
+    };
+
+    const close = (): void => {
+      menu.hidden = true;
+      trigger.setAttribute("aria-expanded", "false");
+    };
+
+    const render = (query: string): void => {
+      list.textContent = "";
+      const q = query.trim().toLowerCase();
+      const filtered = q
+        ? availablePiModels.filter(
+            (model) =>
+              (model.name ?? "").toLowerCase().includes(q) ||
+              model.id.toLowerCase().includes(q) ||
+              model.provider.toLowerCase().includes(q),
+          )
+        : availablePiModels;
+      for (const model of filtered) {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "pop-item";
+        option.setAttribute("role", "option");
+        const active = selected?.provider === model.provider && selected?.id === model.id;
+        option.classList.toggle("active", active);
+        option.setAttribute("aria-selected", String(active));
+        const name = document.createElement("span");
+        name.className = "pop-item-label";
+        name.textContent = model.name ?? model.id;
+        const provider = document.createElement("span");
+        provider.className = "pop-item-meta";
+        provider.textContent = model.provider;
+        option.append(name, provider);
+        option.addEventListener("click", () => {
+          selected = model;
+          stage({ provider: model.provider, id: model.id });
+          updateTrigger();
+          close();
+        });
+        list.appendChild(option);
+      }
+      if (filtered.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "pop-empty";
+        empty.textContent = "—";
+        list.appendChild(empty);
+      }
+    };
+
+    trigger.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const open = menu.hidden;
+      document
+        .querySelectorAll<HTMLElement>(".settings-model-menu:not([hidden])")
+        .forEach((other) => {
+          if (other !== menu) {
+            other.hidden = true;
+            other
+              .closest(".settings-model-picker")
+              ?.querySelector(".settings-model-trigger")
+              ?.setAttribute("aria-expanded", "false");
+          }
+        });
+      menu.hidden = !open;
+      trigger.setAttribute("aria-expanded", String(open));
+      if (open) {
+        search.value = "";
+        render("");
+        search.focus();
+      }
+    });
+    picker.addEventListener("click", (event) => event.stopPropagation());
+    search.addEventListener("input", () => render(search.value));
+    document.addEventListener("click", close, {
+      signal: settingsModelPickerAbort.signal,
+    });
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key === "Escape" && !menu.hidden) {
+          close();
+          trigger.focus();
+        }
+      },
+      { signal: settingsModelPickerAbort.signal },
+    );
+
+    updateTrigger();
+    render("");
+    return picker;
+  }
   if (setting.type === "boolean") {
     const input = document.createElement("input");
     input.type = "checkbox";
@@ -933,19 +1122,27 @@ async function applyPendingSettings(): Promise<void> {
   els.pidevApply.disabled = true;
   els.pidevApplyHint.textContent = t("piSettingApplying");
   try {
+    const fileChanges: Array<{ key: string; value: unknown }> = [];
     for (const [key, value] of pending) {
-      const setting = piSettings.find((p) => p.key === key);
+      const setting = piSettings.find((candidate) => candidate.key === key);
       if (!setting) continue;
       if (setting.source === "pi-rpc") {
         applyRpcSetting(setting, value);
-        setting.value = value; // mirror into the local schema for the re-render
-      } else {
-        const res = await ideRequest({ type: "setSetting", key, value });
-        if (!res?.ok) {
-          console.warn("[pi-webview] set_setting failed:", res?.error);
-          continue;
-        }
         setting.value = value;
+      } else {
+        fileChanges.push({ key, value });
+      }
+    }
+    if (fileChanges.length > 0) {
+      const res = await ideRequest({ type: "setSettings", settings: fileChanges });
+      if (!res?.ok) {
+        console.warn("[pi-webview] set_settings failed:", res?.error);
+        addStatusLine(t("piSettingSetFailed"));
+      } else {
+        for (const change of fileChanges) {
+          const setting = piSettings.find((candidate) => candidate.key === change.key);
+          if (setting) setting.value = change.value;
+        }
       }
     }
   } finally {
@@ -1705,10 +1902,35 @@ async function refreshSessions(): Promise<void> {
     const label = data?.workspace?.split(/[\\/]/).pop();
     if (label) workspaceLabel = label;
   }
+  blockedResumeModel = null;
+  const resumedModel = sessions.find(
+    (session) => session.path === currentSessionPath,
+  )?.model;
+  if (resumedModel) {
+    const available = await rpcRequest(rpc.getAvailableModels()).catch(() => null);
+    if (available?.success) {
+      const models =
+        (
+          available.data as
+            { models?: Array<{ provider?: string; id?: string }> } | undefined
+        )?.models ?? [];
+      if (
+        !models.some(
+          (model) =>
+            model.provider === resumedModel.provider && model.id === resumedModel.id,
+        )
+      ) {
+        blockedResumeModel = `${resumedModel.provider}/${resumedModel.id}`;
+      }
+    }
+  }
   await fetchThinkingSettings();
   syncThinkingChat();
   populateSessionMenu();
   await loadHistory();
+  if (blockedResumeModel) {
+    addStatusLine(tpl(t("resumeModelUnavailable"), { model: blockedResumeModel }));
+  }
   // steering: persisted queue restored; if pi is idle, deliver right away
   await loadSteerQueue();
   updateSteerPlaceholder();
@@ -2100,26 +2322,57 @@ function switchSession(path: string): void {
   els.sessionBtn.disabled = true;
   void (async () => {
     try {
+      let info = sessions.find((session) => session.path === path);
+      if (!info) {
+        const infoRes = await ideRequest({ type: "getSessionInfo", path });
+        if (infoRes?.ok) info = infoRes.data as SessionInfo;
+      }
+      const savedModel = info?.model;
+      if (savedModel) {
+        const available = await rpcRequest(rpc.getAvailableModels()).catch(() => null);
+        const models =
+          (available?.success
+            ? (
+                available.data as
+                  { models?: Array<{ provider?: string; id?: string }> } | undefined
+              )?.models
+            : undefined) ?? [];
+        if (
+          !models.some(
+            (model) =>
+              model.provider === savedModel.provider && model.id === savedModel.id,
+          )
+        ) {
+          addStatusLine(
+            tpl(t("resumeModelUnavailable"), {
+              model: `${savedModel.provider}/${savedModel.id}`,
+            }),
+          );
+          return;
+        }
+      }
+
       const res = await rpcRequest({ type: "switch_session", sessionPath: path });
       if (res.success) {
         currentSessionPath = path;
-        await fetchThinkingSettings();
-        syncThinkingChat();
         persistSessionPath(); // resume this session on VS Code reloads
-        // loading overlay: slow extensions keep logging after the session
-        // file is ready — the chat must stay clean until they settle
+        // Loading overlay: slow extensions keep logging after the session
+        // file is ready — the chat must stay clean until they settle.
         beginSessionLoading();
         els.thread.textContent = "";
-        await loadHistory();
-        refreshSessionNotificationOverride(); // the override follows the new session
+        // Refresh get_state after the switch. pi already restored the saved
+        // model; retaining the previous state made it look like a fallback.
+        await refreshSessions();
+        updateDocumentTitle();
       }
     } catch {
       // switch failed: the current session stays
+    } finally {
+      switchingSession = false;
+      els.sessionBtn.disabled = false;
+      populateSessionMenu();
+      els.sessionMenu.hidden = true;
     }
-    switchingSession = false;
-    els.sessionBtn.disabled = false;
-    populateSessionMenu();
-    els.sessionMenu.hidden = true;
   })();
 }
 
@@ -4791,6 +5044,7 @@ let followUpMode: "one-at-a-time" | "all" = "one-at-a-time";
 let autoCompactionEnabled = true;
 let thinkingLevel = "";
 let currentModel: { provider?: string; name?: string; id?: string } | null = null;
+let blockedResumeModel: string | null = null;
 
 function updateSendButton(): void {
   // the button is ALWAYS Send (never STOP anymore): while processing it takes
@@ -5113,6 +5367,7 @@ async function openModelPopover(): Promise<void> {
           void rpcRequest(rpc.setModel(m.provider ?? "", m.id)).then((r) => {
             if (r.success) {
               currentModel = m;
+              blockedResumeModel = null;
               modelSupportsVision = Array.isArray(m.input) && m.input.includes("image");
               modelInfoText = [m.provider, m.name ?? m.id].filter(Boolean).join(" · ");
               renderModelInfo();
@@ -5299,6 +5554,10 @@ function sendOrStop(): void {
   // instead of sending the text to the model
   if (els.input.value.trim().toLowerCase() === "/settings") {
     if (els.settingsModal.hidden) openSettings();
+    return;
+  }
+  if (blockedResumeModel) {
+    addStatusLine(tpl(t("resumeModelUnavailable"), { model: blockedResumeModel }));
     return;
   }
   // processing (or compaction) in progress → STEERING: the message enters
@@ -5534,7 +5793,7 @@ function dequeueSteering(): void {
 // (pi injects after the turn's tool calls, before the next LLM call);
 // idle (agent_settled) → normal prompt. Mode: one-at-a-time / all.
 function deliverSteering(): void {
-  if (steerShadow.length === 0) return;
+  if (blockedResumeModel || steerShadow.length === 0) return;
   if (compacting) return; // during the compaction no delivery: compaction_end handles it
   const n = steeringMode === "all" ? steerShadow.length : 1;
   const toSend = steerShadow.splice(0, n);

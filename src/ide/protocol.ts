@@ -176,6 +176,7 @@ export type IdeRequest =
       scope?: "global" | "project";
       id?: string;
     }
+  | { type: "setSettings"; settings: PiSettingChange[]; id?: string }
   | { type: "renameSession"; path: string; name: string; id?: string }
   | { type: "deleteSession"; path: string; id?: string }
   | { type: "storeSteerQueue"; items: SteerQueueItem[]; id?: string }
@@ -215,6 +216,18 @@ export interface PiSettingOption {
   label: string;
 }
 
+export interface PiModelSettingValue {
+  provider: string;
+  id: string;
+}
+
+export interface PiSettingChange {
+  key: string;
+  value: unknown;
+  /** force the write target for settings with scope "both" */
+  scope?: "global" | "project";
+}
+
 export interface PiSetting {
   /** facade key (for pi-settings-file: the actual settings.json field name) */
   key: string;
@@ -222,7 +235,9 @@ export interface PiSetting {
   label: string;
   /** i18n key for the description tooltip */
   description?: string;
-  type: "boolean" | "number" | "enum" | "string";
+  /** optional i18n key for a visual sub-group in the settings section */
+  group?: string;
+  type: "boolean" | "number" | "enum" | "string" | "model";
   options?: PiSettingOption[];
   min?: number;
   max?: number;
@@ -252,6 +267,8 @@ export interface SessionInfo {
   id?: string;
   cwd?: string;
   name?: string;
+  /** model selected on the active branch of the saved session */
+  model?: { provider: string; id: string };
   firstMessage?: string;
   messageCount?: number;
   lastActivity?: number;

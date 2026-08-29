@@ -118,9 +118,21 @@ export function renameSessionFile(path: string, name: string): void {
   if (!path.endsWith(".jsonl") || !existsSync(path)) {
     throw new Error("session not found");
   }
+  let parentId: string | undefined;
+  for (const raw of readFileSync(path, "utf8").trimEnd().split("\n").reverse()) {
+    if (!raw.trim()) continue;
+    try {
+      const previous = JSON.parse(raw) as { id?: unknown };
+      if (typeof previous.id === "string") parentId = previous.id;
+    } catch {
+      // Keep looking past malformed trailing lines.
+    }
+    if (parentId) break;
+  }
   const entry = {
     type: "session_info",
     id: randomUUID(),
+    ...(parentId ? { parentId } : {}),
     timestamp: new Date().toISOString(),
     name: sanitized,
   };
@@ -140,6 +152,7 @@ function readSessionInfo(path: string): {
   id?: string;
   cwd?: string;
   name?: string;
+  model?: { provider: string; id: string };
   firstMessage?: string;
   messageCount?: number;
   lastActivity?: number;
@@ -154,10 +167,16 @@ function readSessionInfo(path: string): {
     id?: string;
     cwd?: string;
     name?: string;
+    model?: { provider: string; id: string };
     firstMessage?: string;
     messageCount?: number;
     lastActivity?: number;
   } = {};
+  const nodes = new Map<
+    string,
+    { parentId?: string; model?: { provider: string; id: string } }
+  >();
+  let leafId: string | undefined;
   let count = 0;
   let lastActivity: number | undefined;
   for (const raw of content.split("\n")) {
@@ -186,10 +205,57 @@ function readSessionInfo(path: string): {
         }
       }
     }
+
+    const id = typeof entry.id === "string" ? entry.id : undefined;
+    if (entry.type !== "session" && id) {
+      const parentId = typeof entry.parentId === "string" ? entry.parentId : undefined;
+      let model: { provider: string; id: string } | undefined;
+      if (
+        entry.type === "model_change" &&
+        typeof entry.provider === "string" &&
+        typeof entry.modelId === "string"
+      ) {
+        model = { provider: entry.provider, id: entry.modelId };
+      } else if (entry.type === "message") {
+        const message = entry.message as
+          { role?: string; provider?: string; model?: string } | undefined;
+        if (
+          message?.role === "assistant" &&
+          typeof message.provider === "string" &&
+          typeof message.model === "string"
+        ) {
+          model = { provider: message.provider, id: message.model };
+        }
+      }
+      nodes.set(id, { ...(parentId ? { parentId } : {}), ...(model ? { model } : {}) });
+      leafId = id;
+    }
+  }
+  for (let id = leafId; id;) {
+    const node = nodes.get(id);
+    if (!node) break;
+    if (node.model) {
+      info.model = node.model;
+      break;
+    }
+    id = node.parentId;
   }
   if (count > 0) info.messageCount = count;
   if (lastActivity !== undefined) info.lastActivity = lastActivity;
   return info;
+}
+
+/** Returns the model saved on the session's active branch, if any. */
+export function readSessionModel(
+  path: string,
+): { provider: string; id: string } | undefined {
+  return cachedSessionInfo(path).model;
+}
+
+/** Forces pi to honor the saved model instead of silently using a default. */
+export function sessionModelArgs(path: string): string[] {
+  const model = path ? readSessionModel(path) : undefined;
+  return model ? ["--provider", model.provider, "--model", model.id] : [];
 }
 
 function userText(content: unknown): string {

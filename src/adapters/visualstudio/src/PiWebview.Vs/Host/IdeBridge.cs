@@ -57,6 +57,50 @@ public static class IdeBridge
                 case "getThinkingSettings":
                     host.PostIdeResponse(Ok(req, PiThinkingSettingsReader.Read(host.Workspace())));
                     return;
+                case "getSettings":
+                {
+                    var workspace = host.Workspace();
+                    var trusted = workspace is not null &&
+                                  TrustStore.GetTrust(workspace).Status == "trusted";
+                    host.PostIdeResponse(Ok(req,
+                        PiSettingsStore.Get(workspace, trusted, req.Key)));
+                    return;
+                }
+                case "setSetting":
+                case "setSettings":
+                {
+                    var changes = req.Type == "setSettings"
+                        ? req.Settings
+                        : req.Key is not null && req.Value.HasValue
+                            ? new List<PiSettingChange>
+                            {
+                                new()
+                                {
+                                    Key = req.Key,
+                                    Value = req.Value.Value,
+                                    Scope = req.Scope,
+                                },
+                            }
+                            : null;
+                    if (changes is null)
+                    {
+                        host.PostIdeResponse(Fail(req, "set_settings: missing settings"));
+                        return;
+                    }
+                    var workspace = host.Workspace();
+                    var trusted = workspace is not null &&
+                                  TrustStore.GetTrust(workspace).Status == "trusted";
+                    var result = PiSettingsStore.Set(changes, workspace, trusted);
+                    if (!result.Ok)
+                    {
+                        host.PostIdeResponse(Fail(req, result.Error ?? "set_settings failed"));
+                        return;
+                    }
+                    host.PostIdeResponse(Ok(req,
+                        new Dictionary<string, object?> { ["needsRestart"] = true }));
+                    await host.RestartPiAsync().ConfigureAwait(false);
+                    return;
+                }
                 case "listSessions":
                 {
                     var ws = host.Workspace();

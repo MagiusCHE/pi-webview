@@ -78,6 +78,18 @@ public sealed class IdeRequest
     [System.Text.Json.Serialization.JsonPropertyName("flags")]
     public Dictionary<string, JsonElement>? Flags { get; set; }
 
+    [System.Text.Json.Serialization.JsonPropertyName("key")]
+    public string? Key { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("value")]
+    public JsonElement? Value { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("scope")]
+    public string? Scope { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("settings")]
+    public List<PiSettingChange>? Settings { get; set; }
+
     [System.Text.Json.Serialization.JsonPropertyName("action")]
     public string? Action { get; set; }
 
@@ -225,6 +237,27 @@ public sealed class CliFlagInfo
     public string? Description { get; set; }
 }
 
+public sealed class PiSettingChange
+{
+    [System.Text.Json.Serialization.JsonPropertyName("key")]
+    public string Key { get; set; } = "";
+
+    [System.Text.Json.Serialization.JsonPropertyName("value")]
+    public JsonElement Value { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("scope")]
+    public string? Scope { get; set; }
+}
+
+public sealed class SessionModel
+{
+    [System.Text.Json.Serialization.JsonPropertyName("provider")]
+    public string Provider { get; set; } = "";
+
+    [System.Text.Json.Serialization.JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+}
+
 public sealed class SessionInfo
 {
     [System.Text.Json.Serialization.JsonPropertyName("path")]
@@ -238,6 +271,9 @@ public sealed class SessionInfo
 
     [System.Text.Json.Serialization.JsonPropertyName("name")]
     public string? Name { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("model")]
+    public SessionModel? Model { get; set; }
 
     [System.Text.Json.Serialization.JsonPropertyName("firstMessage")]
     public string? FirstMessage { get; set; }

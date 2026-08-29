@@ -98,10 +98,32 @@ public sealed class SessionStore
         {
             throw new InvalidOperationException("session not found");
         }
+        string? parentId = null;
+        var previousLines = File.ReadAllText(path).TrimEnd().Split('\n');
+        for (var index = previousLines.Length - 1; index >= 0; index--)
+        {
+            var raw = previousLines[index];
+            if (raw.Trim().Length == 0) continue;
+            try
+            {
+                using var previous = JsonDocument.Parse(raw);
+                if (previous.RootElement.TryGetProperty("id", out var id) &&
+                    id.ValueKind == JsonValueKind.String)
+                {
+                    parentId = id.GetString();
+                }
+            }
+            catch (JsonException)
+            {
+                // Keep looking past malformed trailing lines.
+            }
+            if (parentId is not null) break;
+        }
         var entry = new Dictionary<string, object?>
         {
             ["type"] = "session_info",
             ["id"] = Guid.NewGuid().ToString(),
+            ["parentId"] = parentId,
             ["timestamp"] = DateTime.UtcNow.ToString("o"),
             ["name"] = sanitized,
         };
@@ -299,6 +321,8 @@ public sealed class SessionStore
         {
             return;
         }
+        var nodes = new Dictionary<string, (string? ParentId, SessionModel? Model)>();
+        string? leafId = null;
         var count = 0;
         long? lastActivity = null;
         foreach (var raw in content.Split('\n'))
@@ -352,7 +376,57 @@ public sealed class SessionStore
                         if (text.Length > 0) info.FirstMessage = text;
                     }
                 }
+
+                if (type != "session" &&
+                    root.TryGetProperty("id", out var entryId) &&
+                    entryId.ValueKind == JsonValueKind.String &&
+                    entryId.GetString() is { Length: > 0 } entryNodeId)
+                {
+                    var parentId = root.TryGetProperty("parentId", out var parent) &&
+                                   parent.ValueKind == JsonValueKind.String
+                        ? parent.GetString()
+                        : null;
+                    SessionModel? model = null;
+                    if (type == "model_change" &&
+                        root.TryGetProperty("provider", out var provider) &&
+                        provider.ValueKind == JsonValueKind.String &&
+                        root.TryGetProperty("modelId", out var modelId) &&
+                        modelId.ValueKind == JsonValueKind.String)
+                    {
+                        model = new SessionModel
+                        {
+                            Provider = provider.GetString()!,
+                            Id = modelId.GetString()!,
+                        };
+                    }
+                    else if (type == "message" &&
+                             root.TryGetProperty("message", out var assistantMessage) &&
+                             assistantMessage.TryGetProperty("role", out var assistantRole) &&
+                             assistantRole.GetString() == "assistant" &&
+                             assistantMessage.TryGetProperty("provider", out var assistantProvider) &&
+                             assistantProvider.ValueKind == JsonValueKind.String &&
+                             assistantMessage.TryGetProperty("model", out var assistantModelId) &&
+                             assistantModelId.ValueKind == JsonValueKind.String)
+                    {
+                        model = new SessionModel
+                        {
+                            Provider = assistantProvider.GetString()!,
+                            Id = assistantModelId.GetString()!,
+                        };
+                    }
+                    nodes[entryNodeId] = (parentId, model);
+                    leafId = entryNodeId;
+                }
             }
+        }
+        while (leafId is not null && nodes.TryGetValue(leafId, out var node))
+        {
+            if (node.Model is not null)
+            {
+                info.Model = node.Model;
+                break;
+            }
+            leafId = node.ParentId;
         }
         if (count > 0) info.MessageCount = count;
         if (lastActivity is not null) info.LastActivity = lastActivity;

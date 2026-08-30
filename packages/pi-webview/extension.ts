@@ -554,31 +554,6 @@ export default async function (pi: PiApi): Promise<void> {
     }
   });
 
-  // compaction failed/cancelled (pi 0.84.3+): forward the REAL reason to
-  // the UI (webview → chat status line; TUI → notification) — the event has
-  // reason (aborted/error), retryState, source and errorMessage, which the
-  // compaction_end event alone does not distinguish
-  pi.on("session_compact_failed", (event, ctx) => {
-    const ui = (ctx as { ui?: { notify: Notify } }).ui;
-    if (!ui?.notify) return;
-    const e = event as {
-      reason?: string;
-      source?: string;
-      retryState?: string;
-      errorMessage?: string;
-    };
-    const reason =
-      e.reason === "aborted"
-        ? "aborted"
-        : e.reason === "error"
-          ? "failed"
-          : (e.reason ?? "failed");
-    const source = e.source ? ` (${e.source})` : "";
-    const retry = e.retryState ? ` — retry: ${e.retryState}` : "";
-    const err = e.errorMessage ? `: ${e.errorMessage}` : "";
-    ui.notify(`pi-webview: compaction ${reason}${source}${retry}${err}`, "warning");
-  });
-
   // deferred registration: getCommands() is a stub that THROWS during load
   // ("Extension runtime not initialized") → the dedupe can only happen after
   // the bind, at the first session_start (which rpc-mode waits for BEFORE

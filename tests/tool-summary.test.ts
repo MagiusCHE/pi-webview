@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toolSummary } from "../src/web/tool-summary.ts";
+import { streamedToolPath, toolSummary } from "../src/web/tool-summary.ts";
 
 test('bash: come pi.dev — "$" evidenziato, comando negli args attenuati', () => {
   const s = toolSummary("bash", JSON.stringify({ command: "ls -la" }));
@@ -43,6 +43,20 @@ test("edit/write: path come args (nessun ellipsis JS)", () => {
   const path = "z".repeat(60);
   assert.equal(toolSummary("edit", JSON.stringify({ path })).args, path);
   assert.equal(toolSummary("write", JSON.stringify({ path })).args, path);
+});
+
+test("edit streaming: path disponibile prima del JSON completo", () => {
+  const path = '/home/user/proj/src/a\\b"c.ts';
+  const prefix = JSON.stringify({ path }).slice(0, -1);
+  const fragment = `${prefix},"edits":[{"oldText":"large payload`;
+  assert.equal(streamedToolPath("edit", fragment), path);
+  assert.equal(streamedToolPath("edit", fragment, "/home/user/proj"), './src/a\\b"c.ts');
+});
+
+test("edit streaming: attende la fine della stringa path", () => {
+  assert.equal(streamedToolPath("edit", '{"path":"src/incomplete'), "");
+  assert.equal(streamedToolPath("bash", '{"path":"src/done.ts"'), "");
+  assert.equal(streamedToolPath("edit-diff", '{"filePath":"src/done.ts"'), "src/done.ts");
 });
 
 test("grep: pattern + path come argomenti", () => {

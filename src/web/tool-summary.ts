@@ -8,6 +8,52 @@ export interface ToolSummary {
   args: string; // empty when there is no useful summary
 }
 
+function relativeToolPath(path: string, workspace?: string): string {
+  if (!workspace || !path) return path;
+  const ws = workspace.replace(/[\\/]+$/, "");
+  if (path.startsWith(ws)) {
+    const rest = path.slice(ws.length).replace(/^[\\/]+/, "");
+    return rest ? `./${rest}` : "./";
+  }
+  return path;
+}
+
+function partialJsonString(fragment: string, key: string): string {
+  const match = new RegExp(`"${key}"\\s*:\\s*"`).exec(fragment);
+  if (!match || match.index === undefined) return "";
+  const start = match.index + match[0].length - 1;
+  for (let index = start + 1; index < fragment.length; index += 1) {
+    const char = fragment[index];
+    if (char === "\\") {
+      index += 1;
+      continue;
+    }
+    if (char !== '"') continue;
+    try {
+      const value = JSON.parse(fragment.slice(start, index + 1)) as unknown;
+      return typeof value === "string" ? value : "";
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+// File-tool paths normally arrive before the potentially large edit/write
+// payload. Extract the first complete JSON string without waiting for the
+// enclosing object to finish streaming.
+export function streamedToolPath(
+  name: string,
+  argsFragment: string,
+  workspace?: string,
+): string {
+  if (name !== "edit" && name !== "edit-diff" && name !== "write") return "";
+  const path =
+    partialJsonString(argsFragment, "path") ||
+    partialJsonString(argsFragment, "filePath");
+  return relativeToolPath(path, workspace);
+}
+
 export function toolSummary(
   name: string,
   argsJson: string,
@@ -24,16 +70,7 @@ export function toolSummary(
     typeof args[k] === "string" ? (args[k] as string) : "";
   const num = (k: string): number | undefined =>
     typeof args[k] === "number" ? (args[k] as number) : undefined;
-  // percorso relativo al workspace: /ws/proj/src/x.ts → ./src/x.ts
-  const rel = (p: string): string => {
-    if (!workspace || !p) return p;
-    const ws = workspace.replace(/[\\/]+$/, "");
-    if (p.startsWith(ws)) {
-      const rest = p.slice(ws.length).replace(/^[\\/]+/, "");
-      return rest ? `./${rest}` : "./";
-    }
-    return p;
-  };
+  const rel = (path: string): string => relativeToolPath(path, workspace);
 
   switch (name) {
     case "bash": {

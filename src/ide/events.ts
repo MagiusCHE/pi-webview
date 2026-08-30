@@ -49,6 +49,12 @@ export type UiAction =
 export function handleRpcEvent(state: StreamState, evt: RpcEvent): UiAction {
   switch (evt.type) {
     case "message_start": {
+      const role = (evt.message as { role?: unknown } | undefined)?.role;
+      // RPC forwards user, custom and tool-result lifecycle messages too.
+      // Only assistant messages represent a provider response stream.
+      if (typeof role === "string" && role !== "assistant") {
+        return { kind: "none" };
+      }
       state.active = true;
       state.textByIndex.clear();
       state.thinkingByIndex.clear();
@@ -64,6 +70,10 @@ export function handleRpcEvent(state: StreamState, evt: RpcEvent): UiAction {
     }
 
     case "message_end": {
+      const role = (evt.message as { role?: unknown } | undefined)?.role;
+      if (typeof role === "string" && role !== "assistant") {
+        return { kind: "none" };
+      }
       if (!state.active) return { kind: "none" };
       const indexes = [
         ...new Set([
@@ -196,7 +206,6 @@ function handleDelta(state: StreamState, delta: AssistantDelta): UiAction {
     case "text_start":
     case "text_end":
     case "thinking_start":
-    case "thinking_end":
       return { kind: "none" };
     default:
       return { kind: "none" };

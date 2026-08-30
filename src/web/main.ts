@@ -39,7 +39,7 @@ import type { StatsBarPosition, ThemePreference } from "../ide/protocol.ts";
 import { currentLocale, setLocale, t, tpl, isLocaleId, type LocaleId } from "./i18n.ts";
 import { runtime } from "./environment.ts";
 import { renderMarkdown } from "./markdown.ts";
-import { toolSummary, type ToolSummary } from "./tool-summary.ts";
+import { streamedToolPath, toolSummary, type ToolSummary } from "./tool-summary.ts";
 import {
   attachEditorSelectionContext,
   stripEditorSelectionContext,
@@ -1941,7 +1941,6 @@ async function refreshSessions(): Promise<void> {
 async function loadHistory(): Promise<void> {
   // a session switch/restart: no stale "waiting" state from the previous session
   disarmWaitingResponse();
-  activeToolExecutions = 0;
   try {
     const res = await rpcRequest(rpc.getMessages());
     const messages = (res.data as { messages?: unknown[] } | undefined)?.messages;
@@ -2389,7 +2388,10 @@ let thinkingContentEl: HTMLElement | null = null;
 let thinkingSpinnerEl: HTMLElement | null = null;
 let thinkingTimerEl: HTMLElement | null = null;
 let thinkingStartedAt = 0;
-let thinkingTimer: ReturnType<typeof setInterval> | null = null;
+let thinkingTimer: number | null = null;
+let thinkingRenderFrame: number | null = null;
+let thinkingRenderedLength = 0;
+let thinkingTextNode: Text | null = null;
 // the STOP button lives in the STATUS BAR (right of the context):
 // red, visible only with an active turn, clickable independently
 function updateThinkingStopBtn(visible: boolean): void {
@@ -2409,7 +2411,6 @@ function stopWorking(): void {
   transport.send({ channel: "rpc", payload: rpc.abort() });
   working = false;
   disarmWaitingResponse();
-  activeToolExecutions = 0;
   updateSendButton();
   updateSteerPlaceholder();
   updateThinkingStopBtn(false);
@@ -2446,35 +2447,67 @@ function addMsg(kind: "user" | "assistant" | "status"): HTMLElement {
   return wrapper;
 }
 
-// margin to be considered "at the bottom" (and therefore follow the autoscroll).
-// DELIBERATELY SMALL: just scrolling up a bit with the wheel inhibits the
-// autoscroll. The content growth does NOT depend on this margin (it is
-// handled by stickToBottom, see below).
-const SCROLL_RESUME_MARGIN = 24;
+// Distance at which scrolling back down resumes automatic following. Keep it
+// close to zero: even a small upward wheel movement must release the viewport.
+const SCROLL_RESUME_MARGIN = 4;
 
-// is the user following the chat? Updated ONLY by the scroll event (never by
-// our realignments, which bring it back to true when back at the bottom).
-// Separates the user's INTENT from the content growth: the async rendering
-// moves the bottom but does not change the state → the streaming keeps
-// following until the user really scrolls.
+// Is the user following the chat? Content growth never disables this state:
+// only an actual upward movement does. This prevents streaming updates from
+// being mistaken for the user leaving the bottom.
 let stickToBottom = true;
 
-// smart auto-scroll: follows only if the user is already at the bottom
-function scrollToBottom(force = false): void {
-  if (!force && !stickToBottom) return;
+function alignMessagesToBottom(): void {
   const el = els.messages;
   el.scrollTop = el.scrollHeight;
-  // the rendering is ASYNC (markdown re-render at rAF, images, code blocks):
-  // the content grows AFTER the assignment → realign on the following frames
-  // while the user keeps following (stickToBottom stays true even if the
-  // bottom moved: it changes only if the user scrolls)
-  requestAnimationFrame(() => {
-    if (force || stickToBottom) el.scrollTop = el.scrollHeight;
-    requestAnimationFrame(() => {
-      if (force || stickToBottom) el.scrollTop = el.scrollHeight;
-    });
+}
+
+// Smart auto-scroll: follows only if the user is already at the bottom.
+let scrollFrame: number | null = null;
+let forceScrollPending = false;
+let followScrollPending = false;
+
+function cancelPendingFollow(): void {
+  stickToBottom = false;
+  followScrollPending = false;
+  forceScrollPending = false;
+}
+
+function scrollToBottom(force = false): void {
+  if (!force && !stickToBottom) return;
+  forceScrollPending ||= force;
+  // Preserve the follow decision made before the DOM grew. A layout-triggered
+  // scroll event can observe the new distance before this frame runs; it must
+  // not turn an already-following chat into a detached one.
+  followScrollPending ||= stickToBottom;
+  // Streaming can request scrolling many times before the browser paints.
+  // Coalesce those requests so they cannot starve the thinking clock.
+  if (scrollFrame !== null) return;
+  scrollFrame = requestAnimationFrame(() => {
+    scrollFrame = null;
+    const shouldAlign = forceScrollPending || followScrollPending;
+    forceScrollPending = false;
+    followScrollPending = false;
+    if (shouldAlign) {
+      stickToBottom = true;
+      alignMessagesToBottom();
+    }
   });
 }
+
+// Adding a chat block and filling it are separate operations throughout the
+// renderer. Observe all structural additions so a block completed after
+// addMsg() still keeps the viewport at the bottom. ResizeObserver also covers
+// late layout growth such as images, fonts and expanded Markdown content.
+const chatBlockObserver = new MutationObserver((records) => {
+  const elementAdded = records.some((record) =>
+    Array.from(record.addedNodes).some((node) => node.nodeType === Node.ELEMENT_NODE),
+  );
+  if (elementAdded) scrollToBottom();
+});
+chatBlockObserver.observe(els.thread, { childList: true, subtree: true });
+
+const chatSizeObserver = new ResizeObserver(() => scrollToBottom());
+chatSizeObserver.observe(els.thread);
 
 function openAssistantBubble(): void {
   // a SECOND stream_start for the same message (e.g. provider retry that
@@ -2496,12 +2529,18 @@ function openAssistantBubble(): void {
   thinkingContentEl = null;
   thinkingSpinnerEl = null;
   thinkingTimerEl = null;
-  if (thinkingTimer) {
-    clearInterval(thinkingTimer);
+  if (thinkingTimer !== null) {
+    cancelAnimationFrame(thinkingTimer);
     thinkingTimer = null;
+  }
+  if (thinkingRenderFrame !== null) {
+    cancelAnimationFrame(thinkingRenderFrame);
+    thinkingRenderFrame = null;
   }
   thinkingStartedAt = 0;
   thinkingAccum = "";
+  thinkingRenderedLength = 0;
+  thinkingTextNode = null;
   thinkingContentRendered = false;
   toolsEl = null;
   toolsPre = null;
@@ -2614,26 +2653,60 @@ function syncThinkingChat(): void {
   thinkingExpansionOverride = null;
 }
 
-function startThinkingTimer(): void {
-  thinkingStartedAt = performance.now();
-  if (thinkingTimerEl) thinkingTimerEl.textContent = "0s";
-  if (thinkingTimer) clearInterval(thinkingTimer);
-  thinkingTimer = setInterval(() => {
-    if (!thinkingTimerEl) return;
-    const secs = Math.round((performance.now() - thinkingStartedAt) / 1000);
-    thinkingTimerEl.textContent = `${secs}s`;
-  }, 500);
+function updateThinkingTimer(now = performance.now()): void {
+  if (!thinkingTimerEl || thinkingStartedAt <= 0) return;
+  const secs = Math.max(0, Math.floor((now - thinkingStartedAt) / 1000));
+  const value = `${secs}s`;
+  if (thinkingTimerEl.textContent !== value) thinkingTimerEl.textContent = value;
+}
+
+function startThinkingTimer(startedAt = performance.now()): void {
+  if (thinkingTimer !== null) cancelAnimationFrame(thinkingTimer);
+  thinkingStartedAt = startedAt;
+  updateThinkingTimer();
+  const tick = (now: number): void => {
+    updateThinkingTimer(now);
+    thinkingTimer = requestAnimationFrame(tick);
+  };
+  thinkingTimer = requestAnimationFrame(tick);
 }
 
 function stopThinkingTimer(): void {
-  if (thinkingTimer) {
-    clearInterval(thinkingTimer);
+  if (thinkingTimer !== null) {
+    cancelAnimationFrame(thinkingTimer);
     thinkingTimer = null;
   }
   if (thinkingTimerEl && thinkingStartedAt > 0) {
-    const secs = Math.max(1, Math.round((performance.now() - thinkingStartedAt) / 1000));
+    const secs = Math.max(1, Math.floor((performance.now() - thinkingStartedAt) / 1000));
     thinkingTimerEl.textContent = `${secs}s`;
   }
+}
+
+function renderThinkingContent(): void {
+  thinkingRenderFrame = null;
+  if (!thinkingContentEl || thinkingRenderedLength >= thinkingAccum.length) return;
+  if (!thinkingTextNode || thinkingTextNode.parentNode !== thinkingContentEl) {
+    thinkingContentEl.textContent = "";
+    thinkingTextNode = document.createTextNode(thinkingAccum);
+    thinkingContentEl.appendChild(thinkingTextNode);
+  } else {
+    thinkingTextNode.appendData(thinkingAccum.slice(thinkingRenderedLength));
+  }
+  thinkingRenderedLength = thinkingAccum.length;
+  scrollToBottom();
+}
+
+function scheduleThinkingContentRender(): void {
+  if (thinkingRenderFrame !== null) return;
+  thinkingRenderFrame = requestAnimationFrame(renderThinkingContent);
+}
+
+function flushThinkingContentRender(): void {
+  if (thinkingRenderFrame !== null) {
+    cancelAnimationFrame(thinkingRenderFrame);
+    thinkingRenderFrame = null;
+  }
+  renderThinkingContent();
 }
 
 function ensureThinkingLoader(): HTMLElement {
@@ -2645,6 +2718,8 @@ function ensureThinkingLoader(): HTMLElement {
     thinkingTimerEl = timer ?? null;
     thinkingContentEl = document.createElement("div");
     thinkingContentEl.className = "thinking-content";
+    thinkingRenderedLength = 0;
+    thinkingTextNode = null;
     activateThinkingCard(thinkingEl, thinkingContentEl);
     wireThinkingHead(head, thinkingContentEl);
     thinkingEl.append(head, thinkingContentEl);
@@ -2660,6 +2735,7 @@ function ensureThinkingLoader(): HTMLElement {
 // at thinking end: spinner removed, the content stays expandable
 function finishThinking(): void {
   if (!thinkingEl) return;
+  flushThinkingContentRender();
   stopThinkingTimer();
   thinkingSpinnerEl?.remove();
   thinkingSpinnerEl = null;
@@ -2675,34 +2751,25 @@ function finishThinking(): void {
   }
 }
 
-// --- "Waiting for response" indicator (model requests are serial) -----------
-// The pi agent loop awaits ONE provider stream at a time (pi-agent-core
-// agent-loop.js): a model request is in flight from the moment pi calls the
-// provider until the first chunk arrives (message_start). With a slow provider
-// that gap shows NO output in the chat. A 3s timer arms at every model send
-// (user prompt, turn start, last tool of a batch finished, message ended,
-// provider retry re-issued) and — only when the response is late — shows
-// "Attesa risposta…" with a spinner and the seconds (starting from 3).
-// The card is BUILT with the same structure as the thinking block (head +
-// collapsible content) so that, if the response turns out to be a THOUGHT,
-// it is promoted in place to the thinking block (label swapped, the timer
-// CONTINUES — not restarted). Any other content (text, tool call, empty
-// message) removes it.
-// Tool executions are NOT model waits (the cards already show them): when a
-// batch runs in parallel the wait arms only at the LAST tool_execution_end.
+// --- "Waiting for response" indicator (provider inactivity watchdog) -------
+// `turn_start` arms the initial wait before every provider request. Every text
+// delta resets the same 3s timeout: this also exposes a long silent interval
+// inside one response, for example while the provider prepares a tool call
+// after already streaming prose. Thinking and tool cards have their own live
+// spinner/timer, so they need no additional waiting indicator.
+// Before any content, waiting lives in the thinking slot and can be promoted
+// in place. After visible text, it lives at the message tail and disappears as
+// soon as another text/tool/end event arrives.
 
 const WAITING_DELAY_MS = 3000;
-let waitingWrapper: HTMLElement | null = null;
+let waitingCardEl: HTMLElement | null = null;
 let waitingTimerEl: HTMLElement | null = null;
 let waitingLabelEl: HTMLElement | null = null;
 let waitingSpinnerEl: HTMLElement | null = null;
 let waitingContentEl: HTMLElement | null = null;
 let waitingStartedAt = 0;
-let waitingClock: ReturnType<typeof setInterval> | null = null;
+let waitingClock: number | null = null;
 let waitingTimeout: ReturnType<typeof setTimeout> | null = null;
-// tool_execution_start/end of a parallel batch interleave: arm only when the
-// LAST execution ended (counter hits 0)
-let activeToolExecutions = 0;
 
 function armWaitingResponse(): void {
   if (waitingTimeout) {
@@ -2719,24 +2786,15 @@ function armWaitingResponse(): void {
 }
 
 function showWaitingBlock(): void {
-  if (waitingWrapper) return;
-  const wrapper = addMsg("status");
-  wrapper.className = "msg status waiting-msg";
-  waitingWrapper = wrapper;
-  // the waiting card counts as a THINKING block for the inter-block gap: it
-  // sticks (3px) to a previous thought/tool message, 15px from everything
-  // else. When promoted to a real thinking block the card moves inside the
-  // assistant bubble and applyToolChain re-evaluates the gap with the same
-  // rule (see promoteWaitingToThinking).
-  const prev = wrapper.previousElementSibling;
-  if (prev?.classList.contains("msg") && msgEndsWithThinkTool(prev)) {
-    setToolChain(wrapper);
-  }
-  // SAME structure as the thinking block (card + head + collapsible content):
-  // when the response turns out to be a thought, the card is PROMOTED in
-  // place (label swapped, timer continues) instead of being replaced
+  if (waitingCardEl) return;
+  // Materialize the assistant bubble before the provider stream if needed.
+  // Keeping waiting in the real thinking slot avoids an empty sibling message
+  // and therefore prevents either vertical gap from changing on promotion.
+  if (!currentMsg || !thinkingSlot) openAssistantBubble();
+  if (!thinkingSlot) return;
   const card = document.createElement("div");
-  card.className = "thinking-card";
+  card.className = "thinking-card waiting-card";
+  waitingCardEl = card;
   const head = document.createElement("div");
   head.className = "thinking-head";
   const label = document.createElement("span");
@@ -2758,31 +2816,34 @@ function showWaitingBlock(): void {
   waitingContentEl = content;
   wireThinkingHead(head, content);
   card.appendChild(content);
-  wrapper.appendChild(card);
-  waitingClock = setInterval(() => {
-    if (!waitingTimerEl) return;
-    const secs = Math.floor((performance.now() - waitingStartedAt) / 1000);
+  if (markdownAccum.length > 0 && currentMsg) {
+    currentMsg.appendChild(card);
+  } else {
+    thinkingSlot.appendChild(card);
+    applyToolChain();
+  }
+  const tick = (now: number): void => {
+    if (!waitingTimerEl) {
+      waitingClock = null;
+      return;
+    }
+    const secs = Math.floor((now - waitingStartedAt) / 1000);
     waitingTimerEl.textContent = `${secs}s`;
-  }, 500);
+    waitingClock = requestAnimationFrame(tick);
+  };
+  waitingClock = requestAnimationFrame(tick);
   scrollToBottom();
 }
 
-// the model answered with a THOUGHT while the waiting card was visible: the
-// card is promoted to the thinking block — label → "Pensiero", same spinner,
-// the timer CONTINUES from the waiting start (never restarted) — and moved
-// inside the assistant bubble thinking slot (a real thinking block lives
-// there, before the text). The empty status wrapper is removed.
+// The model answered with a thought while waiting is visible: promote the
+// existing card in place. Only its label/state changes and its timer continues;
+// position and gaps remain exactly the same.
 function promoteWaitingToThinking(): void {
-  if (!waitingWrapper) return;
-  const wrapper = waitingWrapper;
-  const card = wrapper.querySelector<HTMLElement>(".thinking-card");
-  if (!card) {
-    disarmWaitingResponse();
-    return;
-  }
-  // stop the waiting clock: the thinking timer takes over from the SAME start
-  if (waitingClock) {
-    clearInterval(waitingClock);
+  const card = waitingCardEl;
+  if (!card) return;
+  // Stop the waiting clock: the thinking clock takes over from the same start.
+  if (waitingClock !== null) {
+    cancelAnimationFrame(waitingClock);
     waitingClock = null;
   }
   if (waitingTimeout) {
@@ -2790,33 +2851,21 @@ function promoteWaitingToThinking(): void {
     waitingTimeout = null;
   }
   if (waitingLabelEl) waitingLabelEl.textContent = t("thought");
-  // adopt the waiting card as the thinking block (same DOM, no flicker)
+  card.classList.remove("waiting-card");
   thinkingEl = card;
   thinkingSpinnerEl = waitingSpinnerEl;
   thinkingTimerEl = waitingTimerEl;
   thinkingContentEl = waitingContentEl;
+  thinkingRenderedLength = 0;
+  thinkingTextNode = null;
   if (thinkingContentEl) activateThinkingCard(card, thinkingContentEl);
-  thinkingStartedAt = waitingStartedAt;
-  if (thinkingTimer) clearInterval(thinkingTimer);
-  thinkingTimer = setInterval(() => {
-    if (!thinkingTimerEl) return;
-    const secs = Math.round((performance.now() - thinkingStartedAt) / 1000);
-    thinkingTimerEl.textContent = `${secs}s`;
-  }, 500);
-  // move the card into the bubble thinking slot (before the streaming text);
-  // defensive: without a bubble yet (stream_start not processed), open it
-  // NOW — leaving the card in the thread would orphan it and the later
-  // stream_start would create a SECOND thinking block
-  if (!thinkingSlot) openAssistantBubble();
-  if (thinkingSlot) thinkingSlot.appendChild(card);
-  wrapper.remove();
-  waitingWrapper = null;
+  startThinkingTimer(waitingStartedAt);
+  waitingCardEl = null;
   waitingTimerEl = null;
   waitingSpinnerEl = null;
   waitingLabelEl = null;
   waitingContentEl = null;
   updateThinkingBlocksButton();
-  applyToolChain();
   scrollToBottom();
 }
 
@@ -2825,13 +2874,13 @@ function disarmWaitingResponse(): void {
     clearTimeout(waitingTimeout);
     waitingTimeout = null;
   }
-  if (waitingClock) {
-    clearInterval(waitingClock);
+  if (waitingClock !== null) {
+    cancelAnimationFrame(waitingClock);
     waitingClock = null;
   }
-  if (waitingWrapper) {
-    waitingWrapper.remove();
-    waitingWrapper = null;
+  if (waitingCardEl) {
+    waitingCardEl.remove();
+    waitingCardEl = null;
   }
   waitingTimerEl = null;
   waitingSpinnerEl = null;
@@ -4061,20 +4110,24 @@ function renderRpcEvent(evt: RpcEvent): void {
       renderCustomMessageBubble(msg);
       return;
     }
+    // toolResult and other local messages are persisted between turns but are
+    // not provider streams. Passing them to the assistant stream renderer used
+    // to create and immediately remove an empty bubble, shrinking the thread
+    // and occasionally breaking bottom-following.
+    if (role && role !== "assistant") return;
   }
   // compaction: show the block even if started by pi (auto-compaction)
   if (evt.type === "compaction_start") {
     // the compaction block is the feedback: nothing is being awaited
     disarmWaitingResponse();
-    activeToolExecutions = 0;
     showCompactionBlock();
   } else if (evt.type === "compaction_end") {
     // REAL outcome from pi: errorMessage present → failed (the client cannot
     // trust the response alone: it arrives after the event)
     const errMsg = evt.errorMessage as string | undefined;
     finishCompaction(!!errMsg, errMsg);
-    // the run resumes right after a success: another model request is in flight
-    if (!errMsg) armWaitingResponse();
+    // A successful continuation emits turn_start immediately before its next
+    // provider request; do not guess that boundary from compaction completion.
     // steering: after the compaction the queue delivery restarts
     deliverSteering();
   } else if (evt.type === "connection_closed") {
@@ -4094,7 +4147,6 @@ function renderRpcEvent(evt: RpcEvent): void {
     hideBootLoader();
     if (compacting) finishCompaction(true, (evt.errorMessage as string) ?? undefined);
     disarmWaitingResponse();
-    activeToolExecutions = 0;
     working = false;
     updateSendButton();
     const cmd = evt.command as string | undefined;
@@ -4175,19 +4227,12 @@ function renderRpcEvent(evt: RpcEvent): void {
   ) {
     handleToolExecution(evt);
     if (evt.type === "tool_execution_start") {
-      // a tool runs: visible activity in the chat — no model wait
-      activeToolExecutions++;
+      // A tool card and its own timer are visible; this is local execution,
+      // not a provider wait. Parallel tools need no special accounting:
+      // pi emits the next turn_start only after the complete batch settles.
       disarmWaitingResponse();
-    } else if (evt.type === "tool_execution_end") {
-      // LAST tool of the batch finished → the agent calls the model again
-      activeToolExecutions = Math.max(0, activeToolExecutions - 1);
-      if (activeToolExecutions === 0) armWaitingResponse();
     }
     return;
-  }
-  // provider retry re-issued: the new attempt is another model request
-  if (evt.type === "auto_retry_end" && (evt as { success?: unknown }).success === true) {
-    armWaitingResponse();
   }
   const action: UiAction = handleRpcEvent(stream, evt);
   switch (action.kind) {
@@ -4199,16 +4244,23 @@ function renderRpcEvent(evt: RpcEvent): void {
       openAssistantBubble();
       break;
     case "text_delta":
+      // Providers may emit several consecutive thinking content blocks. The
+      // clock stays live across their individual thinking_end events and ends
+      // only when the message actually transitions to visible text.
+      if (thinkingEl && !thinkingContentRendered) finishThinking();
       disarmWaitingResponse();
       markdownAccum += action.delta;
       scheduleMarkdownRender();
       scrollToBottom();
+      // The response is still open. Reset the inactivity watchdog so a pause
+      // before the next text block or tool call becomes visible after 3s.
+      armWaitingResponse();
       break;
     case "thinking_delta":
       // a thought follows the waiting card: PROMOTE it in place (label
       // swapped, timer continues); without a waiting card a fresh thinking
       // block is created
-      if (waitingWrapper) {
+      if (waitingCardEl) {
         promoteWaitingToThinking();
       } else {
         // a thought is already streaming: there is no model wait anymore —
@@ -4218,13 +4270,16 @@ function renderRpcEvent(evt: RpcEvent): void {
         ensureThinkingLoader();
       }
       thinkingAccum += action.delta;
-      if (thinkingContentEl) thinkingContentEl.textContent = thinkingAccum;
-      scrollToBottom();
+      scheduleThinkingContentRender();
       break;
     case "thinking_end":
-      finishThinking();
+      // This ends one content block, not necessarily the complete reasoning:
+      // some providers emit two or more consecutive thinking blocks. Flush
+      // its last delta but keep the clock alive until text/tool/message_end.
+      flushThinkingContentRender();
       break;
     case "tool_call_start":
+      if (thinkingEl && !thinkingContentRendered) finishThinking();
       // the name arrives with toolcall_start (partial.content[index].name):
       // the card is born ALREADY with the real name, no "tool" placeholder
       disarmWaitingResponse();
@@ -4269,6 +4324,8 @@ function renderRpcEvent(evt: RpcEvent): void {
       }
       break;
     case "tool_args_delta":
+      // Fallback for providers/older pi versions that omit toolcall_start.
+      if (thinkingEl && !thinkingContentRendered) finishThinking();
       disarmWaitingResponse();
       ensureToolCard();
       toolsText += action.delta;
@@ -4277,7 +4334,19 @@ function renderRpcEvent(evt: RpcEvent): void {
       // content is long) and the number rises in real time. The edits NO
       // (args in bursts): for them only the exact diff at execution end stays.
       if (toolsEl) {
-        const tName = toolsEl.querySelector(".tool-name")?.textContent;
+        const tName = toolsEl.querySelector(".tool-name")?.textContent ?? "";
+        const streamedPath = streamedToolPath(
+          tName,
+          toolsText,
+          workspacePath ?? undefined,
+        );
+        if (streamedPath) {
+          const argsEl = toolsEl.querySelector<HTMLElement>(".tool-args");
+          if (argsEl && argsEl.title !== streamedPath) {
+            argsEl.textContent = ` ${streamedPath}`;
+            argsEl.title = streamedPath;
+          }
+        }
         if (tName === "write") {
           const lines = (toolsText.match(/\\n/g) ?? []).length;
           let badge = toolsEl.querySelector<HTMLElement>(".tool-diff");
@@ -4300,6 +4369,7 @@ function renderRpcEvent(evt: RpcEvent): void {
       scrollToBottom();
       break;
     case "tool_call":
+      if (thinkingEl && !thinkingContentRendered) finishThinking();
       disarmWaitingResponse();
       if (toolsEl) {
         const tcName = action.toolCall.name;
@@ -4335,12 +4405,9 @@ function renderRpcEvent(evt: RpcEvent): void {
       break;
     case "message_end":
       finalizeMessage(action.message);
-      // a message that produced NO content (empty/error) left the waiting
-      // card hanging: remove it (if it was promoted, the wrapper is gone)
+      // A message that produced no content (empty/error) left the waiting card
+      // hanging. The next provider request, if any, gets its own turn_start.
       disarmWaitingResponse();
-      // if the agent continues (another model call, a follow-up) the request
-      // is already in flight: arm the wait, the next message_start kills it
-      armWaitingResponse();
       break;
     case "system_note":
       // one box per level (error/warn/info), like the terminal console
@@ -4845,8 +4912,8 @@ function renderHistory(messages: unknown[]): void {
     if (ts > 0) lastTs = ts; // base for the next thinking duration
   }
   updateThinkingBlocksButton();
-  const main = els.messages;
-  main.scrollTop = main.scrollHeight;
+  stickToBottom = true;
+  scrollToBottom(true);
 }
 
 // --- "back to bottom" button ------------------------------------------------
@@ -4860,7 +4927,10 @@ updateThinkingBlocksButton();
 els.settingsBtn.innerHTML = settingsIcon();
 els.scrollBottom.title = t("scrollToBottom");
 els.scrollBottom.addEventListener("click", () => {
-  els.messages.scrollTo({ top: els.messages.scrollHeight, behavior: "smooth" });
+  // Rejoin the live bottom immediately. A smooth scroll targets the old
+  // scrollHeight and can fall behind content that arrives during the animation.
+  stickToBottom = true;
+  scrollToBottom(true);
 });
 els.thinkingBlocks.addEventListener("click", () => {
   const bodies = thinkingBodies();
@@ -4870,24 +4940,55 @@ els.thinkingBlocks.addEventListener("click", () => {
   for (const body of bodies) setThinkingBodyExpanded(body, expand);
   updateThinkingBlocksButton();
 });
+// A wheel-up gesture expresses intent before the browser emits its scroll
+// event. Disable following immediately so an already scheduled render frame
+// cannot pull the viewport back down and cause visible oscillation.
 els.messages.addEventListener(
-  "scroll",
-  () => {
-    const dist =
-      els.messages.scrollHeight - els.messages.scrollTop - els.messages.clientHeight;
-    stickToBottom = dist < SCROLL_RESUME_MARGIN;
-    els.scrollBottom.hidden = dist < SCROLL_BTN_MARGIN;
+  "wheel",
+  (event) => {
+    if (event.deltaY < 0 && els.messages.scrollHeight > els.messages.clientHeight + 1) {
+      cancelPendingFollow();
+    }
   },
   { passive: true },
 );
-// images loaded late (markdown) grow the content after the scroll:
-// if the user is following, realign on load
+// Scrollbar drags and touch scrolling express user intent without a wheel
+// event. Cancel a queued follow before their resulting scroll event arrives.
+els.messages.addEventListener(
+  "pointerdown",
+  (event) => {
+    const rect = els.messages.getBoundingClientRect();
+    const onScrollbar = event.pointerType === "mouse" && event.clientX >= rect.right - 20;
+    if (onScrollbar) cancelPendingFollow();
+  },
+  { passive: true },
+);
+els.messages.addEventListener("touchmove", cancelPendingFollow, { passive: true });
+els.messages.addEventListener(
+  "scroll",
+  () => {
+    const currentTop = els.messages.scrollTop;
+    const dist = Math.max(
+      0,
+      els.messages.scrollHeight - currentTop - els.messages.clientHeight,
+    );
+    // A content mutation can emit a scroll event after scrollHeight grows but
+    // before the queued alignment frame. Keep the captured follow intent in
+    // that window; explicit wheel/scrollbar/touch gestures cancel it above.
+    if (!followScrollPending && !forceScrollPending) {
+      stickToBottom = dist <= SCROLL_RESUME_MARGIN;
+    }
+    els.scrollBottom.hidden =
+      followScrollPending || forceScrollPending || dist < SCROLL_BTN_MARGIN;
+  },
+  { passive: true },
+);
+// Images loaded late grow the content after the initial render. The resize
+// observer normally handles this; the load hook keeps an immediate fallback.
 els.thread.addEventListener(
   "load",
-  (e) => {
-    if (e.target instanceof HTMLImageElement && stickToBottom) {
-      els.messages.scrollTop = els.messages.scrollHeight;
-    }
+  (event) => {
+    if (event.target instanceof HTMLImageElement) scrollToBottom();
   },
   true,
 );
@@ -5627,8 +5728,7 @@ function sendOrStop(): void {
       inlineImages.length > 0 ? { images: inlineImages } : undefined,
     ),
   });
-  // the model request is in flight: "Attesa risposta…" if it takes > 3s
-  armWaitingResponse();
+  // turn_start will arm the provider wait at the authoritative boundary.
   // slash command sent: after the user bubble is in chat, signal that
   // the extension commands need a pi.dev core change
   if (message.trim().startsWith("/")) notifyCmdNotImplemented();
@@ -5892,6 +5992,7 @@ function msgEndsWithThinkTool(msg: Element): boolean {
   const last = msg.lastElementChild;
   if (!last) return false;
   if (last.classList.contains("tool-card")) return true;
+  if (last.classList.contains("thinking-card")) return true;
   // thinking slot as last child: counts only if it contains the card
   if (last.classList.contains("thinking-slot")) {
     return !!last.querySelector(".thinking-card");
@@ -6731,23 +6832,23 @@ document.addEventListener("keydown", (e) => {
 function trackWorking(evt: RpcEvent): void {
   if (evt.type === "agent_start") {
     working = true;
-    // a fresh turn: no tool of the previous one is still executing
-    activeToolExecutions = 0;
-    // the first model request of the turn is in flight
-    armWaitingResponse();
     // an agent run is part of the extension work at resume: the loading
     // overlay must not end while it is active
     loadingAgentActive = true;
     updateSendButton();
     updateSteerPlaceholder();
     updateThinkingStopBtn(true);
+  } else if (evt.type === "turn_start") {
+    // Authoritative provider-request boundary from pi-agent-core. It is also
+    // emitted for retries and follow-up turns, so no inferred re-arming is
+    // needed at message_end, tool_execution_end or auto_retry_end.
+    armWaitingResponse();
   } else if (evt.type === "agent_settled") {
     working = false;
     loadingAgentActive = false;
     // extension run finished: re-evaluate the loading end (quiet + idle)
     if (sessionLoading) armLoadingQuiet();
     disarmWaitingResponse();
-    activeToolExecutions = 0;
     // stops the tool timers left active (e.g. tool ABORTED by STOP:
     // no tool_execution_end → the timer would run forever)
     clearToolTimers();

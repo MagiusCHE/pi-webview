@@ -89,6 +89,37 @@ test("message_end senza streaming attivo è ignorato", () => {
   assert.equal(a.kind, "none");
 });
 
+test("i messaggi toolResult non aprono uno stream assistant vuoto", () => {
+  const s = emptyStream();
+  const start = handleRpcEvent(s, {
+    type: "message_start",
+    message: { role: "toolResult", content: [{ type: "text", text: "ok" }] },
+  });
+  const end = handleRpcEvent(s, {
+    type: "message_end",
+    message: { role: "toolResult", content: [{ type: "text", text: "ok" }] },
+  });
+  assert.equal(start.kind, "none");
+  assert.equal(end.kind, "none");
+  assert.equal(s.active, false);
+});
+
+test("un messaggio locale non azzera uno stream assistant attivo", () => {
+  const s = emptyStream();
+  handleRpcEvent(s, { type: "message_start", message: { role: "assistant" } });
+  handleRpcEvent(s, {
+    type: "message_update",
+    assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "testo" },
+  });
+  handleRpcEvent(s, { type: "message_start", message: { role: "custom" } });
+  const end = handleRpcEvent(s, {
+    type: "message_end",
+    message: { role: "assistant" },
+  });
+  assert.equal(end.kind, "message_end");
+  if (end.kind === "message_end") assert.equal(end.message.text, "testo");
+});
+
 test("nuovo message_start azzera lo stato precedente", () => {
   const s = emptyStream();
   handleRpcEvent(s, { type: "message_start", message: {} });

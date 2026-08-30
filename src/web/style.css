@@ -948,11 +948,9 @@ header {
   }
 }
 
-/* --- "Waiting for response" indicator: the SAME card structure as the
-       thinking block (head + spinner + timer + collapsible content). Shown
-       only when a model response is late (delay > 3s); when the first
-       content is a THOUGHT the card is promoted to the thinking block (label
-       swapped, timer continues), any other content removes it. --- */
+/* --- "Waiting for response" indicator: before content it lives in the
+       thinking slot; during a silent streaming pause it lives at the current
+       message tail until the next visible provider event. --- */
 
 /* --- tool cards with uniform copy --- */
 .tool-card {

@@ -39,7 +39,12 @@ import type { StatsBarPosition, ThemePreference } from "../ide/protocol.ts";
 import { currentLocale, setLocale, t, tpl, isLocaleId, type LocaleId } from "./i18n.ts";
 import { runtime } from "./environment.ts";
 import { renderMarkdown } from "./markdown.ts";
-import { streamedToolPath, toolSummary, type ToolSummary } from "./tool-summary.ts";
+import {
+  streamedToolFilePath,
+  streamedToolPath,
+  toolSummary,
+  type ToolSummary,
+} from "./tool-summary.ts";
 import {
   attachEditorSelectionContext,
   stripEditorSelectionContext,
@@ -56,6 +61,7 @@ import {
   chatIcon,
   folderIcon,
   scrollDownIcon,
+  openFileIcon,
   copyIcon,
   checkIcon,
   pencilIcon,
@@ -3511,6 +3517,29 @@ function enhanceCodeBlocks(container: HTMLElement): void {
 
 // --- message finalization ---------------------------------------------------
 
+function renderToolOpenButton(el: HTMLElement, filePath?: string): void {
+  const row = el.parentElement;
+  row?.querySelector(".tool-open-file")?.remove();
+  if (!row || !filePath) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "tool-open-file";
+  button.innerHTML = openFileIcon();
+  button.title = t("openFile");
+  button.setAttribute("aria-label", button.title);
+  button.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const result = await ideRequest({ type: "openFile", path: filePath });
+    if (!result?.ok) {
+      addSystemBox("error", tpl(t("openFileFailed"), { error: result?.error ?? "?" }));
+    }
+  });
+  const args = row.querySelector(".tool-args");
+  if (args) args.after(button);
+  else el.after(button);
+}
+
 // tool card header: name in pill (solid accent), muted arguments next to it
 function renderToolHeader(el: HTMLElement, summary: ToolSummary): void {
   el.textContent = summary.name;
@@ -3521,6 +3550,7 @@ function renderToolHeader(el: HTMLElement, summary: ToolSummary): void {
     args.textContent = ` ${summary.args}`;
     el.after(args);
   }
+  renderToolOpenButton(el, summary.filePath);
 }
 
 // track the last assistant text of the current turn: used to synthesize the
@@ -4402,6 +4432,10 @@ function renderRpcEvent(evt: RpcEvent): void {
             argsEl.textContent = ` ${streamedPath}`;
             argsEl.title = streamedPath;
           }
+          renderToolOpenButton(
+            toolsEl.querySelector<HTMLElement>(".tool-name")!,
+            streamedToolFilePath(tName, toolsText),
+          );
         }
         if (tName === "write") {
           const lines = (toolsText.match(/\\n/g) ?? []).length;

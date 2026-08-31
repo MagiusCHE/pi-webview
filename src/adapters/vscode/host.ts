@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { PiProcess } from "../../bridge/pi-process.ts";
 import { resolvePi, findPiFallback, findPiViaShell } from "../../bridge/spawn.ts";
 import { samePath } from "../../ide/paths.ts";
@@ -516,6 +516,24 @@ export abstract class PiWebviewHost {
         this.cb.onNewChat();
         this.respond(req.id, true);
         return;
+      case "openFile": {
+        try {
+          const filePath = isAbsolute(req.path)
+            ? req.path
+            : resolve(this.workspace() ?? "", req.path);
+          const document = await vscode.workspace.openTextDocument(filePath);
+          await vscode.window.showTextDocument(document, { preview: false });
+          this.respond(req.id, true, { path: filePath });
+        } catch (err) {
+          this.respond(
+            req.id,
+            false,
+            undefined,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+        return;
+      }
       case "getBalance":
         void fetchProviderBalance(req.provider).then((b) =>
           this.respond(req.id, true, b ?? null),

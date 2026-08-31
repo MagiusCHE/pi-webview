@@ -6,6 +6,8 @@
 export interface ToolSummary {
   name: string;
   args: string; // empty when there is no useful summary
+  /** Original path sent by edit/write, used by the host-side open-file action. */
+  filePath?: string;
 }
 
 function relativeToolPath(path: string, workspace?: string): string {
@@ -42,16 +44,19 @@ function partialJsonString(fragment: string, key: string): string {
 // File-tool paths normally arrive before the potentially large edit/write
 // payload. Extract the first complete JSON string without waiting for the
 // enclosing object to finish streaming.
+export function streamedToolFilePath(name: string, argsFragment: string): string {
+  if (name !== "edit" && name !== "edit-diff" && name !== "write") return "";
+  return (
+    partialJsonString(argsFragment, "path") || partialJsonString(argsFragment, "filePath")
+  );
+}
+
 export function streamedToolPath(
   name: string,
   argsFragment: string,
   workspace?: string,
 ): string {
-  if (name !== "edit" && name !== "edit-diff" && name !== "write") return "";
-  const path =
-    partialJsonString(argsFragment, "path") ||
-    partialJsonString(argsFragment, "filePath");
-  return relativeToolPath(path, workspace);
+  return relativeToolPath(streamedToolFilePath(name, argsFragment), workspace);
 }
 
 export function toolSummary(
@@ -104,7 +109,8 @@ export function toolSummary(
     case "edit":
     case "edit-diff":
     case "write": {
-      return { name, args: rel(str("path") || str("filePath")) };
+      const filePath = str("path") || str("filePath");
+      return { name, args: rel(filePath), filePath: filePath || undefined };
     }
     case "grep":
     case "find": {

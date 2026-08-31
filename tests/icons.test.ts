@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { trustIcon, sendIcon, stopIcon } from "../src/web/icons.ts";
+import { openFileIcon, trustIcon, sendIcon, stopIcon } from "../src/web/icons.ts";
 
 test("trustIcon: shield colorabile via currentColor", () => {
   const s = trustIcon("shield");
@@ -33,4 +33,11 @@ test("sendIcon/stopIcon: icone SVG colorabili, glifi diversi", () => {
   assert.match(stop, /M6 6h12v12H6/);
   // they are not the same icon
   assert.notEqual(send, stop);
+});
+
+test("openFileIcon: external-link SVG colorabile", () => {
+  const icon = openFileIcon();
+  assert.match(icon, /^<svg/);
+  assert.match(icon, /fill="currentColor"/);
+  assert.match(icon, /M19 19H5V5h7V3/);
 });

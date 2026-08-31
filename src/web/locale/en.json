@@ -80,6 +80,8 @@
     "notifyVscode": "VS Code notifications",
     "now": "now",
     "ok": "OK",
+    "openFile": "Open file",
+    "openFileFailed": "Could not open the file: {error}",
     "parentFolder": "parent folder",
     "piDied": "pi terminated: reload the window to reconnect",
     "piDiedHint": "pi terminated or failed to start. Verify it works from a terminal: `{command}` — if it errors out, pi is not set up correctly.",

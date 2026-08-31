@@ -80,6 +80,8 @@
     "notifyVscode": "Notifiche di VS Code",
     "now": "ora",
     "ok": "OK",
+    "openFile": "Apri file",
+    "openFileFailed": "Impossibile aprire il file: {error}",
     "parentFolder": "cartella superiore",
     "piDied": "pi è terminato: ricarica la finestra per ricollegarti",
     "piDiedHint": "pi è terminato o non è partito. Verifica che funzioni dal terminale: `{command}` — se lancia un errore, pi non è configurato correttamente.",

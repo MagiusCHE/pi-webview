@@ -976,9 +976,9 @@ header {
 .tool-card summary {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   cursor: pointer;
-  padding: 6px 10px;
+  padding: 3px 10px;
   font-size: 13px;
   font-weight: 600;
   color: var(--fg);
@@ -1042,11 +1042,34 @@ header {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tool-open-file {
+  width: 22px;
+  flex: 0 0 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-tertiary);
+  cursor: pointer;
+}
+.tool-open-file:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+.tool-open-file:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+.tool-open-file svg {
+  display: block;
+}
 .tool-timer {
   flex: 0 0 auto;
   color: var(--fg-tertiary);
   font-size: 11px;
-  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   margin-left: 8px;
   white-space: nowrap;
@@ -1061,7 +1084,6 @@ header {
   align-items: center;
   gap: 6px;
   margin-left: 8px;
-  font-family: var(--font-mono);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

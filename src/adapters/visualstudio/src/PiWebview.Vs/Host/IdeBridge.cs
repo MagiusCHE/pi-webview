@@ -233,8 +233,12 @@ public static class IdeBridge
                     await host.Jtf.SwitchToMainThreadAsync();
                     try
                     {
-                        host.Dte.ItemOperations.OpenFile(req.Path);
-                        host.PostIdeResponse(Ok(req, null));
+                        var filePath = req.Path;
+                        var workspace = host.Workspace();
+                        if (!System.IO.Path.IsPathRooted(filePath) && !string.IsNullOrWhiteSpace(workspace))
+                            filePath = System.IO.Path.GetFullPath(System.IO.Path.Combine(workspace, filePath));
+                        host.Dte.ItemOperations.OpenFile(filePath);
+                        host.PostIdeResponse(Ok(req, new Dictionary<string, object?> { ["path"] = filePath }));
                     }
                     catch (Exception ex)
                     {

@@ -52,6 +52,7 @@ import { getPiSettings, setPiSettingFile, setPiSettingsFile } from "./pi-setting
 import { readStartupInfo } from "./startup-info.ts";
 import { saveAttachment, pathExists, attachFromPath } from "./attachments.ts";
 import { fetchProviderBalance } from "./balance.ts";
+import { revealFileInSystemManager } from "./open-file.ts";
 import { clearLock } from "./lock.ts";
 
 // same deterministic log as the VS Code companion: ~/.pi/pi-webview/companion.log
@@ -603,6 +604,17 @@ function main(): void {
       }
       if (req.type === "pathExists") {
         respond(req.id ?? "", { ok: true, data: { exists: pathExists(req.path) } });
+        return;
+      }
+      if (req.type === "openFile") {
+        void revealFileInSystemManager(req.path, workspaceDir)
+          .then((path) => respond(req.id ?? "", { ok: true, data: { path } }))
+          .catch((err: unknown) =>
+            respond(req.id ?? "", {
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
         return;
       }
       if (req.type === "getSessionInfo") {

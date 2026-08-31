@@ -1000,6 +1000,30 @@ header {
 .tool-card summary:hover {
   background: var(--hover);
 }
+.tool-status {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tool-status .spinner {
+  width: 13px;
+  height: 13px;
+  border-width: 2px;
+}
+.tool-status svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+.tool-status-success {
+  color: var(--diff-add, #7bd88f);
+}
+.tool-status-error {
+  color: var(--diff-rem, #e06c75);
+}
 .tool-name {
   flex: 0 0 auto; /* non si restringe: gli args usano tutto lo spazio restante */
   color: var(--accent-text);

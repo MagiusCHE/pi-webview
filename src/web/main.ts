@@ -2580,7 +2580,7 @@ function makeThinkingHead(withSpinner = true): {
   if (withSpinner) {
     const spinner = document.createElement("span");
     spinner.className = "spinner";
-    head.append(label, spinner, timer);
+    head.append(spinner, label, timer);
     return { head, label, spinner, timer };
   }
   head.append(label, timer);
@@ -2808,7 +2808,7 @@ function showWaitingBlock(): void {
   waitingTimerEl.className = "thinking-timer";
   // the wait is already 3s when it appears: the seconds start from there
   waitingTimerEl.textContent = `${Math.floor(WAITING_DELAY_MS / 1000)}s`;
-  head.append(label, spinner, waitingTimerEl);
+  head.append(spinner, label, waitingTimerEl);
   card.appendChild(head);
   const content = document.createElement("div");
   content.className = "thinking-content";
@@ -3598,6 +3598,39 @@ function createToolCard(tc: ToolCallInfo): void {
   if (tc.id) toolCardsById.set(tc.id, card);
 }
 
+type ToolExecutionStatus = "running" | "success" | "error";
+
+function setToolExecutionStatus(card: HTMLElement, status: ToolExecutionStatus): void {
+  const name = card.querySelector(".tool-name");
+  if (!name) return;
+  let indicator = card.querySelector<HTMLElement>(".tool-status");
+  if (!indicator) {
+    indicator = document.createElement("span");
+    indicator.className = "tool-status";
+    name.before(indicator);
+  }
+  card.dataset.toolStatus = status;
+  indicator.className = `tool-status tool-status-${status}`;
+  indicator.textContent = "";
+  const label = t(
+    status === "running"
+      ? "toolRunning"
+      : status === "success"
+        ? "toolSucceeded"
+        : "toolFailed",
+  );
+  indicator.title = label;
+  indicator.setAttribute("aria-label", label);
+  if (status === "running") {
+    const spinner = document.createElement("span");
+    spinner.className = "spinner";
+    spinner.setAttribute("aria-hidden", "true");
+    indicator.appendChild(spinner);
+  } else {
+    indicator.innerHTML = status === "success" ? checkIcon() : trustIcon("warn-filled");
+  }
+}
+
 function buildToolCard(tc: ToolCallInfo): HTMLElement {
   const d = document.createElement("details");
   d.className = "tool-card";
@@ -3656,7 +3689,7 @@ function buildThinkingCard(content: string, durationMs = 0): HTMLElement {
 }
 
 // compact card for a tool result (truncated output)
-function buildResultCard(toolName: string, output: string): HTMLElement {
+function buildResultCard(toolName: string, output: string, isError = false): HTMLElement {
   const d = document.createElement("details");
   d.className = "tool-card";
   const s = document.createElement("summary");
@@ -3682,6 +3715,7 @@ function buildResultCard(toolName: string, output: string): HTMLElement {
   addCopyButton(header, output);
   body.append(header, pre);
   d.append(s, body);
+  setToolExecutionStatus(d, isError ? "error" : "success");
   return d;
 }
 
@@ -3738,6 +3772,15 @@ function clearToolTimers(): void {
     if (state.clock) clearInterval(state.clock);
   }
   toolTimers.clear();
+}
+
+function failRunningTools(): void {
+  for (const card of Array.from(
+    els.thread.querySelectorAll<HTMLElement>('.tool-card[data-tool-status="running"]'),
+  )) {
+    stopToolTimer(card);
+    setToolExecutionStatus(card, "error");
+  }
 }
 const toolOutputPre = new Map<string, HTMLPreElement>();
 // start timestamps of the tools in the history (assistant → toolResult)
@@ -3801,6 +3844,7 @@ function splitAskUserCard(
 ): HTMLElement[] {
   const cards: HTMLElement[] = [firstCard];
   firstCard.dataset.askUser = "true";
+  const inheritedStatus = firstCard.dataset.toolStatus as ToolExecutionStatus | undefined;
   setAskUserHeader(firstCard, questions[0]?.question ?? "");
   const label = firstCard.querySelector(".code-label");
   if (label) label.textContent = "ask_user";
@@ -3814,6 +3858,7 @@ function splitAskUserCard(
     const card = buildToolCard({ id: "", name: "ask_user", args: "" });
     card.dataset.askUser = "true";
     setAskUserHeader(card, questions[i]?.question ?? "");
+    if (inheritedStatus) setToolExecutionStatus(card, inheritedStatus);
     const pre = card.querySelector<HTMLPreElement>(".code-block pre");
     if (pre) pre.textContent = questions[i]?.question ?? "";
     card.querySelector(".tool-timer")?.remove();
@@ -4040,8 +4085,11 @@ function handleToolExecution(evt: RpcEvent): void {
   const card = toolCardsById.get(id);
   if (!card) return;
   if (evt.type === "tool_execution_start") {
-    // timer on ALL the cards (ask_user has one per question)
-    forEachToolCard(id, (c) => startToolTimer(c));
+    // timer/status on ALL the cards (ask_user has one per question)
+    forEachToolCard(id, (c) => {
+      setToolExecutionStatus(c, "running");
+      startToolTimer(c);
+    });
     const pre = ensureToolOutput(card, id);
     pre.textContent = "";
   } else if (evt.type === "tool_execution_update") {
@@ -4053,7 +4101,11 @@ function handleToolExecution(evt: RpcEvent): void {
       scrollToBottom();
     }
   } else if (evt.type === "tool_execution_end") {
-    forEachToolCard(id, (c) => stopToolTimer(c));
+    const status: ToolExecutionStatus = evt.isError === true ? "error" : "success";
+    forEachToolCard(id, (c) => {
+      stopToolTimer(c);
+      setToolExecutionStatus(c, status);
+    });
     const res = evt.result as
       { content?: unknown; details?: { diff?: string } } | undefined;
     // added/removed/modified lines from the diff (edit/write/edit-diff)
@@ -4145,6 +4197,7 @@ function renderRpcEvent(evt: RpcEvent): void {
     // up (get_state retries ≈ up to 27s) — the error must appear right away.
     endSessionLoading(); // also clears the loading timers
     hideBootLoader();
+    failRunningTools();
     if (compacting) finishCompaction(true, (evt.errorMessage as string) ?? undefined);
     disarmWaitingResponse();
     working = false;
@@ -4299,6 +4352,7 @@ function renderRpcEvent(evt: RpcEvent): void {
           // second start at execution_start is a no-op) and stopToolTimer at
           // execution_end freezes it.
           startToolTimer(card);
+          setToolExecutionStatus(card, "running");
           // new tool: reset the args of the previous tool (multi-tool)
           toolsText = "";
           if (toolsPre) toolsPre.textContent = "";
@@ -4327,7 +4381,9 @@ function renderRpcEvent(evt: RpcEvent): void {
       // Fallback for providers/older pi versions that omit toolcall_start.
       if (thinkingEl && !thinkingContentRendered) finishThinking();
       disarmWaitingResponse();
-      ensureToolCard();
+      const fallbackCard = ensureToolCard();
+      startToolTimer(fallbackCard);
+      setToolExecutionStatus(fallbackCard, "running");
       toolsText += action.delta;
       if (toolsPre) toolsPre.textContent = toolsText;
       // write: LIVE line counter — here the deltas REALLY scroll (the
@@ -4876,6 +4932,9 @@ function renderHistory(messages: unknown[]): void {
       const tcId = (msg as { toolCallId?: string }).toolCallId;
       const card = tcId ? toolCardsById.get(tcId) : undefined;
       if (card && tcId) {
+        forEachToolCard(tcId, (c) =>
+          setToolExecutionStatus(c, msg.isError === true ? "error" : "success"),
+        );
         const start = toolStartTimes.get(tcId);
         const ts = parseTs(msg);
         // ask_user: distribute the result per question (header → answer,
@@ -4906,7 +4965,9 @@ function renderHistory(messages: unknown[]): void {
       } else {
         // nessun match (es. sessioni vecchie): card risultato separata
         const wrapper = addMsg("assistant");
-        wrapper.appendChild(buildResultCard(msg.toolName ?? "bash", output));
+        wrapper.appendChild(
+          buildResultCard(msg.toolName ?? "bash", output, msg.isError === true),
+        );
       }
     }
     if (ts > 0) lastTs = ts; // base for the next thinking duration
@@ -5052,7 +5113,7 @@ function showCompactionBlock(): void {
   compactTimerEl = document.createElement("span");
   compactTimerEl.className = "thinking-timer";
   compactTimerEl.textContent = "0s";
-  head.append(label, spinner, compactTimerEl);
+  head.append(spinner, label, compactTimerEl);
   card.appendChild(head);
   wrapper.appendChild(card);
   compactStartedAt = performance.now();
@@ -6849,9 +6910,9 @@ function trackWorking(evt: RpcEvent): void {
     // extension run finished: re-evaluate the loading end (quiet + idle)
     if (sessionLoading) armLoadingQuiet();
     disarmWaitingResponse();
-    // stops the tool timers left active (e.g. tool ABORTED by STOP:
-    // no tool_execution_end → the timer would run forever)
-    clearToolTimers();
+    // Tools aborted by STOP have no tool_execution_end: freeze their timers
+    // and turn every still-running spinner into a visible failure.
+    failRunningTools();
     void fetchSessionStats(); // context/token updated at turn end
     void fetchBalance(); // the balance changes after the usage
     updateSendButton();
@@ -6924,6 +6985,7 @@ function renderDemo(): void {
   addCopyButton(header, pre.textContent);
   body.append(header, pre);
   tool.append(s, body);
+  setToolExecutionStatus(tool, "success");
   asst.appendChild(tool);
 }
 

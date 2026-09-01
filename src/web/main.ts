@@ -136,7 +136,7 @@ const els = {
   statsSlots: document.getElementById("stats-slots") as HTMLSpanElement,
   statsStop: document.getElementById("btn-stop") as HTMLButtonElement,
   inputBox: document.querySelector(".input-box") as HTMLElement,
-  header: document.querySelector("header") as HTMLElement,
+  statsTopbarRow: document.getElementById("stats-topbar-row") as HTMLDivElement,
   scrollBottom: document.getElementById("scroll-bottom") as HTMLButtonElement,
   connectPanel: document.getElementById("connect-panel") as HTMLDivElement,
   connectUrl: document.getElementById("connect-url") as HTMLInputElement,
@@ -600,8 +600,8 @@ function applyStatsBarPosition(pos: StatsBarPosition): void {
     "stats-bar-topbar",
   );
   document.body.classList.add(`stats-bar-${pos}`);
-  // DOM placement: above/below the composer, or as the last header row
-  if (pos === "topbar") els.header.appendChild(els.statsBadge);
+  // DOM placement: above/below the composer, or on its own header row.
+  if (pos === "topbar") els.statsTopbarRow.appendChild(els.statsBadge);
   else if (pos === "below") els.inputBox.after(els.statsBadge);
   else els.inputBox.before(els.statsBadge);
   els.statsBarPos.value = pos;

@@ -2214,6 +2214,15 @@ body.stats-bar-below .stats-badge {
 body.stats-bar-topbar header {
   flex-wrap: wrap;
 }
+.stats-topbar-row {
+  display: none;
+}
+body.stats-bar-topbar .stats-topbar-row {
+  display: block;
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 0;
+}
 body.stats-bar-topbar .input-box {
   border-top: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);

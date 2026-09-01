@@ -2285,7 +2285,7 @@ body.stats-bar-topbar .stats-slots {
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 0 8px;
   overflow: hidden;
 }
 /* "muted" pipe after the context block, only if there is at least one extension slot */

@@ -38,6 +38,34 @@ webview è la UI.
 - pnpm 11: le impostazioni vivono in `pnpm-workspace.yaml`
   (il campo `pnpm` di package.json non è più letto)
 
+## Aggiornamento degli artefatti locali solo su richiesta
+
+Al termine dello sviluppo ordinario **NON** compilare o reinstallare
+automaticamente i companion VS Code/Visual Studio, non aggiornare il package
+locale `piw` e non arrestare o riavviare il bridge. Eseguire la procedura
+seguente solo quando l'utente lo richiede esplicitamente dicendo di
+**aggiornare gli artefatti**. La richiesta di una release costituisce invece
+autorizzazione separata e, in quel caso, prevale la regola di build completa
+indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
+
+- **Aggiornamento artefatti su Linux**: compilare il companion VS Code, reinstallarlo
+  forzatamente e aggiornare anche il package locale `piw` (bundle launcher,
+  bridge e UI servita dal browser). Se un bridge `piw` è attivo, leggere e
+  conservare la sua porta dal lock senza stampare il token, eseguire `piw -k` e
+  riavviarlo in background sulla stessa porta con `piw -b --port <porta>`. A
+  fine lavoro comunicare all'utente che può eseguire il reload di VS Code e che
+  `piw` è stato riavviato in background, indicando la porta.
+- **Aggiornamento artefatti su Windows**: compilare i companion VS Code e Visual Studio,
+  reinstallare forzatamente entrambi e aggiornare anche il package locale
+  `piw` (bundle launcher, bridge e UI servita dal browser). Se un bridge `piw`
+  è attivo, leggere e conservare la sua porta dal lock senza stampare il token,
+  eseguire `piw -k` e riavviarlo in background sulla stessa porta con
+  `piw -b --port <porta>`. A fine lavoro comunicare all'utente che può eseguire
+  il reload di VS Code e/o Visual Studio e che `piw` è stato riavviato in
+  background, indicando la porta.
+- Se nessun bridge `piw` era attivo, non inventare una porta e non avviarne uno
+  implicitamente: segnalarlo chiaramente nel riepilogo finale.
+
 ## Architettura prevista (concept 0001 + 0002)
 
 - Layering: UI web pura ↔ IDE bridge protocol ↔ host adapter ↔ pi core

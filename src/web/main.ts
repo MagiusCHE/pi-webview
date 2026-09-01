@@ -341,7 +341,7 @@ function setupTransport(tr: Transport): void {
           // loading begins NOW (before get_state): slow extensions logging
           // during the resume must land in the loader box, not in the chat
           beginSessionLoading();
-          await refreshSessions();
+          await refreshSessions(true);
         })();
       }
     } else if (s.state === "closed") {
@@ -1622,6 +1622,40 @@ function isNewSession(s?: SessionInfo): boolean {
   return !s || !s.messageCount || s.messageCount === 0;
 }
 
+function formatSessionEventTime(timestamp: number): string {
+  return new Intl.DateTimeFormat(currentLocale === "it" ? "it-IT" : "en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(timestamp));
+}
+
+// Pure UI status: it is appended after history on every real resume and is
+// never written to the append-only session file.
+function addSessionResumedStatus(info: SessionInfo): void {
+  const timestamp = info.lastEventAt ?? info.lastActivity ?? info.mtime;
+  if (!timestamp || !Number.isFinite(timestamp)) return;
+  const date = formatSessionEventTime(timestamp);
+  if (typeof info.compactionCount !== "number") {
+    addStatusLine(tpl(t("sessionResumed"), { date }));
+    return;
+  }
+  const key =
+    info.compactionCount === 1
+      ? "sessionResumedCompactionsOne"
+      : "sessionResumedCompactionsMany";
+  addStatusLine(
+    tpl(t(key), {
+      date,
+      count: String(info.compactionCount),
+    }),
+  );
+}
+
 function populateSessionMenu(): void {
   els.sessionFilters.textContent = "";
   els.sessionItems.textContent = "";
@@ -1823,7 +1857,7 @@ function pollSessionTitle(attempts = 10, interval = 4000): void {
   }, interval);
 }
 
-async function refreshSessions(): Promise<void> {
+async function refreshSessions(showResumeNotice = false): Promise<void> {
   // get_state can fail at startup (pi not ready yet in the webview):
   // retry until the process answers (short per-attempt timeout)
   for (let attempt = 0; attempt < 6; attempt++) {
@@ -1941,6 +1975,17 @@ async function refreshSessions(): Promise<void> {
   await loadSteerQueue();
   updateSteerPlaceholder();
   deliverSteering();
+  if (showResumeNotice && !blockedResumeModel && sessionHasMessages) {
+    let info = currentSession();
+    if (!info && currentSessionPath) {
+      const infoRes = await ideRequest({
+        type: "getSessionInfo",
+        path: currentSessionPath,
+      });
+      if (infoRes?.ok) info = infoRes.data as SessionInfo;
+    }
+    if (info) addSessionResumedStatus(info);
+  }
   void fetchSlashCommands(); // extension commands for the palette (plan 0003)
 }
 
@@ -2228,7 +2273,7 @@ async function resumeSessionInWorkspace(path: string, folder: string): Promise<v
     currentSessionPath = path;
     els.thread.textContent = "";
     sessionHasMessages = false;
-    await refreshSessions();
+    await refreshSessions(true);
     loaded = true;
   } catch {
     // The bridge could not switch/restart: close the loading overlay without
@@ -2367,7 +2412,7 @@ function switchSession(path: string): void {
         els.thread.textContent = "";
         // Refresh get_state after the switch. pi already restored the saved
         // model; retaining the previous state made it look like a fallback.
-        await refreshSessions();
+        await refreshSessions(true);
         updateDocumentTitle();
       }
     } catch {
@@ -3535,9 +3580,9 @@ function renderToolOpenButton(el: HTMLElement, filePath?: string): void {
       addSystemBox("error", tpl(t("openFileFailed"), { error: result?.error ?? "?" }));
     }
   });
-  const args = row.querySelector(".tool-args");
-  if (args) args.after(button);
-  else el.after(button);
+  // Keep the action next to the tool name, before the file path. Inserting
+  // after the name also places it before an existing .tool-args sibling.
+  el.after(button);
 }
 
 // tool card header: name in pill (solid accent), muted arguments next to it
@@ -4257,7 +4302,7 @@ function renderRpcEvent(evt: RpcEvent): void {
       // same loading semantics as the boot: extensions logging during the
       // re-init go under the spinner, the loader ends when they settle
       beginSessionLoading();
-      void refreshSessions();
+      void refreshSessions(true);
     }
   }
   // UI requests of the pi extensions (ctx.ui.*) → webview modals (standalone)
@@ -4390,11 +4435,15 @@ function renderRpcEvent(evt: RpcEvent): void {
             card.querySelector(".tool-name")!,
             toolSummary(tc.name, "", workspacePath ?? undefined),
           );
-          // write/edit: EMPTY args span already now — without it, during
-          // streaming the diff badge (flex:0) stays attached to the name on
-          // the left; the args (flex:1, even empty) push it right before the
-          // timer, like at execution end
-          if (tc.name === "write" || tc.name === "edit") {
+          // File tools: create the args slot immediately so the streamed path
+          // can appear as soon as its JSON string is complete. The flex slot
+          // also keeps diff badges aligned before the timer.
+          if (
+            tc.name === "read" ||
+            tc.name === "write" ||
+            tc.name === "edit" ||
+            tc.name === "edit-diff"
+          ) {
             if (!card.querySelector(".tool-args")) {
               const argsEl = document.createElement("span");
               argsEl.className = "tool-args";
@@ -4555,18 +4604,12 @@ function formatProviderError(text: string): string {
   return prefix ? `${prefix}. ${formatted}` : formatted;
 }
 
-// system box with a level: one per error/warn/info, styled by class
-// (.level-error / .level-warn / .level-info). Prefix marker via CSS.
-function addSystemBox(level: "error" | "warn" | "info", text: string): void {
+// Appends a system box directly to the chat. History rendering uses this
+// lower-level function so persisted errors can never be mistaken for live
+// startup logs and routed under the loading spinner.
+function appendSystemBox(level: "error" | "warn" | "info", text: string): void {
   const clean = formatProviderError(cleanConsoleText(text));
   if (!clean) return;
-  // during a session load every log line goes UNDER the spinner (collected
-  // and flushed at the END of the resumed chat) — never into the thread that
-  // the history render will reset anyway
-  if (sessionLoading) {
-    pushLoadingLog(level, clean);
-    return;
-  }
   const wrapper = addMsg("status");
   const line = document.createElement("div");
   line.className = `status-line level-${level}`;
@@ -4574,6 +4617,18 @@ function addSystemBox(level: "error" | "warn" | "info", text: string): void {
   line.title = clean;
   wrapper.appendChild(line);
   scrollToBottom();
+}
+
+// System box for LIVE events. During a session load, live lines are shown
+// under the spinner and collected for the end of the resumed chat.
+function addSystemBox(level: "error" | "warn" | "info", text: string): void {
+  const clean = formatProviderError(cleanConsoleText(text));
+  if (!clean) return;
+  if (sessionLoading) {
+    pushLoadingLog(level, clean);
+    return;
+  }
+  appendSystemBox(level, clean);
 }
 
 // OSC 777 notify events received by the webview (debug: double-check)
@@ -4956,7 +5011,7 @@ function renderHistory(messages: unknown[]): void {
         (msg as { errorMessage?: unknown }).errorMessage ??
         (msg as { message?: { errorMessage?: unknown } }).message?.errorMessage;
       if (typeof errMsg === "string" && errMsg.length > 0) {
-        addSystemBox("error", errMsg);
+        appendSystemBox("error", errMsg);
       }
     } else if (msg.role === "toolResult" || msg.role === "bashExecution") {
       const output =

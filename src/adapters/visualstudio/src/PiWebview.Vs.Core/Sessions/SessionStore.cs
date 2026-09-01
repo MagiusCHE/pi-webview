@@ -324,7 +324,9 @@ public sealed class SessionStore
         var nodes = new Dictionary<string, (string? ParentId, SessionModel? Model)>();
         string? leafId = null;
         var count = 0;
+        var compactionCount = 0;
         long? lastActivity = null;
+        long? lastEventAt = null;
         foreach (var raw in content.Split('\n'))
         {
             if (raw.Trim().Length == 0) continue;
@@ -343,6 +345,15 @@ public sealed class SessionStore
                 var type = root.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String
                     ? t.GetString()
                     : null;
+                if (type != "session" &&
+                    root.TryGetProperty("timestamp", out var eventTimestamp) &&
+                    eventTimestamp.ValueKind == JsonValueKind.String &&
+                    DateTimeOffset.TryParse(eventTimestamp.GetString(), out var eventDate))
+                {
+                    lastEventAt = eventDate.ToUnixTimeMilliseconds();
+                }
+                if (type == "compaction") compactionCount++;
+
                 if (type == "session")
                 {
                     if (root.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
@@ -430,6 +441,8 @@ public sealed class SessionStore
         }
         if (count > 0) info.MessageCount = count;
         if (lastActivity is not null) info.LastActivity = lastActivity;
+        if (lastEventAt is not null) info.LastEventAt = lastEventAt;
+        info.CompactionCount = compactionCount;
     }
 
     private static string UserText(JsonElement content)

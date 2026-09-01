@@ -272,6 +272,10 @@ export interface SessionInfo {
   firstMessage?: string;
   messageCount?: number;
   lastActivity?: number;
+  /** timestamp of the last append-only entry recorded in the session */
+  lastEventAt?: number;
+  /** number of compaction entries recorded across the whole session */
+  compactionCount?: number;
   mtime?: number;
 }
 

@@ -6,7 +6,7 @@
 export interface ToolSummary {
   name: string;
   args: string; // empty when there is no useful summary
-  /** Original path sent by edit/write, used by the host-side open-file action. */
+  /** Original path sent by read/edit/write, used by the host-side open-file action. */
   filePath?: string;
 }
 
@@ -45,7 +45,8 @@ function partialJsonString(fragment: string, key: string): string {
 // payload. Extract the first complete JSON string without waiting for the
 // enclosing object to finish streaming.
 export function streamedToolFilePath(name: string, argsFragment: string): string {
-  if (name !== "edit" && name !== "edit-diff" && name !== "write") return "";
+  if (name !== "read" && name !== "edit" && name !== "edit-diff" && name !== "write")
+    return "";
   return (
     partialJsonString(argsFragment, "path") || partialJsonString(argsFragment, "filePath")
   );
@@ -86,7 +87,8 @@ export function toolSummary(
       return { name: "$", args: cmd };
     }
     case "read": {
-      const path = rel(str("path") || str("filePath"));
+      const filePath = str("path") || str("filePath");
+      const path = rel(filePath);
       const startLine = num("startLine");
       const endLine = num("endLine");
       const offset = num("offset");
@@ -102,9 +104,13 @@ export function toolSummary(
           endLine ??
           (offset !== undefined && length !== undefined ? offset + length : undefined);
         const range = end !== undefined ? `[${start}-${end}]` : `[${start}-…]`;
-        return { name, args: `${range} ${path}`.trim() };
+        return {
+          name,
+          args: `${range} ${path}`.trim(),
+          filePath: filePath || undefined,
+        };
       }
-      return { name, args: path };
+      return { name, args: path, filePath: filePath || undefined };
     }
     case "edit":
     case "edit-diff":

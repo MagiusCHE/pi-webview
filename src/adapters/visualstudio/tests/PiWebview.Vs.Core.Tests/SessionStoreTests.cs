@@ -83,6 +83,43 @@ public sealed class SessionStoreTests : IDisposable
     }
 
     [Fact]
+    public void Session_info_espone_ultimo_evento_e_numero_compattazioni()
+    {
+        var store = new SessionStore();
+        var path = WriteSession(@"C:\proj", "sess.jsonl");
+        File.AppendAllLines(path, new[]
+        {
+            JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["type"] = "compaction",
+                ["id"] = "compaction-1",
+                ["timestamp"] = "2026-08-27T20:00:00.000Z",
+                ["summary"] = "first",
+            }),
+            JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["type"] = "compaction",
+                ["id"] = "compaction-2",
+                ["timestamp"] = "2026-08-27T20:05:00.000Z",
+                ["summary"] = "second",
+            }),
+            JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["type"] = "session_info",
+                ["id"] = "last-event",
+                ["timestamp"] = "2026-08-27T20:10:11.000Z",
+                ["name"] = "renamed",
+            }),
+        });
+
+        var info = store.GetSessionInfo(path);
+        Assert.Equal(2, info.CompactionCount);
+        Assert.Equal(
+            DateTimeOffset.Parse("2026-08-27T20:10:11.000Z").ToUnixTimeMilliseconds(),
+            info.LastEventAt);
+    }
+
+    [Fact]
     public void List_sessions_filtra_per_workspace()
     {
         var store = new SessionStore();

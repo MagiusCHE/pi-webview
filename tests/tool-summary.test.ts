@@ -24,6 +24,7 @@ test("read: path come args (ellipsis CSS, niente troncatura JS)", () => {
   const s = toolSummary("read", JSON.stringify({ path }));
   assert.equal(s.name, "read");
   assert.equal(s.args, path);
+  assert.equal(s.filePath, path);
 });
 
 test("read con range: [start-end] e path", () => {
@@ -34,6 +35,7 @@ test("read con range: [start-end] e path", () => {
   assert.equal(s.name, "read");
   assert.match(s.args, /^\[10-20\] \/p\//);
   assert.ok(s.args.endsWith("y".repeat(50)));
+  assert.equal(s.filePath, "/p/" + "y".repeat(50));
 
   // fallback offset+length
   const s2 = toolSummary(
@@ -43,7 +45,7 @@ test("read con range: [start-end] e path", () => {
   assert.match(s2.args, /^\[5-35\]/);
 });
 
-test("edit/write: path visibile e originale disponibile per l'apertura", () => {
+test("read/edit/write: path visibile e originale disponibile per l'apertura", () => {
   const path = "/home/user/proj/" + "z".repeat(60);
   const edit = toolSummary("edit", JSON.stringify({ path }), "/home/user/proj");
   const write = toolSummary("write", JSON.stringify({ path }), "/home/user/proj");
@@ -51,7 +53,7 @@ test("edit/write: path visibile e originale disponibile per l'apertura", () => {
   assert.equal(edit.filePath, path);
   assert.equal(write.args, `./${"z".repeat(60)}`);
   assert.equal(write.filePath, path);
-  assert.equal(toolSummary("read", JSON.stringify({ path })).filePath, undefined);
+  assert.equal(toolSummary("read", JSON.stringify({ path })).filePath, path);
 });
 
 test("edit streaming: path disponibile prima del JSON completo", () => {
@@ -61,6 +63,7 @@ test("edit streaming: path disponibile prima del JSON completo", () => {
   assert.equal(streamedToolPath("edit", fragment), path);
   assert.equal(streamedToolPath("edit", fragment, "/home/user/proj"), './src/a\\b"c.ts');
   assert.equal(streamedToolFilePath("edit", fragment), path);
+  assert.equal(streamedToolFilePath("read", fragment), path);
 });
 
 test("edit streaming: attende la fine della stringa path", () => {

@@ -206,6 +206,26 @@ test("readSessionInfo: conteggio su TUTTO il file e ultima attività dai timesta
         }),
       );
     }
+    lines.push(
+      JSON.stringify({
+        type: "compaction",
+        id: "c1",
+        timestamp: "2026-07-01T13:00:00.000Z",
+        summary: "first",
+      }),
+      JSON.stringify({
+        type: "compaction",
+        id: "c2",
+        timestamp: "2026-07-01T13:10:00.000Z",
+        summary: "second",
+      }),
+      JSON.stringify({
+        type: "session_info",
+        id: "i1",
+        timestamp: "2026-07-01T13:15:00.000Z",
+        name: "renamed",
+      }),
+    );
     // 40KB of padding at the end to exceed the old limit
     const big = "x".repeat(600 * 1024);
     writeFileSync(path, lines.join("\n") + "\n" + big + "\n");
@@ -216,6 +236,8 @@ test("readSessionInfo: conteggio su TUTTO il file e ultima attività dai timesta
     assert.equal(s.firstMessage, "messaggio 0");
     // last activity = timestamp of the last message, not the file mtime
     assert.equal(s.lastActivity, Date.parse("2026-07-01T12:29:00.000Z"));
+    assert.equal(s.lastEventAt, Date.parse("2026-07-01T13:15:00.000Z"));
+    assert.equal(s.compactionCount, 2);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -988,15 +988,6 @@ header {
 .tool-card summary::-webkit-details-marker {
   display: none;
 }
-.tool-card summary::before {
-  content: "▸";
-  color: var(--fg-tertiary);
-  font-size: 11px;
-  transition: transform var(--transition);
-}
-.tool-card[open] summary::before {
-  transform: rotate(90deg);
-}
 .tool-card summary:hover {
   background: var(--hover);
 }

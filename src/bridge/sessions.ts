@@ -156,6 +156,8 @@ function readSessionInfo(path: string): {
   firstMessage?: string;
   messageCount?: number;
   lastActivity?: number;
+  lastEventAt?: number;
+  compactionCount?: number;
 } {
   let content = "";
   try {
@@ -171,6 +173,8 @@ function readSessionInfo(path: string): {
     firstMessage?: string;
     messageCount?: number;
     lastActivity?: number;
+    lastEventAt?: number;
+    compactionCount?: number;
   } = {};
   const nodes = new Map<
     string,
@@ -178,7 +182,9 @@ function readSessionInfo(path: string): {
   >();
   let leafId: string | undefined;
   let count = 0;
+  let compactionCount = 0;
   let lastActivity: number | undefined;
+  let lastEventAt: number | undefined;
   for (const raw of content.split("\n")) {
     if (!raw.trim()) continue;
     let entry: Record<string, unknown>;
@@ -187,6 +193,12 @@ function readSessionInfo(path: string): {
     } catch {
       continue;
     }
+    if (entry.type !== "session" && typeof entry.timestamp === "string") {
+      const eventTs = Date.parse(entry.timestamp);
+      if (Number.isFinite(eventTs)) lastEventAt = eventTs;
+    }
+    if (entry.type === "compaction") compactionCount++;
+
     if (entry.type === "session") {
       info.id = typeof entry.id === "string" ? entry.id : undefined;
       info.cwd = typeof entry.cwd === "string" ? entry.cwd : undefined;
@@ -242,6 +254,8 @@ function readSessionInfo(path: string): {
   }
   if (count > 0) info.messageCount = count;
   if (lastActivity !== undefined) info.lastActivity = lastActivity;
+  if (lastEventAt !== undefined) info.lastEventAt = lastEventAt;
+  info.compactionCount = compactionCount;
   return info;
 }
 

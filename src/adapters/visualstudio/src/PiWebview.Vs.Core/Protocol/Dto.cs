@@ -284,6 +284,12 @@ public sealed class SessionInfo
     [System.Text.Json.Serialization.JsonPropertyName("lastActivity")]
     public long? LastActivity { get; set; }
 
+    [System.Text.Json.Serialization.JsonPropertyName("lastEventAt")]
+    public long? LastEventAt { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("compactionCount")]
+    public int? CompactionCount { get; set; }
+
     [System.Text.Json.Serialization.JsonPropertyName("mtime")]
     public long? Mtime { get; set; }
 }

@@ -355,6 +355,12 @@ export interface UserConfig {
    *  "above" (default) | "below" the composer, or "topbar" (second row of
    *  the header, under the sessions/gear row). Global, not per-session. */
   statsBarPosition?: StatsBarPosition;
+  /** compact truncation (true) or multi-line wrapping (false), independently
+   *  from the bar placement. Missing preserves the legacy placement behavior. */
+  statsBarCompact?: boolean;
+  /** setStatus keys hidden by the user. RPC exposes the key as the stable
+   *  identifier of the status source. */
+  hiddenStatusKeys?: string[];
 }
 
 export type IdeEvent =

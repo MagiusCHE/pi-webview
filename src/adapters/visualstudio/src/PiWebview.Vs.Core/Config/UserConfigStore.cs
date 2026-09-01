@@ -21,7 +21,12 @@ public static class UserConfigPaths
 
 public sealed class UserConfigStore
 {
-    public static readonly UserConfig Default = new() { Theme = "system", HistoryLimit = 30 };
+    public static readonly UserConfig Default = new()
+    {
+        Theme = "system",
+        HistoryLimit = 30,
+        StatsBarPosition = "above",
+    };
 
     private UserConfig _config;
 
@@ -47,6 +52,13 @@ public sealed class UserConfigStore
                 Theme = parsed.Theme ?? Default.Theme,
                 Locale = parsed.Locale,
                 HistoryLimit = parsed.HistoryLimit ?? Default.HistoryLimit,
+                Notifications = parsed.Notifications,
+                StatsBarPosition = parsed.StatsBarPosition ?? Default.StatsBarPosition,
+                StatsBarCompact = parsed.StatsBarCompact,
+                HiddenStatusKeys = parsed.HiddenStatusKeys?
+                    .Where(key => !string.IsNullOrWhiteSpace(key))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList(),
             };
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
@@ -73,6 +85,34 @@ public sealed class UserConfigStore
         {
             _config.HistoryLimit = n;
         }
+        if (patch.TryGetValue("notifications", out var notifications) &&
+            notifications.ValueKind == JsonValueKind.String)
+        {
+            var v = notifications.GetString();
+            if (v is "desktop" or "vscode" or "off") _config.Notifications = v;
+        }
+        if (patch.TryGetValue("statsBarPosition", out var position) &&
+            position.ValueKind == JsonValueKind.String)
+        {
+            var v = position.GetString();
+            if (v is "above" or "below" or "topbar") _config.StatsBarPosition = v;
+        }
+        if (patch.TryGetValue("statsBarCompact", out var compact) &&
+            compact.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            _config.StatsBarCompact = compact.GetBoolean();
+        }
+        if (patch.TryGetValue("hiddenStatusKeys", out var hidden) &&
+            hidden.ValueKind == JsonValueKind.Array)
+        {
+            _config.HiddenStatusKeys = hidden.EnumerateArray()
+                .Where(value => value.ValueKind == JsonValueKind.String)
+                .Select(value => value.GetString())
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value!)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+        }
         Write();
         return Get();
     }
@@ -91,6 +131,10 @@ public sealed class UserConfigStore
         Theme = c.Theme,
         Locale = c.Locale,
         HistoryLimit = c.HistoryLimit,
+        Notifications = c.Notifications,
+        StatsBarPosition = c.StatsBarPosition,
+        StatsBarCompact = c.StatsBarCompact,
+        HiddenStatusKeys = c.HiddenStatusKeys is null ? null : new List<string>(c.HiddenStatusKeys),
     };
 }
 

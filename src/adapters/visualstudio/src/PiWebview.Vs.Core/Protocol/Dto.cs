@@ -218,6 +218,18 @@ public sealed class UserConfig
 
     [System.Text.Json.Serialization.JsonPropertyName("historyLimit")]
     public int? HistoryLimit { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("notifications")]
+    public string? Notifications { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("statsBarPosition")]
+    public string? StatsBarPosition { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("statsBarCompact")]
+    public bool? StatsBarCompact { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("hiddenStatusKeys")]
+    public List<string>? HiddenStatusKeys { get; set; }
 }
 
 /// <summary>pi CLI flags (settings block 3): name → value.</summary>

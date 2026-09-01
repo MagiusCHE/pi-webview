@@ -2,7 +2,7 @@
 // Standalone bridge (plans 0001 + 0005): exposes `pi --mode rpc` over a local
 // WebSocket (127.0.0.1 + token) with multiple sessions. Each WS connection is
 // a dedicated channel with its OWN pi process: the intent (new session or
-// resume) is declared by the client in the WS query (?new=1 / ?session=<path>).
+// resume) is declared by the client in the WS query (?new=1 / ?sessionId=<id>).
 // Transparent bidirectional forwarding of JSONL frames per channel — no
 // broadcast between clients.
 
@@ -46,6 +46,7 @@ import {
   readSessionCliFlags,
   writeSessionCliFlags,
   sessionModelArgs,
+  sessionPathForId,
 } from "./sessions.ts";
 import { getTrust, setTrust } from "./trust.ts";
 import { getPiSettings, setPiSettingFile, setPiSettingsFile } from "./pi-settings.ts";
@@ -54,6 +55,7 @@ import { saveAttachment, pathExists, attachFromPath } from "./attachments.ts";
 import { fetchProviderBalance } from "./balance.ts";
 import { revealFileInSystemManager } from "./open-file.ts";
 import { clearLock } from "./lock.ts";
+import { normalizeLaunchCwd } from "./launch-context.ts";
 
 // same deterministic log as the VS Code companion: ~/.pi/pi-webview/companion.log
 const MAX_LOG_BYTES = 2 * 1024 * 1024; // 2MB: reset only at session startup
@@ -187,16 +189,35 @@ function serveStatic(root: string, req: IncomingMessage, res: ServerResponse): v
 }
 
 // intent declared by the client in the WebSocket query
-interface Intent {
-  kind: "default" | "new" | "session";
-  sessionPath?: string;
-}
+type Intent =
+  | { kind: "default" }
+  | { kind: "new"; workspaceDir?: string }
+  | { kind: "session"; sessionPath: string }
+  | { kind: "invalid-session"; sessionId: string };
 
-function parseIntent(url: URL): Intent {
-  if (url.searchParams.has("session")) {
-    return { kind: "session", sessionPath: url.searchParams.get("session") ?? undefined };
+type LaunchIntent = { cwd: string; createdAt: number };
+
+function parseIntent(url: URL, launchIntents: Map<string, LaunchIntent>): Intent {
+  const sessionId = url.searchParams.get("sessionId");
+  if (sessionId) {
+    const sessionPath = sessionPathForId(sessionId);
+    return sessionPath
+      ? { kind: "session", sessionPath }
+      : { kind: "invalid-session", sessionId };
   }
-  if (url.searchParams.get("new") === "1") return { kind: "new" };
+  const legacySessionPath = url.searchParams.get("session");
+  if (legacySessionPath) return { kind: "session", sessionPath: legacySessionPath };
+  if (url.searchParams.get("new") === "1") {
+    const launchId = url.searchParams.get("launchId");
+    if (launchId) {
+      const launch = launchIntents.get(launchId);
+      return {
+        kind: "new",
+        workspaceDir: launch?.cwd ?? normalizeLaunchCwd(undefined),
+      };
+    }
+    return { kind: "new" };
+  }
   return { kind: "default" };
 }
 
@@ -218,6 +239,7 @@ function main(): void {
   const piCommand = opts.piCommand === "pi" && pi.path ? pi.path : opts.piCommand;
 
   const token = opts.token ?? randomBytes(16).toString("hex");
+  const launchIntents = new Map<string, LaunchIntent>();
   const mockIde = opts.mockIde ? createMockIde((m) => console.error(m)) : null;
   const configStore = new ConfigStore();
   let availableCliFlagsPromise: ReturnType<typeof fetchAvailableCliFlags> | null = null;
@@ -243,7 +265,7 @@ function main(): void {
     }
     return stderrCount++ < 25;
   }
-  const http = createServer((req, res) => {
+  const http = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (url.pathname === "/health") {
       // used by `piw` to validate the lock (single-instance)
@@ -251,6 +273,34 @@ function main(): void {
         res.writeHead(200).end("ok");
       } else {
         res.writeHead(401).end("unauthorized");
+      }
+      return;
+    }
+    if (url.pathname === "/launch-intent" && req.method === "POST") {
+      if (req.headers["x-pi-webview-token"] !== token) {
+        res.writeHead(401).end("unauthorized");
+        return;
+      }
+      try {
+        let body = "";
+        for await (const chunk of req) {
+          body += chunk.toString();
+          if (body.length > 4096) throw new Error("request too large");
+        }
+        const data = JSON.parse(body) as { cwd?: unknown };
+        const id = randomBytes(16).toString("hex");
+        const now = Date.now();
+        for (const [key, launch] of launchIntents) {
+          if (now - launch.createdAt > 60 * 60_000) launchIntents.delete(key);
+        }
+        launchIntents.set(id, {
+          cwd: normalizeLaunchCwd(data.cwd),
+          createdAt: now,
+        });
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ id }));
+      } catch {
+        res.writeHead(400).end("invalid launch intent");
       }
       return;
     }
@@ -290,7 +340,10 @@ function main(): void {
     dispose: () => void;
   }
 
-  const createChannel = (ws: WebSocket, intent: Intent): Channel => {
+  const createChannel = (
+    ws: WebSocket,
+    intent: Exclude<Intent, { kind: "invalid-session" }>,
+  ): Channel => {
     const send = (frame: Frame) => {
       const text = JSON.stringify(frame);
       log(`→ ui ${text.slice(0, 200)}`);
@@ -300,8 +353,15 @@ function main(): void {
     const respond = (id: string, payload: Omit<IdeResponse, "id">) =>
       send({ channel: "ide", payload: { ...payload, id } });
 
-    let workspaceDir = process.cwd();
     let currentSessionPath = intent.kind === "session" ? intent.sessionPath : undefined;
+    // Browser refresh can resume a session from another workspace. The session
+    // header is authoritative, so launch pi in its saved cwd rather than in
+    // the directory where the long-lived bridge happened to start.
+    let workspaceDir = currentSessionPath
+      ? (getSessionInfo(currentSessionPath).cwd ?? process.cwd())
+      : intent.kind === "new" && intent.workspaceDir
+        ? intent.workspaceDir
+        : process.cwd();
     const makePi = (
       cwd: string,
       sessionPath?: string,
@@ -767,11 +827,26 @@ function main(): void {
     const url = new URL(req.url ?? "/", "http://localhost");
     activeConnections++;
     cancelIdleTimer();
-    const channel = createChannel(ws, parseIntent(url));
     ws.on("close", () => {
       activeConnections--;
       if (activeConnections === 0) startIdleTimer();
     });
+    const intent = parseIntent(url, launchIntents);
+    if (intent.kind === "invalid-session") {
+      ws.send(
+        JSON.stringify({
+          channel: "rpc",
+          payload: {
+            type: "connection_closed",
+            reason: "invalid_session",
+            sessionId: intent.sessionId,
+          },
+        } satisfies Frame),
+        () => ws.close(),
+      );
+      return;
+    }
+    createChannel(ws, intent);
   });
 
   // --- startup ---------------------------------------------------------------

@@ -64,6 +64,24 @@ test("ConfigStore: default, patch e persistenza", () => {
   }
 });
 
+test("ConfigStore: persiste compattezza e sorgenti di stato nascoste", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-webview-config-"));
+  try {
+    const store = new ConfigStore(dir);
+    store.patch({
+      statsBarPosition: "topbar",
+      statsBarCompact: true,
+      hiddenStatusKeys: ["mcp", "control"],
+    });
+    const reloaded = new ConfigStore(dir).get();
+    assert.equal(reloaded.statsBarPosition, "topbar");
+    assert.equal(reloaded.statsBarCompact, true);
+    assert.deepEqual(reloaded.hiddenStatusKeys, ["mcp", "control"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("ConfigStore: file corrotto → default senza crash", () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-webview-config-"));
   try {

@@ -67,8 +67,8 @@ con **un solo bridge in ascolto sul sistema**, in modo che:
 - **Ogni connessione WebSocket = un canale = un `PiProcess` dedicato**
   (refactor del `startPi` custom verso `PiProcess`, riuso totale).
 - Intento dichiarato dal client all'atto della connessione (query param del WS):
-  - `?new=1` → nuovo pi (sessione nuova);
-  - `?session=<path>` → pi con `--session <path>` (resume; cwd gestita da pi);
+  - `?new=1&launchId=<id>` → nuovo pi nel cwd registrato da `piw`;
+  - `?sessionId=<id>` → il bridge risolve il path e avvia pi con `--session`;
   - niente → canale 0 (default).
 - Routing per canale: i frame vanno SOLO al pi del proprio canale e gli eventi
   del pi SOLO al proprio client (niente broadcast globale).
@@ -85,7 +85,7 @@ con **un solo bridge in ascolto sul sistema**, in modo che:
 ### Fase 4 — `piw --session <id>`
 
 - `piw --session <id>`: risolve l'id (parziale o path, come pi) → apre il
-  browser su `/?session=<path>`.
+  browser su `/?s=<sessionId>`; il path locale resta interno al bridge.
 - Senza `--session` (default): apre su `/?new=1` (nuova sessione pronta).
 - Il bridge spawna pi con `--session <path>`; pi imposta da solo la cwd.
 
@@ -116,7 +116,8 @@ La coppia **pid + health check con token segreto** copre il caso del pid riusato
 
 ## Verifica
 
-- `piw` due volte: un solo bridge, seconda chiamata apre solo una tab.
+- `piw` due volte: un solo bridge, seconda chiamata apre solo una tab e la
+  nuova sessione usa il `cwd` della seconda invocazione (fallback: home utente).
 - Due tab con sessioni diverse: messaggi/eventi non si mescolano.
 - "Nuova chat" in standalone: nuova tab con nuova sessione.
 - Crash simulato (kill -9 del bridge): `piw` riparte pulito.

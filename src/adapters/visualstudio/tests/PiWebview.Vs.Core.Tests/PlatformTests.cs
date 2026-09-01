@@ -90,13 +90,25 @@ public sealed class UserConfigStoreTests : IDisposable
         var store = new UserConfigStore(_dir);
         Assert.Equal("system", store.Get().Theme);
         Assert.Equal(30, store.Get().HistoryLimit);
+        Assert.Equal("above", store.Get().StatsBarPosition);
+        Assert.Null(store.Get().StatsBarCompact);
     }
 
     [Fact]
     public void Patch_persiste_sul_disco()
     {
         var store = new UserConfigStore(_dir);
-        using var doc = JsonDocument.Parse("{\"theme\":\"dark\",\"historyLimit\":50,\"locale\":\"en\"}");
+        using var doc = JsonDocument.Parse("""
+            {
+              "theme": "dark",
+              "historyLimit": 50,
+              "locale": "en",
+              "notifications": "desktop",
+              "statsBarPosition": "topbar",
+              "statsBarCompact": true,
+              "hiddenStatusKeys": ["mcp", "control", "mcp"]
+            }
+            """);
         var patch = new Dictionary<string, JsonElement>();
         foreach (var p in doc.RootElement.EnumerateObject()) patch[p.Name] = p.Value.Clone();
         store.Patch(patch);
@@ -106,18 +118,33 @@ public sealed class UserConfigStoreTests : IDisposable
         Assert.Equal("dark", reloaded.Theme);
         Assert.Equal(50, reloaded.HistoryLimit);
         Assert.Equal("en", reloaded.Locale);
+        Assert.Equal("desktop", reloaded.Notifications);
+        Assert.Equal("topbar", reloaded.StatsBarPosition);
+        Assert.True(reloaded.StatsBarCompact);
+        Assert.Equal(new[] { "mcp", "control" }, reloaded.HiddenStatusKeys);
     }
 
     [Fact]
     public void Patch_ignora_valori_non_validi()
     {
         var store = new UserConfigStore(_dir);
-        using var doc = JsonDocument.Parse("{\"theme\":\"rosso\",\"historyLimit\":0}");
+        using var doc = JsonDocument.Parse("""
+            {
+              "theme": "rosso",
+              "historyLimit": 0,
+              "statsBarPosition": "left",
+              "statsBarCompact": "yes",
+              "hiddenStatusKeys": "mcp"
+            }
+            """);
         var patch = new Dictionary<string, JsonElement>();
         foreach (var p in doc.RootElement.EnumerateObject()) patch[p.Name] = p.Value.Clone();
         store.Patch(patch);
         Assert.Equal("system", store.Get().Theme);
         Assert.Equal(30, store.Get().HistoryLimit);
+        Assert.Equal("above", store.Get().StatsBarPosition);
+        Assert.Null(store.Get().StatsBarCompact);
+        Assert.Null(store.Get().HiddenStatusKeys);
     }
 }
 

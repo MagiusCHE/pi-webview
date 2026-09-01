@@ -27,7 +27,7 @@ piw -b              # same as --background
 piw -k              # stops the background bridge (same as --kill)
 ```
 
-`piw` resolves `pi` on the `PATH` (on Windows the `pi.cmd` shim), spawns it with `--mode rpc` and opens `http://127.0.0.1:<port>/`. Exit with Ctrl+C.
+`piw` resolves `pi` on the `PATH` (on Windows the `pi.cmd` shim), spawns it with `--mode rpc` and opens `http://127.0.0.1:<port>/`. A new session starts in the shell directory from which `piw` was invoked—even when reusing an existing bridge—and falls back to the user home if that directory is unavailable. Exit with Ctrl+C.
 
 ### One bridge per system
 
@@ -174,13 +174,13 @@ The companion spawns `pi --mode rpc` and bridges the UI via `postMessage` (same 
 ## Features
 
 - **Full chat UI** — streaming markdown (`marked` + `DOMPurify`), thinking blocks with spinner and elapsed time, collapsible tool cards with command summaries, copy buttons
-- **Sessions** — switch, filter by folder, fork of sessions from other folders (same behavior as pi), new session; in standalone browser mode, a session from another workspace can instead move the current workspace to its original folder and resume there without a fork
+- **Sessions** — switch, filter by folder, fork of sessions from other folders (same behavior as pi), new session; in standalone browser mode, a session from another workspace can instead move the current workspace to its original folder and resume there without a fork, and refreshing the browser resumes the same session in its saved workspace
 - **Composer controls** — model picker, thinking level, project trust (writes `~/.pi/agent/trust.json`, with confirmation for full access)
 - **Attachments** — paste or drag & drop of files and images, with inline previews
 - **Editor selection context** — when pi-webview runs in the **sidebar view**, selecting text in the editor shows a discreet one-line selection block (attach context for your messages). **In editor-area panels** ("new chat in a new panel") the selection mode is **inhibited**: a webview panel steals editor focus, which would clear the attached selection — so the block is hidden there and selection works only from the sidebar.
-- **Extension status** — status/widget lines set by pi extensions (`setStatus` / `setWidget`) rendered live in the chat footer
+- **Extension status** — status/widget lines set by pi extensions (`setStatus` / `setWidget`) rendered live in the chat footer; status placement and compact/multi-line layout are independent settings, and clicking a status source hides it after confirmation (hidden sources can be restored in settings)
 - **Themes** (light/dark/system) and **i18n** (it/en)
-- **Settings modal** — three groups: (1) webview preferences (language, theme, history limit, version), (2) pi.dev `/settings` (placeholder — managed from the pi terminal), (3) **pi.dev CLI launch flags**, listed **dynamically** from the flags registered by pi and its extensions (`pi --help` → "Extension CLI Flags", e.g. `--session-control` from pi-agent-extensions; a flag appears only if its extension is installed). Boolean flags are toggles; string flags are shown as not-yet-supported. Changes reveal an **Apply** button that **restarts pi transparently** with the new command line (no webview reload): the current session is resumed, and if work is in progress pi asks for confirmation and dequeues/stops first.
+- **Settings modal** — four groups: (1) info, (2) webview preferences (language, theme, history limit, notifications, status-bar position/compactness and hidden status sources), (3) staged pi.dev settings, including new-session model/thinking defaults, and (4) **pi.dev CLI launch flags**, listed **dynamically** from the flags registered by pi and its extensions (`pi --help` → "Extension CLI Flags", e.g. `--session-control` from pi-agent-extensions; a flag appears only if its extension is installed). Applying restart-backed changes resumes the current session transparently; if work is in progress pi asks for confirmation and dequeues/stops first.
 
   CLI flags are **per-session**: they are stored as a `pi-webview-cli-flags` custom entry **inside the session's `.jsonl` file** (last one wins — never in the shared settings), so each open session keeps its own flags and the settings storage never grows with the session count. New sessions start without flags; forks inherit the parent's flags entry.
 

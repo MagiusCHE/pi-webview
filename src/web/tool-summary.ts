@@ -106,7 +106,7 @@ export function toolSummary(
         const range = end !== undefined ? `[${start}-${end}]` : `[${start}-…]`;
         return {
           name,
-          args: `${range} ${path}`.trim(),
+          args: `${path} ${range}`.trim(),
           filePath: filePath || undefined,
         };
       }

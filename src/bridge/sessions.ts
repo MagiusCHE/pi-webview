@@ -109,6 +109,14 @@ export function getSessionInfo(path: string): SessionInfo {
   return cachedSessionInfo(path);
 }
 
+/** Resolves a public session id without exposing filesystem paths to the UI URL. */
+export function sessionPathForId(
+  id: string,
+  dir: string = defaultSessionDir(),
+): string | undefined {
+  return listSessions(dir).find((session) => session.id === id)?.path;
+}
+
 // Renames a session (also non-current) by appending a session_info entry to
 // the jsonl file — the same format pi uses (appendSessionInfo): the last name
 // wins. The name is sanitized like in pi (no newlines, trim).

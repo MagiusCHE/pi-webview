@@ -27,22 +27,19 @@ test("read: path come args (ellipsis CSS, niente troncatura JS)", () => {
   assert.equal(s.filePath, path);
 });
 
-test("read con range: [start-end] e path", () => {
-  const s = toolSummary(
-    "read",
-    JSON.stringify({ path: "/p/" + "y".repeat(50), startLine: 10, endLine: 20 }),
-  );
+test("read con range: path seguito da [start-end]", () => {
+  const path = "/p/" + "y".repeat(50);
+  const s = toolSummary("read", JSON.stringify({ path, startLine: 10, endLine: 20 }));
   assert.equal(s.name, "read");
-  assert.match(s.args, /^\[10-20\] \/p\//);
-  assert.ok(s.args.endsWith("y".repeat(50)));
-  assert.equal(s.filePath, "/p/" + "y".repeat(50));
+  assert.equal(s.args, `${path} [10-20]`);
+  assert.equal(s.filePath, path);
 
   // fallback offset+length
   const s2 = toolSummary(
     "read",
     JSON.stringify({ path: "file.txt", offset: 5, length: 30 }),
   );
-  assert.match(s2.args, /^\[5-35\]/);
+  assert.equal(s2.args, "file.txt [5-35]");
 });
 
 test("read/edit/write: path visibile e originale disponibile per l'apertura", () => {

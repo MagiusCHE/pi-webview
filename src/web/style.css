@@ -478,6 +478,35 @@ header {
   margin-bottom: 8px;
   line-height: 1.45;
 }
+.hidden-status-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hidden-status-empty {
+  font-size: 12px;
+  color: var(--fg-tertiary);
+}
+.hidden-status-restore {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: var(--surface);
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.hidden-status-restore:hover,
+.hidden-status-restore:focus-visible {
+  border-color: var(--accent);
+  color: var(--fg);
+  outline: none;
+}
 .field-checkbox {
   width: 16px;
   height: 16px;
@@ -2232,10 +2261,14 @@ body.stats-bar-topbar .stats-badge {
   margin-bottom: 0;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
+}
+/* Compactness is independent from placement: compact truncates in one row,
+   expanded lets status sources wrap wherever the bar is positioned. */
+body.stats-bar-expanded .stats-badge {
   white-space: normal;
   overflow: visible;
 }
-body.stats-bar-topbar .stats-slots {
+body.stats-bar-expanded .stats-slots {
   flex-wrap: wrap;
   overflow: visible;
 }
@@ -2304,7 +2337,20 @@ body.stats-bar-topbar .stats-slots {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font: inherit;
   font-variant-numeric: tabular-nums;
+  color: inherit;
+  text-align: left;
+  padding: 1px 3px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+.stats-slot:hover,
+.stats-slot:focus-visible {
+  background: var(--hover);
+  outline: none;
 }
 .stats-slot + .stats-slot::before {
   content: "";

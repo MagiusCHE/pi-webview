@@ -171,6 +171,18 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   `switch_session` RPC + ricarica cronologia) + dot connessione + gear
   (settings: lingua e tema in pannello). `color-scheme` per tema sui form
   nativi (dropdown che rispettano il tema)
+- **Barra stato**: posizione (`above`/`below`/`topbar`) e compattezza sono
+  preferenze globali indipendenti. Gli slot `setStatus` sono identificati dal
+  `statusKey` RPC: click con conferma per nasconderli, ripristino dai settings;
+  le chiavi nascoste vivono in `hiddenStatusKeys` nella config utente
+- **Avvio standalone**: una nuova sessione aperta da `piw` usa il `cwd` della
+  shell che ha invocato il comando, anche quando riutilizza un bridge già
+  attivo; se il `cwd` non è leggibile usa la home dell'utente. Il path resta
+  interno al bridge e nell'URL compare solo un identificativo opaco di lancio
+- **Refresh standalone**: la pagina sostituisce `?new=1` con `?s=<sessionId>`
+  appena pi espone il file sessione. Il path locale non compare nell'URL: al
+  refresh il bridge risolve l'id e riprende la sessione nel `cwd` salvato nel
+  suo header
 - **Runtime**: `src/web/environment.ts` rileva la modalità all'avvio
   (`standalone` | `vscode` | `ide`) per variare il comportamento in base
   all'ambiente (es. trasporto, tema, futuri comportamenti IDE)

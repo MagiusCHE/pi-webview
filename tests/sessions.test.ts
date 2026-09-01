@@ -18,11 +18,27 @@ import {
   encodeProjectFolder,
   readSessionModel,
   sessionModelArgs,
+  sessionPathForId,
   renameSessionFile,
 } from "../src/bridge/sessions.ts";
 
 const header = (id: string, cwd: string) =>
   JSON.stringify({ type: "session", version: "3", id, cwd });
+
+test("sessionPathForId resolves an exact public id to its private path", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-webview-session-id-"));
+  try {
+    const project = join(root, "--work-project--");
+    mkdirSync(project, { recursive: true });
+    const path = join(project, "session.jsonl");
+    writeFileSync(path, header("session-uuid", "/work/project") + "\n");
+
+    assert.equal(sessionPathForId("session-uuid", root), path);
+    assert.equal(sessionPathForId("missing", root), undefined);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("listSessions: header, nome da session_info, primo messaggio, ordine mtime", () => {
   const root = mkdtempSync(join(tmpdir(), "pi-webview-sessions-"));

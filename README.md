@@ -26,10 +26,10 @@ The terminal TUI of pi limits interaction: no rich markdown, no proper mouse/tex
 
 - **Chat in the browser** (standalone): streaming markdown, thinking blocks with elapsed seconds, collapsible tool cards with command summaries, copy buttons, smart auto-scroll
 - **IDE integration**: the same UI in **VS Code**, **Visual Studio 2022** and **Visual Studio 2026**, distributed as a pi package with companion auto-install. VS Code includes editor selection context and native dialogs (`select`/`confirm`/`input` via `showQuickPick`/`showWarningMessage`/`showInputBox`); editor selection works only in the **sidebar view** (inhibited in editor-area panels, where focus would clear it)
-- **Sessions**: dropdown with current folder (`./…`) / All filter, switch, **fork of sessions from other folders** (same behavior as pi), new session
+- **Sessions**: dropdown with current folder (`./…`) / All filter, switch, **fork of sessions from other folders** (same behavior as pi), new session; standalone browser refresh resumes the same session and workspace
 - **Composer controls**: model picker, thinking level, project **trust** (writes `~/.pi/agent/trust.json`, with confirmation for full access)
 - **Attachments**: paste and drag & drop of files and images — previews in chat; images sent inline when the model supports vision, otherwise as file paths
-- **Extension UI**: status and widget areas set by pi extensions (`setStatus`/`setWidget` via `extension_ui_request`) rendered live in the chat footer (see screenshot above)
+- **Extension UI**: status and widget areas set by pi extensions (`setStatus`/`setWidget` via `extension_ui_request`) rendered live in the chat footer (see screenshot above); the status bar has independent placement/compactness controls and each source can be hidden with confirmation, then restored in settings
 - **Themes** (light/dark/system) and **i18n** (it/en), settings modal
 - **pi.dev CLI flags in settings** — dynamic per-session launch flags (e.g. `--session-control`), applied via a transparent pi restart, stored in the session file
 - **Extensibility base**: `pi --mode rpc` bridge, transport-agnostic UI (WebSocket standalone, `postMessage` in the IDE webview)

@@ -25,6 +25,8 @@ import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { resolvePi } from "./spawn.ts";
 import { readLock, writeLock, clearLock, pidAlive, healthCheck } from "./lock.ts";
+import { getSessionInfo, listSessions } from "./sessions.ts";
+import { resolveLaunchCwd } from "./launch-context.ts";
 import {
   ensureCompanions,
   formatCompanionNotes,
@@ -100,6 +102,7 @@ const session = value("--session");
 const portArg = value("--port");
 const piArg = value("--pi");
 const debug = argv.includes("--debug");
+const launchCwd = resolveLaunchCwd();
 
 // extra arguments passed to the bridge (e.g. --no-idle, --idle-timeout, --mock-ide)
 const extra: string[] = [];
@@ -114,8 +117,41 @@ for (let i = 0; i < argv.length; i++) {
   if (a !== undefined) extra.push(a);
 }
 
-// intent for the UI: new session (default) or resume of an existing one
-const intent = session ? `session=${encodeURIComponent(session)}` : "new=1";
+function resolvePublicSessionId(reference: string): string | undefined {
+  if (existsSync(reference)) return getSessionInfo(reference).id;
+  const all = listSessions();
+  const exact = all.find((candidate) => candidate.id === reference);
+  if (exact?.id) return exact.id;
+  const partial = all.filter((candidate) => candidate.id?.startsWith(reference));
+  return partial.length === 1 ? partial[0]?.id : undefined;
+}
+
+// The browser URL contains only opaque identifiers. Session paths and the
+// shell working directory stay inside the bridge process.
+const publicSessionId = session ? resolvePublicSessionId(session) : undefined;
+if (session && !publicSessionId) {
+  console.error(`piw: sessione non trovata o id ambiguo: ${session}`);
+  process.exit(1);
+}
+
+async function createPageIntent(port: number, token: string): Promise<string> {
+  if (publicSessionId) return `s=${encodeURIComponent(publicSessionId)}`;
+  const res = await fetch(`http://127.0.0.1:${port}/launch-intent`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-pi-webview-token": token,
+    },
+    body: JSON.stringify({ cwd: launchCwd }),
+    signal: AbortSignal.timeout(3000),
+  });
+  if (!res.ok) throw new Error("impossibile registrare la directory di avvio");
+  const data = (await res.json()) as { id?: unknown };
+  if (typeof data.id !== "string" || !data.id) {
+    throw new Error("risposta non valida durante la registrazione della directory");
+  }
+  return `new=1&launch=${encodeURIComponent(data.id)}`;
+}
 
 function openBrowser(url: string): void {
   const platform = process.platform;
@@ -166,6 +202,7 @@ async function main(): Promise<void> {
   //    and start a second bridge.
   if (background && !detachedRun) {
     const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv], {
+      cwd: launchCwd,
       detached: true,
       stdio: "ignore",
       env: { ...process.env, PIW_DETACHED: "1" },
@@ -176,6 +213,7 @@ async function main(): Promise<void> {
     for (;;) {
       const l = readLock();
       if (l && pidAlive(l.pid) && (await healthCheck(l.port, l.token))) {
+        const intent = await createPageIntent(l.port, l.token);
         const url = `http://127.0.0.1:${l.port}/?${intent}`;
         // default: opens the browser; with --no-open prints only the link
         if (noOpen) {
@@ -199,6 +237,7 @@ async function main(): Promise<void> {
   // 1) bridge already active? → reuse (no second bridge)
   const lock = readLock();
   if (lock && pidAlive(lock.pid) && (await healthCheck(lock.port, lock.token))) {
+    const intent = detachedRun ? "new=1" : await createPageIntent(lock.port, lock.token);
     const url = `http://127.0.0.1:${lock.port}/?${intent}`;
     console.log(
       `piw: bridge già attivo su http://127.0.0.1:${lock.port} — apro ${intent}`,
@@ -238,6 +277,7 @@ async function main(): Promise<void> {
 
   console.log(`piw: avvio bridge (pi = ${pi.path ?? pi.command})…`);
   const child = spawn(process.execPath, bridgeArgs, {
+    cwd: launchCwd,
     stdio: ["ignore", "pipe", "inherit"],
   });
 
@@ -262,6 +302,13 @@ async function main(): Promise<void> {
 
   if (!child.pid) {
     throw new Error("processo bridge senza pid");
+  }
+  let intent: string;
+  try {
+    intent = detachedRun ? "new=1" : await createPageIntent(port, token);
+  } catch (error) {
+    child.kill();
+    throw error;
   }
   writeLock({ pid: child.pid, port, token, startedAt: new Date().toISOString() });
   const url = `http://127.0.0.1:${port}/?${intent}`;

@@ -52,6 +52,12 @@ import {
   type ActiveEditorSelection,
 } from "./selection-context.ts";
 import {
+  effectiveStatsBarCompact,
+  normalizeHiddenStatusKeys,
+  setStatusKeyHidden,
+} from "./status-preferences.ts";
+import { bridgeUrlWithPageIntent, pageUrlForSession } from "./session-url.ts";
+import {
   trustIcon,
   sendIcon,
   stopIcon,
@@ -107,6 +113,19 @@ const els = {
     "settings-stats-bar-label",
   ) as HTMLLabelElement,
   statsBarPos: document.getElementById("stats-bar-pos") as HTMLSelectElement,
+  statsBarCompactLabel: document.getElementById(
+    "settings-stats-bar-compact-label",
+  ) as HTMLLabelElement,
+  statsBarCompact: document.getElementById("stats-bar-compact") as HTMLInputElement,
+  hiddenStatusTitle: document.getElementById(
+    "settings-hidden-status-title",
+  ) as HTMLDivElement,
+  hiddenStatusNote: document.getElementById(
+    "settings-hidden-status-note",
+  ) as HTMLDivElement,
+  hiddenStatusList: document.getElementById(
+    "settings-hidden-status-list",
+  ) as HTMLDivElement,
   themeLabel: document.getElementById("settings-theme-label") as HTMLLabelElement,
   settingsVersionLabel: document.getElementById(
     "settings-version-label",
@@ -185,18 +204,9 @@ async function resolveBridgeUrl(): Promise<string | null> {
   } catch {
     // no bridge on the same origin
   }
-  // channel intent (plan 0005): new=1 (new session) or
-  // session=<path> (resume) propagated from the page query to the WebSocket
-  if (url && !runtime.isVsCode) {
-    const p = new URLSearchParams(location.search);
-    if (p.get("new") === "1") {
-      url += (url.includes("?") ? "&" : "?") + "new=1";
-    }
-    const s = p.get("session");
-    if (s) {
-      url += (url.includes("?") ? "&" : "?") + `session=${encodeURIComponent(s)}`;
-    }
-  }
+  // The public page URL exposes only ?s=<session-id>; the bridge resolves it
+  // to the local session path before launching pi.
+  if (url && !runtime.isVsCode) return bridgeUrlWithPageIntent(url, location.search);
   return url;
 }
 
@@ -437,6 +447,10 @@ let historyLimit = DEFAULT_HISTORY_LIMIT;
 let notificationsDefault: "desktop" | "vscode" | "off" = "desktop";
 /** where the stats bar lives (global config statsBarPosition, default above) */
 let statsBarPosition: StatsBarPosition = "above";
+/** truncation or multi-line wrapping, independent from placement */
+let statsBarCompact = true;
+/** RPC setStatus keys hidden by the user (the only stable source id RPC exposes) */
+let hiddenStatusKeys: string[] = [];
 let sessionNotificationsOverride: "desktop" | "vscode" | "off" | undefined;
 
 function effectiveNotifications(): "desktop" | "vscode" | "off" {
@@ -579,6 +593,11 @@ function applyUiStrings(): void {
     els.statsBarPos.appendChild(opt);
   }
   els.statsBarPos.value = statsBarPosition;
+  els.statsBarCompactLabel.textContent = t("settingsStatsBarCompact");
+  els.statsBarCompact.checked = statsBarCompact;
+  els.hiddenStatusTitle.textContent = t("settingsHiddenStatusGroup");
+  els.hiddenStatusNote.textContent = t("settingsHiddenStatusNote");
+  renderHiddenStatusSettings();
   updateStatus();
   updateThemeButtons();
   populateSessionMenu();
@@ -607,6 +626,45 @@ function applyStatsBarPosition(pos: StatsBarPosition): void {
   els.statsBarPos.value = pos;
 }
 
+function applyStatsBarCompact(compact: boolean): void {
+  statsBarCompact = compact;
+  document.body.classList.toggle("stats-bar-compact", compact);
+  document.body.classList.toggle("stats-bar-expanded", !compact);
+  els.statsBarCompact.checked = compact;
+}
+
+function persistWebviewConfig(patch: Partial<UserConfig>): void {
+  transport?.send({
+    channel: "ide",
+    payload: { type: "setConfig", patch, id: `cfg-${++configId}` },
+  });
+}
+
+function renderHiddenStatusSettings(): void {
+  els.hiddenStatusList.textContent = "";
+  if (hiddenStatusKeys.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "hidden-status-empty";
+    empty.textContent = t("settingsHiddenStatusEmpty");
+    els.hiddenStatusList.appendChild(empty);
+    return;
+  }
+  for (const key of hiddenStatusKeys) {
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.className = "hidden-status-restore";
+    restore.textContent = key;
+    restore.title = tpl(t("settingsHiddenStatusRestore"), { source: key });
+    restore.addEventListener("click", () => {
+      hiddenStatusKeys = setStatusKeyHidden(hiddenStatusKeys, key, false);
+      renderHiddenStatusSettings();
+      renderStatusSlots();
+      persistWebviewConfig({ hiddenStatusKeys });
+    });
+    els.hiddenStatusList.appendChild(restore);
+  }
+}
+
 function requestConfig(): void {
   void ideRequest({ type: "getConfig" }).then((res) => {
     if (res?.ok && typeof res.data === "object" && res.data !== null) {
@@ -628,9 +686,21 @@ function requestConfig(): void {
         notificationsDefault = cfg.notifications;
       }
       const sbp = cfg.statsBarPosition;
-      if (sbp === "above" || sbp === "below" || sbp === "topbar") {
-        applyStatsBarPosition(sbp);
+      const effectivePosition =
+        sbp === "above" || sbp === "below" || sbp === "topbar" ? sbp : statsBarPosition;
+      applyStatsBarPosition(effectivePosition);
+      const effectiveCompact = effectiveStatsBarCompact(
+        cfg.statsBarCompact,
+        effectivePosition,
+      );
+      applyStatsBarCompact(effectiveCompact);
+      // One-time migration from the old placement-dependent layout. Persisting
+      // the inferred value makes later position changes truly independent.
+      if (typeof cfg.statsBarCompact !== "boolean") {
+        persistWebviewConfig({ statsBarCompact: effectiveCompact });
       }
+      hiddenStatusKeys = normalizeHiddenStatusKeys(cfg.hiddenStatusKeys);
+      renderStatusSlots();
       applyUiStrings();
     }
   });
@@ -658,6 +728,13 @@ function handleIdeResponse(res: IdeResponse): void {
     const sbp = cfg.statsBarPosition;
     if (sbp === "above" || sbp === "below" || sbp === "topbar") {
       applyStatsBarPosition(sbp);
+    }
+    if (typeof cfg.statsBarCompact === "boolean") {
+      applyStatsBarCompact(cfg.statsBarCompact);
+    }
+    if (Object.prototype.hasOwnProperty.call(cfg, "hiddenStatusKeys")) {
+      hiddenStatusKeys = normalizeHiddenStatusKeys(cfg.hiddenStatusKeys);
+      renderStatusSlots();
     }
     applyUiStrings();
   }
@@ -1503,15 +1580,13 @@ els.statsBarPos.addEventListener("change", () => {
   const v = els.statsBarPos.value as StatsBarPosition;
   if (v === "above" || v === "below" || v === "topbar") {
     applyStatsBarPosition(v);
-    transport?.send({
-      channel: "ide",
-      payload: {
-        type: "setConfig",
-        patch: { statsBarPosition: v },
-        id: `cfg-${++configId}`,
-      },
-    });
+    persistWebviewConfig({ statsBarPosition: v });
   }
+});
+
+els.statsBarCompact.addEventListener("change", () => {
+  applyStatsBarCompact(els.statsBarCompact.checked);
+  persistWebviewConfig({ statsBarCompact });
 });
 
 // history limit: saved in the config and re-applied right away (truncates from the top)
@@ -1877,7 +1952,8 @@ async function refreshSessions(showResumeNotice = false): Promise<void> {
           | undefined;
         if (data?.sessionFile) {
           currentSessionPath = data.sessionFile;
-          persistSessionPath(); // resume the same session on VS Code reloads
+          persistSessionPath(); // resume the same session on IDE reloads
+          void persistBrowserSessionUrl(); // refresh resumes this standalone channel
           refreshSessionNotificationOverride(); // per-session select follows it
         }
         if (data?.model) {
@@ -2357,6 +2433,22 @@ async function changeWorkspace(): Promise<void> {
     if (forkPath) switchSession(forkPath);
   }
   void refreshSessions();
+}
+
+// Replaces ?new=1 with the current session id. The running WebSocket is
+// untouched; a later browser refresh reconnects to this exact session without
+// exposing its local filesystem path in the address bar.
+async function persistBrowserSessionUrl(): Promise<void> {
+  const sessionPath = currentSessionPath;
+  if (runtime.isIDE || !sessionPath) return;
+  let info = sessions.find((session) => session.path === sessionPath);
+  if (!info?.id) {
+    const res = await ideRequest({ type: "getSessionInfo", path: sessionPath });
+    if (res?.ok) info = res.data as SessionInfo;
+  }
+  if (!info?.id || currentSessionPath !== sessionPath) return;
+  const next = pageUrlForSession(location.href, info.id);
+  if (next !== location.href) history.replaceState(null, "", next);
 }
 
 // saves the current session in the companion (VS Code globalState): on
@@ -3257,11 +3349,22 @@ function inlinePrompt(prefill: string, title: string): Promise<string | null> {
 function renderStatusSlots(): void {
   els.statsSlots.textContent = "";
   for (const [key, text] of statusSlots) {
-    const slot = document.createElement("span");
+    if (hiddenStatusKeys.includes(key)) continue;
+    const slot = document.createElement("button");
+    slot.type = "button";
     slot.className = "stats-slot";
     // terminal ANSI → colors mapped on the theme (textContent no: HTML is needed)
     slot.innerHTML = renderAnsiToHtml(text);
-    slot.title = stripAnsi(text);
+    slot.title = `${stripAnsi(text)} · ${tpl(t("hideStatusSource"), { source: key })}`;
+    slot.addEventListener("click", () => {
+      void showConfirm(tpl(t("hideStatusConfirm"), { source: key })).then((ok) => {
+        if (!ok) return;
+        hiddenStatusKeys = setStatusKeyHidden(hiddenStatusKeys, key, true);
+        renderStatusSlots();
+        renderHiddenStatusSettings();
+        persistWebviewConfig({ hiddenStatusKeys });
+      });
+    });
     els.statsSlots.appendChild(slot);
   }
   updateStatsTitle();
@@ -3292,14 +3395,15 @@ function updateStatsTitle(): void {
       parts.push(`(${t("autoCompactOff")})`);
     }
   }
-  for (const text of statusSlots.values()) parts.push(stripAnsi(text));
+  for (const [key, text] of statusSlots) {
+    if (!hiddenStatusKeys.includes(key)) parts.push(stripAnsi(text));
+  }
   els.statsBadge.title = parts.join(" · ");
 }
 
-// --- responsive: no block hiding, only standard CSS ellipsis ----------------
-// The context block stays whole (flex: 0 0 auto); the extension slots
-// shrink (flex: 1 1 auto + min-width: 0) and the last visible one shows the
-// native ellipsis. No JS needed.
+// --- responsive status bar --------------------------------------------------
+// Compact mode uses standard CSS ellipsis; expanded mode wraps status sources
+// across lines. Placement and compactness are independent preferences.
 
 // --- circular context gauge (always visible, teal bar) ----------------------
 
@@ -4169,6 +4273,10 @@ function renderRpcEvent(evt: RpcEvent): void {
     disarmWaitingResponse();
     working = false;
     updateSendButton();
+    if (evt.reason === "invalid_session") {
+      addStatusLine(tpl(t("sessionNotFound"), { id: String(evt.sessionId ?? "") }));
+      return;
+    }
     const cmd = evt.command as string | undefined;
     addStatusLine(cmd ? tpl(t("piDiedHint"), { command: cmd }) : t("piDied"));
   } else if (evt.type === "panel_mode") {

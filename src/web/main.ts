@@ -39,6 +39,7 @@ import type { StatsBarPosition, ThemePreference } from "../ide/protocol.ts";
 import { currentLocale, setLocale, t, tpl, isLocaleId, type LocaleId } from "./i18n.ts";
 import { runtime } from "./environment.ts";
 import { renderMarkdown } from "./markdown.ts";
+import { renderAnsiToHtml, stripAnsi } from "./ansi.ts";
 import {
   streamedToolFilePath,
   streamedToolPath,
@@ -2946,115 +2947,6 @@ function disarmWaitingResponse(): void {
 // E.g. pi-tokens-per-second → ⚡ 43 tokens in 0.7s (59.1 t/s).
 
 const statusSlots = new Map<string, string>();
-
-// --- ANSI SGR → HTML with colors mapped on the theme ------------------------
-// The extensions format for the terminal: instead of throwing away the codes,
-// we parse them (SGR: 16/256-color fg, bold) and render them with the theme
-// tokens (--ansi-N), readable both in dark and light.
-
-// standard xterm RGB to reduce the 256 colors to the closest of the 16
-const XTERM_RGB: Array<[number, number, number]> = [
-  [0, 0, 0],
-  [128, 0, 0],
-  [0, 128, 0],
-  [128, 128, 0],
-  [0, 0, 128],
-  [128, 0, 128],
-  [0, 128, 128],
-  [192, 192, 192],
-  [128, 128, 128],
-  [255, 0, 0],
-  [0, 255, 0],
-  [255, 255, 0],
-  [0, 0, 255],
-  [255, 0, 255],
-  [0, 255, 255],
-  [255, 255, 255],
-];
-
-function ansi256To16(n: number): number {
-  if (n < 16) return n;
-  if (n >= 232) return n >= 244 ? 15 : 8; // gray scale
-  const i = n - 16;
-  const cube = [0, 95, 135, 175, 215, 255];
-  const r = cube[Math.floor(i / 36) % 6]!;
-  const g = cube[Math.floor(i / 6) % 6]!;
-  const b = cube[i % 6]!;
-  let best = 7;
-  let bestD = Infinity;
-  for (let k = 0; k < 16; k++) {
-    const [x, y, z] = XTERM_RGB[k]!;
-    const d = (x - r) ** 2 + (y - g) ** 2 + (z - b) ** 2;
-    if (d < bestD) {
-      bestD = d;
-      best = k;
-    }
-  }
-  return best;
-}
-
-function ansiEscapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    c === "&"
-      ? "&amp;"
-      : c === "<"
-        ? "&lt;"
-        : c === ">"
-          ? "&gt;"
-          : c === '"'
-            ? "&quot;"
-            : "&#39;",
-  );
-}
-
-// text with ANSI sequences → safe HTML (escape first, then colored wrap)
-function renderAnsiToHtml(text: string): string {
-  // remove the OSC sequences (e.g. terminal titles); the CSI SGR remain
-  const s = text.replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "");
-  const tokens = s.split(/(\u001b\[[0-9;]*m)/);
-  let out = "";
-  let fg: number | null = null;
-  let bold = false;
-  for (const tok of tokens) {
-    const m = /^\u001b\[([0-9;]*)m$/.exec(tok);
-    if (m) {
-      const params = m[1] === "" ? [0] : m[1]!.split(";").map(Number);
-      for (let i = 0; i < params.length; i++) {
-        const p = params[i]!;
-        if (p === 0) {
-          fg = null;
-          bold = false;
-        } else if (p === 1) bold = true;
-        else if (p === 22) bold = false;
-        else if (p === 39) fg = null;
-        else if (p >= 30 && p <= 37) fg = p - 30;
-        else if (p >= 90 && p <= 97) fg = 8 + (p - 90);
-        else if (p === 38 && params[i + 1] === 5) {
-          fg = ansi256To16(params[i + 2] ?? 7);
-          i += 2;
-        }
-      }
-      continue;
-    }
-    const esc = ansiEscapeHtml(tok);
-    if (fg !== null || bold) {
-      const style =
-        (bold ? "font-weight:600;" : "") +
-        (fg !== null ? `color:var(--ansi-${fg});` : "");
-      out += `<span style="${style}">${esc}</span>`;
-    } else {
-      out += esc;
-    }
-  }
-  return out;
-}
-
-// plain text only (for tooltips): removes OSC and CSI
-function stripAnsi(text: string): string {
-  return text
-    .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
-    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "");
-}
 
 // UI requests of the pi extensions (ctx.ui.*): in VS Code the companion
 // handles them with native UI (select/confirm/input), here (standalone/piw)

@@ -1,0 +1,772 @@
+/* CSP-safe foreground palette used by ANSI status rendering. */
+.ansi-bold {
+  font-weight: 600;
+}
+.ansi-fg-0 {
+  color: var(--ansi-0);
+}
+.ansi-fg-1 {
+  color: var(--ansi-1);
+}
+.ansi-fg-2 {
+  color: var(--ansi-2);
+}
+.ansi-fg-3 {
+  color: var(--ansi-3);
+}
+.ansi-fg-4 {
+  color: var(--ansi-4);
+}
+.ansi-fg-5 {
+  color: var(--ansi-5);
+}
+.ansi-fg-6 {
+  color: var(--ansi-6);
+}
+.ansi-fg-7 {
+  color: var(--ansi-7);
+}
+.ansi-fg-8 {
+  color: var(--ansi-8);
+}
+.ansi-fg-9 {
+  color: var(--ansi-9);
+}
+.ansi-fg-10 {
+  color: var(--ansi-10);
+}
+.ansi-fg-11 {
+  color: var(--ansi-11);
+}
+.ansi-fg-12 {
+  color: var(--ansi-12);
+}
+.ansi-fg-13 {
+  color: var(--ansi-13);
+}
+.ansi-fg-14 {
+  color: var(--ansi-14);
+}
+.ansi-fg-15 {
+  color: var(--ansi-15);
+}
+.ansi-fg-16 {
+  color: rgb(0 0 0);
+}
+.ansi-fg-17 {
+  color: rgb(0 0 95);
+}
+.ansi-fg-18 {
+  color: rgb(0 0 135);
+}
+.ansi-fg-19 {
+  color: rgb(0 0 175);
+}
+.ansi-fg-20 {
+  color: rgb(0 0 215);
+}
+.ansi-fg-21 {
+  color: rgb(0 0 255);
+}
+.ansi-fg-22 {
+  color: rgb(0 95 0);
+}
+.ansi-fg-23 {
+  color: rgb(0 95 95);
+}
+.ansi-fg-24 {
+  color: rgb(0 95 135);
+}
+.ansi-fg-25 {
+  color: rgb(0 95 175);
+}
+.ansi-fg-26 {
+  color: rgb(0 95 215);
+}
+.ansi-fg-27 {
+  color: rgb(0 95 255);
+}
+.ansi-fg-28 {
+  color: rgb(0 135 0);
+}
+.ansi-fg-29 {
+  color: rgb(0 135 95);
+}
+.ansi-fg-30 {
+  color: rgb(0 135 135);
+}
+.ansi-fg-31 {
+  color: rgb(0 135 175);
+}
+.ansi-fg-32 {
+  color: rgb(0 135 215);
+}
+.ansi-fg-33 {
+  color: rgb(0 135 255);
+}
+.ansi-fg-34 {
+  color: rgb(0 175 0);
+}
+.ansi-fg-35 {
+  color: rgb(0 175 95);
+}
+.ansi-fg-36 {
+  color: rgb(0 175 135);
+}
+.ansi-fg-37 {
+  color: rgb(0 175 175);
+}
+.ansi-fg-38 {
+  color: rgb(0 175 215);
+}
+.ansi-fg-39 {
+  color: rgb(0 175 255);
+}
+.ansi-fg-40 {
+  color: rgb(0 215 0);
+}
+.ansi-fg-41 {
+  color: rgb(0 215 95);
+}
+.ansi-fg-42 {
+  color: rgb(0 215 135);
+}
+.ansi-fg-43 {
+  color: rgb(0 215 175);
+}
+.ansi-fg-44 {
+  color: rgb(0 215 215);
+}
+.ansi-fg-45 {
+  color: rgb(0 215 255);
+}
+.ansi-fg-46 {
+  color: rgb(0 255 0);
+}
+.ansi-fg-47 {
+  color: rgb(0 255 95);
+}
+.ansi-fg-48 {
+  color: rgb(0 255 135);
+}
+.ansi-fg-49 {
+  color: rgb(0 255 175);
+}
+.ansi-fg-50 {
+  color: rgb(0 255 215);
+}
+.ansi-fg-51 {
+  color: rgb(0 255 255);
+}
+.ansi-fg-52 {
+  color: rgb(95 0 0);
+}
+.ansi-fg-53 {
+  color: rgb(95 0 95);
+}
+.ansi-fg-54 {
+  color: rgb(95 0 135);
+}
+.ansi-fg-55 {
+  color: rgb(95 0 175);
+}
+.ansi-fg-56 {
+  color: rgb(95 0 215);
+}
+.ansi-fg-57 {
+  color: rgb(95 0 255);
+}
+.ansi-fg-58 {
+  color: rgb(95 95 0);
+}
+.ansi-fg-59 {
+  color: rgb(95 95 95);
+}
+.ansi-fg-60 {
+  color: rgb(95 95 135);
+}
+.ansi-fg-61 {
+  color: rgb(95 95 175);
+}
+.ansi-fg-62 {
+  color: rgb(95 95 215);
+}
+.ansi-fg-63 {
+  color: rgb(95 95 255);
+}
+.ansi-fg-64 {
+  color: rgb(95 135 0);
+}
+.ansi-fg-65 {
+  color: rgb(95 135 95);
+}
+.ansi-fg-66 {
+  color: rgb(95 135 135);
+}
+.ansi-fg-67 {
+  color: rgb(95 135 175);
+}
+.ansi-fg-68 {
+  color: rgb(95 135 215);
+}
+.ansi-fg-69 {
+  color: rgb(95 135 255);
+}
+.ansi-fg-70 {
+  color: rgb(95 175 0);
+}
+.ansi-fg-71 {
+  color: rgb(95 175 95);
+}
+.ansi-fg-72 {
+  color: rgb(95 175 135);
+}
+.ansi-fg-73 {
+  color: rgb(95 175 175);
+}
+.ansi-fg-74 {
+  color: rgb(95 175 215);
+}
+.ansi-fg-75 {
+  color: rgb(95 175 255);
+}
+.ansi-fg-76 {
+  color: rgb(95 215 0);
+}
+.ansi-fg-77 {
+  color: rgb(95 215 95);
+}
+.ansi-fg-78 {
+  color: rgb(95 215 135);
+}
+.ansi-fg-79 {
+  color: rgb(95 215 175);
+}
+.ansi-fg-80 {
+  color: rgb(95 215 215);
+}
+.ansi-fg-81 {
+  color: rgb(95 215 255);
+}
+.ansi-fg-82 {
+  color: rgb(95 255 0);
+}
+.ansi-fg-83 {
+  color: rgb(95 255 95);
+}
+.ansi-fg-84 {
+  color: rgb(95 255 135);
+}
+.ansi-fg-85 {
+  color: rgb(95 255 175);
+}
+.ansi-fg-86 {
+  color: rgb(95 255 215);
+}
+.ansi-fg-87 {
+  color: rgb(95 255 255);
+}
+.ansi-fg-88 {
+  color: rgb(135 0 0);
+}
+.ansi-fg-89 {
+  color: rgb(135 0 95);
+}
+.ansi-fg-90 {
+  color: rgb(135 0 135);
+}
+.ansi-fg-91 {
+  color: rgb(135 0 175);
+}
+.ansi-fg-92 {
+  color: rgb(135 0 215);
+}
+.ansi-fg-93 {
+  color: rgb(135 0 255);
+}
+.ansi-fg-94 {
+  color: rgb(135 95 0);
+}
+.ansi-fg-95 {
+  color: rgb(135 95 95);
+}
+.ansi-fg-96 {
+  color: rgb(135 95 135);
+}
+.ansi-fg-97 {
+  color: rgb(135 95 175);
+}
+.ansi-fg-98 {
+  color: rgb(135 95 215);
+}
+.ansi-fg-99 {
+  color: rgb(135 95 255);
+}
+.ansi-fg-100 {
+  color: rgb(135 135 0);
+}
+.ansi-fg-101 {
+  color: rgb(135 135 95);
+}
+.ansi-fg-102 {
+  color: rgb(135 135 135);
+}
+.ansi-fg-103 {
+  color: rgb(135 135 175);
+}
+.ansi-fg-104 {
+  color: rgb(135 135 215);
+}
+.ansi-fg-105 {
+  color: rgb(135 135 255);
+}
+.ansi-fg-106 {
+  color: rgb(135 175 0);
+}
+.ansi-fg-107 {
+  color: rgb(135 175 95);
+}
+.ansi-fg-108 {
+  color: rgb(135 175 135);
+}
+.ansi-fg-109 {
+  color: rgb(135 175 175);
+}
+.ansi-fg-110 {
+  color: rgb(135 175 215);
+}
+.ansi-fg-111 {
+  color: rgb(135 175 255);
+}
+.ansi-fg-112 {
+  color: rgb(135 215 0);
+}
+.ansi-fg-113 {
+  color: rgb(135 215 95);
+}
+.ansi-fg-114 {
+  color: rgb(135 215 135);
+}
+.ansi-fg-115 {
+  color: rgb(135 215 175);
+}
+.ansi-fg-116 {
+  color: rgb(135 215 215);
+}
+.ansi-fg-117 {
+  color: rgb(135 215 255);
+}
+.ansi-fg-118 {
+  color: rgb(135 255 0);
+}
+.ansi-fg-119 {
+  color: rgb(135 255 95);
+}
+.ansi-fg-120 {
+  color: rgb(135 255 135);
+}
+.ansi-fg-121 {
+  color: rgb(135 255 175);
+}
+.ansi-fg-122 {
+  color: rgb(135 255 215);
+}
+.ansi-fg-123 {
+  color: rgb(135 255 255);
+}
+.ansi-fg-124 {
+  color: rgb(175 0 0);
+}
+.ansi-fg-125 {
+  color: rgb(175 0 95);
+}
+.ansi-fg-126 {
+  color: rgb(175 0 135);
+}
+.ansi-fg-127 {
+  color: rgb(175 0 175);
+}
+.ansi-fg-128 {
+  color: rgb(175 0 215);
+}
+.ansi-fg-129 {
+  color: rgb(175 0 255);
+}
+.ansi-fg-130 {
+  color: rgb(175 95 0);
+}
+.ansi-fg-131 {
+  color: rgb(175 95 95);
+}
+.ansi-fg-132 {
+  color: rgb(175 95 135);
+}
+.ansi-fg-133 {
+  color: rgb(175 95 175);
+}
+.ansi-fg-134 {
+  color: rgb(175 95 215);
+}
+.ansi-fg-135 {
+  color: rgb(175 95 255);
+}
+.ansi-fg-136 {
+  color: rgb(175 135 0);
+}
+.ansi-fg-137 {
+  color: rgb(175 135 95);
+}
+.ansi-fg-138 {
+  color: rgb(175 135 135);
+}
+.ansi-fg-139 {
+  color: rgb(175 135 175);
+}
+.ansi-fg-140 {
+  color: rgb(175 135 215);
+}
+.ansi-fg-141 {
+  color: rgb(175 135 255);
+}
+.ansi-fg-142 {
+  color: rgb(175 175 0);
+}
+.ansi-fg-143 {
+  color: rgb(175 175 95);
+}
+.ansi-fg-144 {
+  color: rgb(175 175 135);
+}
+.ansi-fg-145 {
+  color: rgb(175 175 175);
+}
+.ansi-fg-146 {
+  color: rgb(175 175 215);
+}
+.ansi-fg-147 {
+  color: rgb(175 175 255);
+}
+.ansi-fg-148 {
+  color: rgb(175 215 0);
+}
+.ansi-fg-149 {
+  color: rgb(175 215 95);
+}
+.ansi-fg-150 {
+  color: rgb(175 215 135);
+}
+.ansi-fg-151 {
+  color: rgb(175 215 175);
+}
+.ansi-fg-152 {
+  color: rgb(175 215 215);
+}
+.ansi-fg-153 {
+  color: rgb(175 215 255);
+}
+.ansi-fg-154 {
+  color: rgb(175 255 0);
+}
+.ansi-fg-155 {
+  color: rgb(175 255 95);
+}
+.ansi-fg-156 {
+  color: rgb(175 255 135);
+}
+.ansi-fg-157 {
+  color: rgb(175 255 175);
+}
+.ansi-fg-158 {
+  color: rgb(175 255 215);
+}
+.ansi-fg-159 {
+  color: rgb(175 255 255);
+}
+.ansi-fg-160 {
+  color: rgb(215 0 0);
+}
+.ansi-fg-161 {
+  color: rgb(215 0 95);
+}
+.ansi-fg-162 {
+  color: rgb(215 0 135);
+}
+.ansi-fg-163 {
+  color: rgb(215 0 175);
+}
+.ansi-fg-164 {
+  color: rgb(215 0 215);
+}
+.ansi-fg-165 {
+  color: rgb(215 0 255);
+}
+.ansi-fg-166 {
+  color: rgb(215 95 0);
+}
+.ansi-fg-167 {
+  color: rgb(215 95 95);
+}
+.ansi-fg-168 {
+  color: rgb(215 95 135);
+}
+.ansi-fg-169 {
+  color: rgb(215 95 175);
+}
+.ansi-fg-170 {
+  color: rgb(215 95 215);
+}
+.ansi-fg-171 {
+  color: rgb(215 95 255);
+}
+.ansi-fg-172 {
+  color: rgb(215 135 0);
+}
+.ansi-fg-173 {
+  color: rgb(215 135 95);
+}
+.ansi-fg-174 {
+  color: rgb(215 135 135);
+}
+.ansi-fg-175 {
+  color: rgb(215 135 175);
+}
+.ansi-fg-176 {
+  color: rgb(215 135 215);
+}
+.ansi-fg-177 {
+  color: rgb(215 135 255);
+}
+.ansi-fg-178 {
+  color: rgb(215 175 0);
+}
+.ansi-fg-179 {
+  color: rgb(215 175 95);
+}
+.ansi-fg-180 {
+  color: rgb(215 175 135);
+}
+.ansi-fg-181 {
+  color: rgb(215 175 175);
+}
+.ansi-fg-182 {
+  color: rgb(215 175 215);
+}
+.ansi-fg-183 {
+  color: rgb(215 175 255);
+}
+.ansi-fg-184 {
+  color: rgb(215 215 0);
+}
+.ansi-fg-185 {
+  color: rgb(215 215 95);
+}
+.ansi-fg-186 {
+  color: rgb(215 215 135);
+}
+.ansi-fg-187 {
+  color: rgb(215 215 175);
+}
+.ansi-fg-188 {
+  color: rgb(215 215 215);
+}
+.ansi-fg-189 {
+  color: rgb(215 215 255);
+}
+.ansi-fg-190 {
+  color: rgb(215 255 0);
+}
+.ansi-fg-191 {
+  color: rgb(215 255 95);
+}
+.ansi-fg-192 {
+  color: rgb(215 255 135);
+}
+.ansi-fg-193 {
+  color: rgb(215 255 175);
+}
+.ansi-fg-194 {
+  color: rgb(215 255 215);
+}
+.ansi-fg-195 {
+  color: rgb(215 255 255);
+}
+.ansi-fg-196 {
+  color: rgb(255 0 0);
+}
+.ansi-fg-197 {
+  color: rgb(255 0 95);
+}
+.ansi-fg-198 {
+  color: rgb(255 0 135);
+}
+.ansi-fg-199 {
+  color: rgb(255 0 175);
+}
+.ansi-fg-200 {
+  color: rgb(255 0 215);
+}
+.ansi-fg-201 {
+  color: rgb(255 0 255);
+}
+.ansi-fg-202 {
+  color: rgb(255 95 0);
+}
+.ansi-fg-203 {
+  color: rgb(255 95 95);
+}
+.ansi-fg-204 {
+  color: rgb(255 95 135);
+}
+.ansi-fg-205 {
+  color: rgb(255 95 175);
+}
+.ansi-fg-206 {
+  color: rgb(255 95 215);
+}
+.ansi-fg-207 {
+  color: rgb(255 95 255);
+}
+.ansi-fg-208 {
+  color: rgb(255 135 0);
+}
+.ansi-fg-209 {
+  color: rgb(255 135 95);
+}
+.ansi-fg-210 {
+  color: rgb(255 135 135);
+}
+.ansi-fg-211 {
+  color: rgb(255 135 175);
+}
+.ansi-fg-212 {
+  color: rgb(255 135 215);
+}
+.ansi-fg-213 {
+  color: rgb(255 135 255);
+}
+.ansi-fg-214 {
+  color: rgb(255 175 0);
+}
+.ansi-fg-215 {
+  color: rgb(255 175 95);
+}
+.ansi-fg-216 {
+  color: rgb(255 175 135);
+}
+.ansi-fg-217 {
+  color: rgb(255 175 175);
+}
+.ansi-fg-218 {
+  color: rgb(255 175 215);
+}
+.ansi-fg-219 {
+  color: rgb(255 175 255);
+}
+.ansi-fg-220 {
+  color: rgb(255 215 0);
+}
+.ansi-fg-221 {
+  color: rgb(255 215 95);
+}
+.ansi-fg-222 {
+  color: rgb(255 215 135);
+}
+.ansi-fg-223 {
+  color: rgb(255 215 175);
+}
+.ansi-fg-224 {
+  color: rgb(255 215 215);
+}
+.ansi-fg-225 {
+  color: rgb(255 215 255);
+}
+.ansi-fg-226 {
+  color: rgb(255 255 0);
+}
+.ansi-fg-227 {
+  color: rgb(255 255 95);
+}
+.ansi-fg-228 {
+  color: rgb(255 255 135);
+}
+.ansi-fg-229 {
+  color: rgb(255 255 175);
+}
+.ansi-fg-230 {
+  color: rgb(255 255 215);
+}
+.ansi-fg-231 {
+  color: rgb(255 255 255);
+}
+.ansi-fg-232 {
+  color: rgb(8 8 8);
+}
+.ansi-fg-233 {
+  color: rgb(18 18 18);
+}
+.ansi-fg-234 {
+  color: rgb(28 28 28);
+}
+.ansi-fg-235 {
+  color: rgb(38 38 38);
+}
+.ansi-fg-236 {
+  color: rgb(48 48 48);
+}
+.ansi-fg-237 {
+  color: rgb(58 58 58);
+}
+.ansi-fg-238 {
+  color: rgb(68 68 68);
+}
+.ansi-fg-239 {
+  color: rgb(78 78 78);
+}
+.ansi-fg-240 {
+  color: rgb(88 88 88);
+}
+.ansi-fg-241 {
+  color: rgb(98 98 98);
+}
+.ansi-fg-242 {
+  color: rgb(108 108 108);
+}
+.ansi-fg-243 {
+  color: rgb(118 118 118);
+}
+.ansi-fg-244 {
+  color: rgb(128 128 128);
+}
+.ansi-fg-245 {
+  color: rgb(138 138 138);
+}
+.ansi-fg-246 {
+  color: rgb(148 148 148);
+}
+.ansi-fg-247 {
+  color: rgb(158 158 158);
+}
+.ansi-fg-248 {
+  color: rgb(168 168 168);
+}
+.ansi-fg-249 {
+  color: rgb(178 178 178);
+}
+.ansi-fg-250 {
+  color: rgb(188 188 188);
+}
+.ansi-fg-251 {
+  color: rgb(198 198 198);
+}
+.ansi-fg-252 {
+  color: rgb(208 208 208);
+}
+.ansi-fg-253 {
+  color: rgb(218 218 218);
+}
+.ansi-fg-254 {
+  color: rgb(228 228 228);
+}
+.ansi-fg-255 {
+  color: rgb(238 238 238);
+}

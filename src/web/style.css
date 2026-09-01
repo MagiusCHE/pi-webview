@@ -1335,14 +1335,15 @@ footer {
 .trust-indicator[data-status="trusted"] {
   color: var(--err);
 }
-.toolbar-chip .model-info {
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+#btn-model {
+  min-width: 0;
 }
 #model-info {
+  display: inline-flex;
+  align-items: center;
+  max-width: 280px;
+  min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 #thinking-info {
@@ -1359,6 +1360,9 @@ footer {
   display: block;
 }
 .model-name {
+  flex: 1 1 auto;
+  max-width: 180px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1369,8 +1373,13 @@ footer {
 }
 .model-provider {
   color: var(--fg-tertiary);
+  flex: 0 1 auto;
+  max-width: 100px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-
 /* balance chip: OUTSIDE the model button, non-interactive chip style.
    Shows “session cost / balance”: the COLOR lives ONLY on the balance
    (green normal --ok, yellow low --warn, red almost exhausted --err),

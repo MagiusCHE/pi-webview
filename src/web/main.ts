@@ -5811,9 +5811,12 @@ function sendOrStop(): void {
     addStatusLine(tpl(t("resumeModelUnavailable"), { model: blockedResumeModel }));
     return;
   }
-  // processing (or compaction) in progress → STEERING: the message enters
-  // the local queue (dequeue brings it back to the editor), never auto-abort
-  if (working || compacting) {
+  // During a model run, extension commands exposed by the command palette
+  // must reach pi immediately: pi executes them before its streaming guard.
+  // Regular messages still enter the steering queue. During compaction every
+  // message remains queued because pi cannot execute commands at that point.
+  const extensionCommand = isExtensionSlashCommand(els.input.value);
+  if (compacting || (working && !extensionCommand)) {
     submitSteering();
     return;
   }
@@ -5879,9 +5882,12 @@ function sendOrStop(): void {
     ),
   });
   // turn_start will arm the provider wait at the authoritative boundary.
-  // slash command sent: after the user bubble is in chat, signal that
-  // the extension commands need a pi.dev core change
-  if (message.trim().startsWith("/")) notifyCmdNotImplemented();
+  // Only unknown slash commands still need the generic core warning.
+  // Commands advertised by get_commands are handled immediately by pi,
+  // including while the model is already processing.
+  if (message.trim().startsWith("/") && !isExtensionSlashCommand(message)) {
+    notifyCmdNotImplemented();
+  }
   // at send completion (bubble + attachments + badge) ALWAYS go to the bottom:
   // the old forced scroll before the bubble was not enough — the content
   // added after left it above, and the "smart" follow then believed the
@@ -6203,6 +6209,11 @@ let cmdOpen = false;
 let cmdSelected = 0;
 let cmdMatches: SlashCommand[] = [];
 
+function isExtensionSlashCommand(input: string): boolean {
+  const match = /^\/([^\s/]+)/.exec(input.trim());
+  return !!match && slashCommands.some((command) => command.name === match[1]);
+}
+
 // extension command list from get_commands (source "extension"), fetched at
 // boot and lazily at the first "/" (the list can change with the extensions)
 async function fetchSlashCommands(): Promise<void> {
@@ -6358,6 +6369,7 @@ function openCmdPalette(): void {
         inner.style.alignItems = "center";
         inner.append(name, desc);
         row.append(inner);
+        row.dataset.name = c.name;
         row.addEventListener("click", () => close(`/${c.name}`));
         row.classList.toggle("selected", i === sel);
         list.appendChild(row);
@@ -6389,8 +6401,8 @@ function openCmdPalette(): void {
         }
       } else if (e.key === "Enter") {
         e.preventDefault();
-        const row = rows[sel];
-        if (row) close(row.textContent ?? undefined);
+        const name = rows[sel]?.dataset.name;
+        if (name) close(`/${name}`);
       } else if (e.key === "Escape") {
         e.stopPropagation();
         close();

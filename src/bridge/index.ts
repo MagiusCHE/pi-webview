@@ -187,6 +187,7 @@ function serveStatic(root: string, req: IncomingMessage, res: ServerResponse): v
   const url = new URL(req.url ?? "/", "http://localhost");
   let pathname = decodeURIComponent(url.pathname);
   if (pathname === "/") pathname = "/index.html";
+  if (pathname === "/favicon.ico") pathname = "/icon.png";
   const filePath = normalize(join(root, pathname));
   if (!filePath.startsWith(normalize(root))) {
     res.writeHead(403).end("forbidden");

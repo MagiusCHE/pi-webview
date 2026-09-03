@@ -916,6 +916,7 @@ export abstract class PiWebviewHost {
     const root = webview.asWebviewUri(webDir);
     html = html.replace(/src="\/assets\//g, `src="${root}/assets/`);
     html = html.replace(/href="\/assets\//g, `href="${root}/assets/`);
+    html = html.replace(/href="\/icon\.png"/g, `href="${root}/icon.png"`);
     html = html.replace(/href="\/style\.css"/g, `href="${root}/style.css"`);
     html = html.replace(
       "<head>",

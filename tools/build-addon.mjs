@@ -70,7 +70,6 @@ chmodSync("packages/pi-webview/dist/piw.js", 0o755);
 
 rmSync("packages/pi-webview/dist/web", { recursive: true, force: true });
 cpSync("dist/web", "packages/pi-webview/dist/web", { recursive: true });
-cpSync("media/icon.png", "packages/pi-webview/dist/web/icon.png");
 cpSync("dist/pi-webview-ide.vsix", "packages/pi-webview/companion/pi-webview-ide.vsix");
 const bundledVsVsix = "packages/pi-webview/companion/pi-webview-visualstudio.vsix";
 if (existsSync(vsVsix)) {

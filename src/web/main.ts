@@ -2273,6 +2273,25 @@ function openFolderBrowser(start: string): Promise<string | null> {
 
 type CrossWorkspaceSessionAction = "resume" | "fork" | "new";
 
+function buildWarningModalLead(message: string): {
+  row: HTMLDivElement;
+  copy: HTMLDivElement;
+} {
+  const row = document.createElement("div");
+  row.className = "modal-content";
+  const icon = document.createElement("div");
+  icon.className = "modal-icon";
+  icon.innerHTML = trustIcon("warn-filled");
+  const copy = document.createElement("div");
+  copy.className = "modal-copy";
+  const msg = document.createElement("div");
+  msg.className = "modal-message";
+  msg.textContent = message;
+  copy.appendChild(msg);
+  row.append(icon, copy);
+  return { row, copy };
+}
+
 // Standalone only: a session outside the current workspace can stay original
 // by moving the bridge cwd to its folder, or follow the existing fork/new
 // alternatives. IDE webviews never open this dialog because their workspace
@@ -2285,12 +2304,9 @@ function askCrossWorkspaceSessionAction(
     backdrop.className = "modal-backdrop";
     const card = document.createElement("div");
     card.className = "modal";
-    const icon = document.createElement("div");
-    icon.className = "modal-icon";
-    icon.innerHTML = trustIcon("warn-filled");
-    const msg = document.createElement("div");
-    msg.className = "modal-message";
-    msg.textContent = `${t("crossWorkspaceSessionAsk")}\n\n${folder}`;
+    const { row: lead } = buildWarningModalLead(
+      `${t("crossWorkspaceSessionAsk")}\n\n${folder}`,
+    );
     const actions = document.createElement("div");
     actions.className = "modal-actions session-workspace-actions";
     const resumeBtn = document.createElement("button");
@@ -2310,7 +2326,7 @@ function askCrossWorkspaceSessionAction(
     cancelBtn.className = "btn";
     cancelBtn.textContent = t("cancel");
     actions.append(resumeBtn, forkBtn, newBtn, cancelBtn);
-    card.append(icon, msg, actions);
+    card.append(lead, actions);
     backdrop.appendChild(card);
 
     const done = (value: CrossWorkspaceSessionAction | null): void => {
@@ -2377,12 +2393,9 @@ function askWorkspaceAction(folder: string): Promise<"fork" | "new" | null> {
     backdrop.className = "modal-backdrop";
     const card = document.createElement("div");
     card.className = "modal";
-    const icon = document.createElement("div");
-    icon.className = "modal-icon";
-    icon.innerHTML = trustIcon("warn-filled");
-    const msg = document.createElement("div");
-    msg.className = "modal-message";
-    msg.textContent = `${t("changeWorkspaceAsk")}\n\n${folder}`;
+    const { row: lead } = buildWarningModalLead(
+      `${t("changeWorkspaceAsk")}\n\n${folder}`,
+    );
     const actions = document.createElement("div");
     actions.className = "modal-actions";
     const forkBtn = document.createElement("button");
@@ -2398,7 +2411,7 @@ function askWorkspaceAction(folder: string): Promise<"fork" | "new" | null> {
     cancelBtn.className = "btn";
     cancelBtn.textContent = t("cancel");
     actions.append(forkBtn, newBtn, cancelBtn);
-    card.append(icon, msg, actions);
+    card.append(lead, actions);
     backdrop.appendChild(card);
 
     const done = (val: "fork" | "new" | null): void => {
@@ -3366,7 +3379,7 @@ function renderStatusSlots(): void {
     slot.innerHTML = renderAnsiToHtml(text);
     slot.title = `${stripAnsi(text)} · ${tpl(t("hideStatusSource"), { source: key })}`;
     slot.addEventListener("click", () => {
-      void showConfirm(tpl(t("hideStatusConfirm"), { source: key })).then((ok) => {
+      void showConfirm(tpl(t("hideStatusConfirm"), { source: key }), text).then((ok) => {
         if (!ok) return;
         hiddenStatusKeys = setStatusKeyHidden(hiddenStatusKeys, key, true);
         renderStatusSlots();
@@ -5765,18 +5778,20 @@ function openImageLightbox(src: string, name: string): void {
   document.body.appendChild(backdrop);
 }
 
-function showConfirm(message: string): Promise<boolean> {
+function showConfirm(message: string, ansiValue?: string): Promise<boolean> {
   return new Promise((resolve) => {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
     const card = document.createElement("div");
     card.className = "modal";
-    const icon = document.createElement("div");
-    icon.className = "modal-icon";
-    icon.innerHTML = trustIcon("warn-filled");
-    const msg = document.createElement("div");
-    msg.className = "modal-message";
-    msg.textContent = message;
+    const { row: lead, copy } = buildWarningModalLead(message);
+    if (ansiValue !== undefined) {
+      const value = document.createElement("div");
+      value.className = "modal-status-value";
+      value.innerHTML = renderAnsiToHtml(ansiValue);
+      value.title = stripAnsi(ansiValue);
+      copy.appendChild(value);
+    }
     const actions = document.createElement("div");
     actions.className = "modal-actions";
     const cancel = document.createElement("button");
@@ -5788,7 +5803,7 @@ function showConfirm(message: string): Promise<boolean> {
     ok.className = "btn danger";
     ok.textContent = t("confirm");
     actions.append(cancel, ok);
-    card.append(icon, msg, actions);
+    card.append(lead, actions);
     backdrop.appendChild(card);
     document.body.appendChild(backdrop);
 

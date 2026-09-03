@@ -48,28 +48,27 @@ seguente solo quando l'utente lo richiede esplicitamente dicendo di
 autorizzazione separata e, in quel caso, prevale la regola di build completa
 indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
 
-- **Aggiornamento artefatti su Linux**: compilare il companion VS Code, reinstallarlo
-  forzatamente e aggiornare anche il package locale `piw` (bundle launcher,
-  bridge e UI servita dal browser). Se un bridge `piw` è attivo, leggere e
-  conservare dal lock porta, bind e token senza mai stampare il token; preservare
-  anche le opzioni runtime attive, in particolare `--no-idle`. Eseguire `piw -k`
-  e riavviare in background sulla stessa porta/bind passando il token precedente
-  al nuovo launcher esclusivamente tramite la variabile interna
-  `PIW_RESTART_TOKEN`. Il vecchio URL autenticato deve continuare a funzionare.
-  A fine lavoro comunicare all'utente che può eseguire il reload di VS Code e
+- **Riavvio del bridge attivo — tutte le piattaforme**: quando si aggiornano gli
+  artefatti, se un bridge `piw` è attivo leggere e conservare dal lock porta,
+  bind e token senza mai stampare il token; preservare anche tutte le opzioni
+  runtime attive, in particolare `--no-idle`. Eseguire `piw -k` e riavviare in
+  background sulla stessa porta/bind passando il token precedente al nuovo
+  launcher esclusivamente tramite la variabile interna `PIW_RESTART_TOKEN`. Il
+  vecchio URL autenticato deve continuare a funzionare. Verificare dopo il
+  riavvio che configurazione e token siano rimasti invariati. Se nessun bridge
+  era attivo, non inventare una porta e non avviarne uno implicitamente:
+  segnalarlo chiaramente nel riepilogo finale.
+- **Aggiornamento artefatti su Linux**: compilare il companion VS Code,
+  reinstallarlo forzatamente e aggiornare anche il package locale `piw` (bundle
+  launcher, bridge e UI servita dal browser). A fine lavoro comunicare
+  all'utente che può eseguire il reload di VS Code e, se inizialmente attivo,
   che `piw` è stato riavviato in background, indicando la porta.
-- **Aggiornamento artefatti su Windows**: compilare i companion VS Code e Visual Studio,
-  reinstallare forzatamente entrambi e aggiornare anche il package locale
-  `piw` (bundle launcher, bridge e UI servita dal browser). Se un bridge `piw`
-  è attivo, leggere e conservare dal lock porta, bind e token senza mai stampare
-  il token; preservare anche le opzioni runtime attive. Eseguire `piw -k` e
-  riavviare in background sulla stessa porta/bind passando il token precedente
-  al nuovo launcher esclusivamente tramite la variabile interna
-  `PIW_RESTART_TOKEN`. Il vecchio URL autenticato deve continuare a funzionare.
-  A fine lavoro comunicare all'utente che può eseguire il reload di VS Code e/o
-  Visual Studio e che `piw` è stato riavviato in background, indicando la porta.
-- Se nessun bridge `piw` era attivo, non inventare una porta e non avviarne uno
-  implicitamente: segnalarlo chiaramente nel riepilogo finale.
+- **Aggiornamento artefatti su Windows**: compilare i companion VS Code e Visual
+  Studio, reinstallare forzatamente entrambi e aggiornare anche il package
+  locale `piw` (bundle launcher, bridge e UI servita dal browser). A fine lavoro
+  comunicare all'utente che può eseguire il reload di VS Code e/o Visual Studio
+  e, se inizialmente attivo, che `piw` è stato riavviato in background, indicando
+  la porta.
 
 ## Architettura prevista (concept 0001 + 0002)
 

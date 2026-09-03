@@ -190,8 +190,9 @@ header {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
+  margin-right: auto;
 }
 .conn-dot {
   width: 8px;
@@ -210,12 +211,13 @@ header {
 }
 .dropdown {
   position: relative;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
 }
 .session-btn {
   display: block;
-  width: 100%;
+  width: max-content;
+  max-width: 100%;
   background: var(--input-bg);
   color: var(--fg);
   border: 1px solid var(--border);
@@ -1322,6 +1324,10 @@ footer {
   gap: 5px;
   padding: 6px 10px 8px;
 }
+.toolbar-spacer {
+  flex: 1;
+  min-width: 0;
+}
 .toolbar-chip {
   display: inline-flex;
   align-items: center;
@@ -1967,9 +1973,24 @@ footer {
   color: var(--fg);
   background: var(--hover);
 }
+.modal-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+.modal-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
 .modal-icon {
   color: var(--err);
   display: flex;
+  flex: 0 0 auto;
+  margin-top: 1px;
 }
 .modal-icon svg {
   display: block;
@@ -1980,6 +2001,21 @@ footer {
   font-size: 14px;
   line-height: 1.5;
   color: var(--fg);
+  white-space: pre-wrap;
+}
+.modal-status-value {
+  align-self: flex-start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-secondary);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
 }
 .modal-actions {
   display: flex;

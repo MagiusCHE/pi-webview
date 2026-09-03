@@ -12,6 +12,8 @@ export interface BridgeLock {
   port: number;
   token: string;
   startedAt: string;
+  /** Requested IPv4 binding; absent in older locks means loopback only. */
+  bindIp?: string;
 }
 
 export function lockPath(): string {

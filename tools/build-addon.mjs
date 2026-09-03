@@ -28,6 +28,9 @@ if (existsSync(vsVsix)) {
   );
 }
 
+// Rebuild the distributable directory from scratch so removed or renamed
+// bundles can never leak into npm tarballs from an earlier local build.
+rmSync("packages/pi-webview/dist", { recursive: true, force: true });
 mkdirSync("packages/pi-webview/dist", { recursive: true });
 mkdirSync("packages/pi-webview/companion", { recursive: true });
 

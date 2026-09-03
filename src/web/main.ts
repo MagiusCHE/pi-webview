@@ -196,7 +196,13 @@ async function resolveBridgeUrl(): Promise<string | null> {
   if (fromEnv) return fromEnv;
   let url: string | null = null;
   try {
-    const res = await fetch("/bridge-config.json", { cache: "no-store" });
+    // Non-loopback standalone pages carry the launch token in their URL. The
+    // bridge requires it before revealing the authenticated WebSocket URL.
+    const pageToken = new URLSearchParams(location.search).get("token");
+    const configUrl = pageToken
+      ? `/bridge-config.json?token=${encodeURIComponent(pageToken)}`
+      : "/bridge-config.json";
+    const res = await fetch(configUrl, { cache: "no-store" });
     if (res.ok) {
       const cfg = (await res.json()) as { wsUrl?: string };
       if (cfg.wsUrl) url = cfg.wsUrl;
@@ -2415,7 +2421,10 @@ async function changeWorkspace(): Promise<void> {
   const target = await openFolderBrowser(workspacePath);
   if (!target) return;
   if (target === workspacePath) return; // same folder: no change
-  const choice = await askWorkspaceAction(target);
+  // An empty session has nothing to preserve or fork: move directly to the
+  // selected workspace and let pi start its empty session there.
+  const currentIsEmpty = !sessionHasMessages && isNewSession(currentSession());
+  const choice = currentIsEmpty ? "new" : await askWorkspaceAction(target);
   if (!choice) return;
   const res = await ideRequest({
     type: "setWorkspace",
@@ -5822,6 +5831,11 @@ function sendOrStop(): void {
   }
   const text = els.input.value.trim();
   if (!text && attachments.length === 0) return;
+  // Mark a real prompt immediately instead of waiting for the session list to
+  // be refreshed. This prevents an in-flight first message from making the
+  // current session look empty during a workspace change. Extension commands
+  // do not become conversation messages by themselves.
+  if (!extensionCommand) sessionHasMessages = true;
   if (text) pushMessageHistory(text);
   const wrapper = addMsg("user");
   // attachments BEFORE the text: images in grid (click → lightbox), then files

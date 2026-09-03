@@ -7,6 +7,7 @@
 //   piw --session <id>       → resumes a session (partial id or path;
 //                              the cwd is set by pi from the session)
 //   piw --port N             → fixed port (default: random)
+//   piw --ip <IPv4>          → also binds a specific address; 0.0.0.0 binds all
 //   piw --no-open            → does not open the browser: prints the link
 //   piw --pi <command>       → alternative pi command
 //   piw --background | -b    → starts in background (fire-and-forget),
@@ -23,10 +24,17 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
+import { networkInterfaces } from "node:os";
 import { resolvePi } from "./spawn.ts";
 import { readLock, writeLock, clearLock, pidAlive, healthCheck } from "./lock.ts";
 import { getSessionInfo, listSessions } from "./sessions.ts";
 import { resolveLaunchCwd } from "./launch-context.ts";
+import {
+  ALL_IPV4_INTERFACES,
+  LOOPBACK_IP,
+  bindingIncludes,
+  normalizeBindIp,
+} from "./bind.ts";
 import {
   ensureCompanions,
   formatCompanionNotes,
@@ -101,6 +109,14 @@ const detachedRun = process.env.PIW_DETACHED === "1";
 const session = value("--session");
 const portArg = value("--port");
 const piArg = value("--pi");
+const ipArg = value("--ip") ?? value("--host");
+let bindIp: string;
+try {
+  bindIp = normalizeBindIp(ipArg);
+} catch (error) {
+  console.error(`piw: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(2);
+}
 const debug = argv.includes("--debug");
 const launchCwd = resolveLaunchCwd();
 
@@ -109,7 +125,13 @@ const extra: string[] = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === "--no-open" || a === "--debug") continue;
-  if (a === "--session" || a === "--port" || a === "--pi") {
+  if (
+    a === "--session" ||
+    a === "--port" ||
+    a === "--pi" ||
+    a === "--ip" ||
+    a === "--host"
+  ) {
     i++; // skip the value too
     continue;
   }
@@ -151,6 +173,46 @@ async function createPageIntent(port: number, token: string): Promise<string> {
     throw new Error("risposta non valida durante la registrazione della directory");
   }
   return `new=1&launch=${encodeURIComponent(data.id)}`;
+}
+
+function remoteHosts(ip: string): string[] {
+  if (ip !== ALL_IPV4_INTERFACES) return ip === LOOPBACK_IP ? [] : [ip];
+  const hosts = new Set<string>();
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === "IPv4" && !address.internal) hosts.add(address.address);
+    }
+  }
+  return [...hosts];
+}
+
+function remotePageUrl(
+  host: string,
+  port: number,
+  intent: string,
+  token: string,
+): string {
+  const params = new URLSearchParams({ token });
+  for (const [key, value] of new URLSearchParams(intent)) params.set(key, value);
+  return `http://${host}:${port}/?${params.toString()}`;
+}
+
+function printRemoteAccess(
+  ip: string,
+  port: number,
+  intent: string,
+  token: string,
+): void {
+  const hosts = remoteHosts(ip);
+  if (hosts.length === 0 && ip === ALL_IPV4_INTERFACES) {
+    console.log(
+      `piw: in ascolto su 0.0.0.0:${port}; nessun indirizzo IPv4 esterno rilevato.`,
+    );
+    return;
+  }
+  for (const host of hosts) {
+    console.log(`piw: accesso remoto: ${remotePageUrl(host, port, intent, token)}`);
+  }
 }
 
 function openBrowser(url: string): void {
@@ -213,15 +275,25 @@ async function main(): Promise<void> {
     for (;;) {
       const l = readLock();
       if (l && pidAlive(l.pid) && (await healthCheck(l.port, l.token))) {
+        const activeBindIp = normalizeBindIp(l.bindIp);
+        if (!bindingIncludes(activeBindIp, bindIp)) {
+          console.error(
+            `piw: il bridge attivo è bindato su ${activeBindIp}; fermalo con piw -k prima di usare --ip ${bindIp}.`,
+          );
+          process.exit(1);
+        }
         const intent = await createPageIntent(l.port, l.token);
-        const url = `http://127.0.0.1:${l.port}/?${intent}`;
+        const url = `http://${LOOPBACK_IP}:${l.port}/?${intent}`;
         // default: opens the browser; with --no-open prints only the link
         if (noOpen) {
           console.log(`piw: bridge attivo su ${url}`);
         } else {
           openBrowser(url);
-          console.log(`piw: bridge attivo su http://127.0.0.1:${l.port} (background).`);
+          console.log(
+            `piw: bridge attivo su http://${LOOPBACK_IP}:${l.port} (background).`,
+          );
         }
+        if (ipArg) printRemoteAccess(activeBindIp, l.port, intent, l.token);
         return;
       }
       if (Date.now() > deadline) {
@@ -237,12 +309,22 @@ async function main(): Promise<void> {
   // 1) bridge already active? → reuse (no second bridge)
   const lock = readLock();
   if (lock && pidAlive(lock.pid) && (await healthCheck(lock.port, lock.token))) {
+    const activeBindIp = normalizeBindIp(lock.bindIp);
+    if (ipArg && !bindingIncludes(activeBindIp, bindIp)) {
+      console.error(
+        `piw: il bridge attivo è bindato su ${activeBindIp}; fermalo con piw -k prima di usare --ip ${bindIp}.`,
+      );
+      process.exit(1);
+    }
     const intent = detachedRun ? "new=1" : await createPageIntent(lock.port, lock.token);
-    const url = `http://127.0.0.1:${lock.port}/?${intent}`;
+    const url = `http://${LOOPBACK_IP}:${lock.port}/?${intent}`;
     console.log(
-      `piw: bridge già attivo su http://127.0.0.1:${lock.port} — apro ${intent}`,
+      `piw: bridge già attivo su http://${LOOPBACK_IP}:${lock.port} — apro ${intent}`,
     );
     if (!noOpen && !detachedRun) openBrowser(url);
+    if (ipArg && !detachedRun) {
+      printRemoteAccess(activeBindIp, lock.port, intent, lock.token);
+    }
     return;
   }
   if (lock) {
@@ -258,6 +340,8 @@ async function main(): Promise<void> {
     "--token",
     token,
     ...(portArg ? ["--port", portArg] : []),
+    "--ip",
+    bindIp,
     ...(piArg ? ["--pi", piArg] : []),
     ...(debug ? ["--debug"] : []),
     ...extra,
@@ -310,9 +394,16 @@ async function main(): Promise<void> {
     child.kill();
     throw error;
   }
-  writeLock({ pid: child.pid, port, token, startedAt: new Date().toISOString() });
-  const url = `http://127.0.0.1:${port}/?${intent}`;
+  writeLock({
+    pid: child.pid,
+    port,
+    token,
+    startedAt: new Date().toISOString(),
+    bindIp,
+  });
+  const url = `http://${LOOPBACK_IP}:${port}/?${intent}`;
   console.log(`piw: bridge attivo su ${url}`);
+  if (ipArg) printRemoteAccess(bindIp, port, intent, token);
   if (!noOpen && !detachedRun) openBrowser(url);
 
   // 4) the launcher stays alive with the bridge; on exit it cleans the lock

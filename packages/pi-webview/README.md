@@ -19,6 +19,8 @@ The package also includes the web UI and a local bridge, launchable from the she
 ```bash
 piw                 # starts the bridge, serves the UI and opens the browser
 piw --port 8900     # fixed port (default: random port)
+piw --ip 192.168.1.20 # also listens on this IPv4 address and on 127.0.0.1
+piw --ip 0.0.0.0    # listens on every IPv4 interface (including loopback)
 piw --no-open       # does not open the browser: prints the link to the console
 piw --session <id>  # resumes a session (partial id or path)
 piw --no-idle       # disables the automatic idle shutdown
@@ -28,6 +30,10 @@ piw -k              # stops the background bridge (same as --kill)
 ```
 
 `piw` resolves `pi` on the `PATH` (on Windows the `pi.cmd` shim), spawns it with `--mode rpc` and opens `http://127.0.0.1:<port>/`. A new session starts in the shell directory from which `piw` was invoked—even when reusing an existing bridge—and falls back to the user home if that directory is unavailable. Exit with Ctrl+C.
+
+The default bind remains loopback-only. `--ip <IPv4>` (also accepted as `--host <IPv4>`) adds a specific local address while preserving `127.0.0.1`; `--ip 0.0.0.0` listens on every IPv4 interface. For a non-loopback bind, `piw` prints authenticated remote-access links. Treat those links as secrets: anyone who has one can operate pi with your local user permissions. Use this only on a trusted network, preferably behind a host firewall or private VPN. If the active single-instance bridge has a different binding, stop it with `piw -k` before restarting it with the desired `--ip`.
+
+A reverse proxy on the same machine may keep `piw` loopback-only and forward HTTP/WebSocket traffic to it. The bridge trusts `X-Forwarded-For` and `X-Forwarded-Proto` only when the direct peer is loopback, so remote token checks remain active and HTTPS proxies receive a `wss://` URL.
 
 ### One bridge per system
 

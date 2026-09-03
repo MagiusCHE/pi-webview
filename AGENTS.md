@@ -98,7 +98,7 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   estensione pi-webview lato pi (auto-install/auto-update dei companion
   VS Code + Visual Studio, confronto di versione coi vsix inclusi) + vsix
   companion inclusi + **standalone**
-  (UI buildata `dist/web`, bridge `dist/bridge.js` e bin npm `piw` per aprire la
+  (UI buildata `dist/web`, bridge `dist/bridge.cjs` e bin npm `piw` per aprire la
   UI nel browser da shell — `src/bridge/piw.ts`)
 - `tests/` — test unitari (`pnpm test`, `node --test tests/`)
 - `tools/` — script di sviluppo (es. `check-package-manager.mjs`)
@@ -178,7 +178,13 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
 - **Avvio standalone**: una nuova sessione aperta da `piw` usa il `cwd` della
   shell che ha invocato il comando, anche quando riutilizza un bridge già
   attivo; se il `cwd` non è leggibile usa la home dell'utente. Il path resta
-  interno al bridge e nell'URL compare solo un identificativo opaco di lancio
+  interno al bridge e nell'URL compare solo un identificativo opaco di lancio.
+  Il bind resta `127.0.0.1` per default; `--ip <IPv4>`/`--host <IPv4>` aggiunge
+  uno specifico indirizzo mantenendo il loopback, mentre `0.0.0.0` include
+  tutte le interfacce. L'accesso non-loopback richiede il link autenticato
+  stampato da `piw`. Dietro un reverse proxy locale, il bridge considera
+  `X-Forwarded-For`/`X-Forwarded-Proto` solo se il peer diretto è loopback,
+  preservando autenticazione remota e WebSocket `ws://`/`wss://` corretti
 - **Refresh standalone**: la pagina sostituisce `?new=1` con `?s=<sessionId>`
   appena pi espone il file sessione. Il path locale non compare nell'URL: al
   refresh il bridge risolve l'id e riprende la sessione nel `cwd` salvato nel

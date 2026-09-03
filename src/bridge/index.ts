@@ -7,7 +7,7 @@
 // broadcast between clients.
 
 import { createServer } from "node:http";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
 import {
   appendFileSync,
@@ -56,6 +56,14 @@ import { fetchProviderBalance } from "./balance.ts";
 import { revealFileInSystemManager } from "./open-file.ts";
 import { clearLock } from "./lock.ts";
 import { normalizeLaunchCwd } from "./launch-context.ts";
+import {
+  LOOPBACK_IP,
+  bindHosts,
+  effectiveClientAddress,
+  isLoopbackAddress,
+  normalizeBindIp,
+  websocketProtocol,
+} from "./bind.ts";
 
 // same deterministic log as the VS Code companion: ~/.pi/pi-webview/companion.log
 const MAX_LOG_BYTES = 2 * 1024 * 1024; // 2MB: reset only at session startup
@@ -104,6 +112,7 @@ interface Options {
   open: boolean;
   port: number | null;
   token: string | null;
+  bindIp: string;
   piCommand: string;
   idleTimeoutMs: number;
 }
@@ -116,6 +125,7 @@ function parseArgs(argv: string[]): Options {
     open: false,
     port: null,
     token: null,
+    bindIp: LOOPBACK_IP,
     piCommand: "pi",
     idleTimeoutMs: 60_000,
   };
@@ -139,6 +149,10 @@ function parseArgs(argv: string[]): Options {
         break;
       case "--token":
         opts.token = argv[++i] ?? null;
+        break;
+      case "--ip":
+      case "--host":
+        opts.bindIp = normalizeBindIp(argv[++i]);
         break;
       case "--pi":
         opts.piCommand = argv[++i] ?? "pi";
@@ -265,7 +279,7 @@ function main(): void {
     }
     return stderrCount++ < 25;
   }
-  const http = createServer(async (req, res) => {
+  const handleHttp = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (url.pathname === "/health") {
       // used by `piw` to validate the lock (single-instance)
@@ -305,8 +319,25 @@ function main(): void {
       return;
     }
     if (url.pathname === "/bridge-config.json") {
+      // A remote page must prove knowledge of the launch token. Without this
+      // check, exposing the HTTP port would also expose the WebSocket token to
+      // every host that can reach it. Loopback keeps the original frictionless
+      // behavior.
+      const clientAddress = effectiveClientAddress(
+        req.socket.remoteAddress,
+        req.headers["x-forwarded-for"],
+      );
+      if (!isLoopbackAddress(clientAddress) && url.searchParams.get("token") !== token) {
+        res.writeHead(401).end("unauthorized");
+        return;
+      }
+      const authority = req.headers.host ?? `${LOOPBACK_IP}:${port}`;
+      const wsProtocol = websocketProtocol(
+        req.socket.remoteAddress,
+        req.headers["x-forwarded-proto"],
+      );
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ wsUrl: `ws://127.0.0.1:${port}?token=${token}` }));
+      res.end(JSON.stringify({ wsUrl: `${wsProtocol}://${authority}?token=${token}` }));
       return;
     }
     if (opts.serve) {
@@ -314,23 +345,27 @@ function main(): void {
       return;
     }
     res.writeHead(404).end("bridge attivo, ma --serve non specificato");
-  });
+  };
 
   // --- WebSocket with token authentication ---------------------------------
   const wss = new WebSocketServer({ noServer: true });
   const channels = new Set<Channel>();
 
-  http.on("upgrade", (req, socket, head) => {
-    const url = new URL(req.url ?? "/", "http://localhost");
-    if (url.searchParams.get("token") !== token) {
-      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-      socket.destroy();
-      return;
-    }
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit("connection", ws, req);
+  const createHttpServer = (): Server => {
+    const server = createServer((req, res) => void handleHttp(req, res));
+    server.on("upgrade", (req, socket, head) => {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      if (url.searchParams.get("token") !== token) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit("connection", ws, req);
+      });
     });
-  });
+    return server;
+  };
 
   // --- channel: one WS connection + its pi process --------------------------
   interface Channel {
@@ -851,26 +886,56 @@ function main(): void {
 
   // --- startup ---------------------------------------------------------------
   let port = opts.port ?? 0;
-  const server = http.listen(port, "127.0.0.1", () => {
-    const addr = http.address();
-    port = typeof addr === "object" && addr ? addr.port : port;
-    const wsUrl = `ws://127.0.0.1:${port}?token=${token}`;
+  const hosts = bindHosts(opts.bindIp);
+  const servers = hosts.map(() => createHttpServer());
+
+  const listen = (server: Server, host: string, requestedPort: number): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const onError = (error: Error) => {
+        server.off("listening", onListening);
+        reject(error);
+      };
+      const onListening = () => {
+        server.off("error", onError);
+        const address = server.address();
+        resolve(typeof address === "object" && address ? address.port : requestedPort);
+      };
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(requestedPort, host);
+    });
+
+  const startServers = async (): Promise<void> => {
+    port = await listen(servers[0]!, hosts[0]!, port);
+    for (let i = 1; i < servers.length; i++) {
+      await listen(servers[i]!, hosts[i]!, port);
+    }
+    const wsUrl = `ws://${LOOPBACK_IP}:${port}?token=${token}`;
     console.log(`BRIDGE_READY ${wsUrl}`);
-    console.log(opts.serve ? `UI:  http://127.0.0.1:${port}/` : `WS:  ${wsUrl}`);
-    if (opts.serve && opts.open) openBrowser(`http://127.0.0.1:${port}/`);
+    console.log(opts.serve ? `UI:  http://${LOOPBACK_IP}:${port}/` : `WS:  ${wsUrl}`);
+    console.log(`BIND: ${hosts.join(", ")}`);
+    if (opts.serve && opts.open) openBrowser(`http://${LOOPBACK_IP}:${port}/`);
     startIdleTimer();
-  });
+  };
 
   // --- shutdown ---------------------------------------------------------------
   const shutdown = (code: number) => {
     for (const ch of channels) ch.dispose();
     wss.close();
-    server.close();
+    for (const server of servers) {
+      if (server.listening) server.close();
+    }
     clearLock();
     process.exit(code);
   };
   process.on("SIGINT", () => shutdown(0));
   process.on("SIGTERM", () => shutdown(0));
+  void startServers().catch((error: unknown) => {
+    console.error(
+      `[bridge] bind fallito (${hosts.join(", ")}): ${error instanceof Error ? error.message : String(error)}`,
+    );
+    shutdown(1);
+  });
 }
 
 function openBrowser(url: string): void {

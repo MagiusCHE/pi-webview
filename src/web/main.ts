@@ -3574,6 +3574,7 @@ function renderToolOpenButton(el: HTMLElement, filePath?: string): void {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "tool-open-file";
+  button.dataset.filePath = filePath;
   button.innerHTML = openFileIcon();
   button.title = t("openFile");
   button.setAttribute("aria-label", button.title);
@@ -3683,6 +3684,7 @@ type ToolExecutionStatus = "running" | "success" | "error";
 function setToolExecutionStatus(card: HTMLElement, status: ToolExecutionStatus): void {
   const name = card.querySelector(".tool-name");
   if (!name) return;
+  const sameStatus = card.dataset.toolStatus === status;
   let indicator = card.querySelector<HTMLElement>(".tool-status");
   if (!indicator) {
     indicator = document.createElement("span");
@@ -3691,7 +3693,6 @@ function setToolExecutionStatus(card: HTMLElement, status: ToolExecutionStatus):
   }
   card.dataset.toolStatus = status;
   indicator.className = `tool-status tool-status-${status}`;
-  indicator.textContent = "";
   const label = t(
     status === "running"
       ? "toolRunning"
@@ -3701,6 +3702,16 @@ function setToolExecutionStatus(card: HTMLElement, status: ToolExecutionStatus):
   );
   indicator.title = label;
   indicator.setAttribute("aria-label", label);
+
+  // Tool argument deltas call this repeatedly. Preserve an already-correct
+  // visual node so its CSS animation does not restart on every streamed chunk.
+  const hasExpectedVisual =
+    status === "running"
+      ? indicator.querySelector(".spinner") !== null
+      : indicator.querySelector("svg") !== null;
+  if (sameStatus && hasExpectedVisual) return;
+
+  indicator.replaceChildren();
   if (status === "running") {
     const spinner = document.createElement("span");
     spinner.className = "spinner";
@@ -4490,10 +4501,14 @@ function renderRpcEvent(evt: RpcEvent): void {
             argsEl.textContent = ` ${streamedPath}`;
             argsEl.title = streamedPath;
           }
-          renderToolOpenButton(
-            toolsEl.querySelector<HTMLElement>(".tool-name")!,
-            streamedToolFilePath(tName, toolsText),
-          );
+          const filePath = streamedToolFilePath(tName, toolsText);
+          const openButton = toolsEl.querySelector<HTMLElement>(".tool-open-file");
+          if (filePath && openButton?.dataset.filePath !== filePath) {
+            renderToolOpenButton(
+              toolsEl.querySelector<HTMLElement>(".tool-name")!,
+              filePath,
+            );
+          }
         }
         if (tName === "write") {
           const lines = (toolsText.match(/\\n/g) ?? []).length;

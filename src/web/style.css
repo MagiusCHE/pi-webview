@@ -212,7 +212,6 @@ header {
   position: relative;
   flex: 1;
   min-width: 0;
-  max-width: 420px;
 }
 .session-btn {
   display: block;
@@ -424,10 +423,6 @@ header {
   color: inherit;
   font-size: 14px;
 }
-.spacer {
-  flex: 1;
-}
-
 /* settings panel (gear) */
 .settings-row {
   display: flex;

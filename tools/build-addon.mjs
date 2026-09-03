@@ -1,11 +1,11 @@
 // Assembles the pi package (installable with `pi install ./packages/pi-webview`):
 // 1) builds the pi-side extension → packages/pi-webview/dist/extension.js (ESM)
-// 2) builds bridge + standalone CLI → packages/pi-webview/dist/{bridge,piw}.js
+// 2) builds bridge + standalone CLI → packages/pi-webview/dist/bridge.cjs + piw.js
 // 3) copies the built UI (dist/web) and the companion vsixes (VS Code + Visual
 //    Studio) into the package
 
 import { build } from "esbuild";
-import { cpSync, mkdirSync, existsSync, rmSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, existsSync, rmSync } from "node:fs";
 
 if (!existsSync("dist/pi-webview-ide.vsix")) {
   console.error("VS Code companion vsix missing: run `pnpm package:vscode` first");
@@ -64,6 +64,9 @@ await build({
   banner: { js: "#!/usr/bin/env node" },
   logLevel: "info",
 });
+// The local development install points directly at this file. A clean rebuild
+// creates it as 0644, while npm normally applies executable mode to package bins.
+chmodSync("packages/pi-webview/dist/piw.js", 0o755);
 
 rmSync("packages/pi-webview/dist/web", { recursive: true, force: true });
 cpSync("dist/web", "packages/pi-webview/dist/web", { recursive: true });

@@ -40,6 +40,12 @@ import {
   formatCompanionNotes,
   companionReloadHints,
 } from "./companions.ts";
+import { RESTART_TOKEN_ENV, restartTokenFromEnvironment } from "./restart-token.ts";
+
+// Capture and remove the private hand-off before companion checks or any other
+// subprocess can inherit it. A background relaunch receives it explicitly.
+const restartTokenValue = process.env[RESTART_TOKEN_ENV];
+delete process.env[RESTART_TOKEN_ENV];
 
 // dist/piw.js → root of the installed package
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -233,6 +239,8 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  const restartToken = restartTokenFromEnvironment(restartTokenValue);
+
   // every launch says its version
   console.log(`piw ${piwVersion}`);
 
@@ -267,7 +275,11 @@ async function main(): Promise<void> {
       cwd: launchCwd,
       detached: true,
       stdio: "ignore",
-      env: { ...process.env, PIW_DETACHED: "1" },
+      env: {
+        ...process.env,
+        PIW_DETACHED: "1",
+        ...(restartToken ? { [RESTART_TOKEN_ENV]: restartToken } : {}),
+      },
     });
     child.unref();
     console.log("piw: avvio in background…");
@@ -331,8 +343,10 @@ async function main(): Promise<void> {
     console.log("piw: lock stantio (bridge non raggiungibile) — avvio un nuovo bridge");
   }
 
-  // 2) new bridge: token generated here (the bridge uses it and the lock records it)
-  const token = randomBytes(16).toString("hex");
+  // 2) New bridges normally receive a fresh token. The artifact-update
+  // procedure may hand the previous one back internally so authenticated
+  // remote URLs remain valid across that controlled restart.
+  const token = restartToken ?? randomBytes(16).toString("hex");
   const bridgeArgs = [
     bridgeJs,
     "--serve",
@@ -360,9 +374,14 @@ async function main(): Promise<void> {
   bridgeArgs.push("--pi", pi.path ?? pi.command);
 
   console.log(`piw: avvio bridge (pi = ${pi.path ?? pi.command})…`);
+  const bridgeEnv = { ...process.env };
+  // The bridge receives the token through its existing --token argument; do
+  // not retain the private restart hand-off in the child environment as well.
+  delete bridgeEnv[RESTART_TOKEN_ENV];
   const child = spawn(process.execPath, bridgeArgs, {
     cwd: launchCwd,
     stdio: ["ignore", "pipe", "inherit"],
+    env: bridgeEnv,
   });
 
   // 3) waits for BRIDGE_READY to know the real port and register the lock

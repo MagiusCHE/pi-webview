@@ -292,9 +292,12 @@ public sealed class SessionStore
     private SessionInfo CachedSessionInfo(string path)
     {
         long mtime = 0;
+        long sizeBytes = 0;
         try
         {
-            mtime = File.GetLastWriteTimeUtc(path).ToFileTimeUtc();
+            var fi = new FileInfo(path);
+            mtime = fi.LastWriteTimeUtc.ToFileTimeUtc();
+            sizeBytes = fi.Length;
         }
         catch (IOException)
         {
@@ -304,7 +307,12 @@ public sealed class SessionStore
         {
             if (_cache.TryGetValue(path, out var hit) && hit.Mtime == mtime) return hit.Info;
         }
-        var info = new SessionInfo { Path = path, Mtime = mtime == 0 ? null : mtime };
+        var info = new SessionInfo
+        {
+            Path = path,
+            SizeBytes = sizeBytes == 0 ? null : sizeBytes,
+            Mtime = mtime == 0 ? null : mtime
+        };
         FillSessionInfo(path, info);
         lock (_cacheGate) _cache[path] = (mtime, info);
         return info;

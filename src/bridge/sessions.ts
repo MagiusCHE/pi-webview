@@ -91,14 +91,22 @@ const infoCache = new Map<string, { mtime: number; info: SessionInfo }>();
 
 function cachedSessionInfo(path: string): SessionInfo {
   let mtime = 0;
+  let sizeBytes = 0;
   try {
-    mtime = statSync(path).mtimeMs;
+    const st = statSync(path);
+    mtime = st.mtimeMs;
+    sizeBytes = st.size;
   } catch {
     // file not reachable
   }
   const hit = infoCache.get(path);
   if (hit && hit.mtime === mtime) return hit.info;
-  const info: SessionInfo = { path, ...readSessionInfo(path), mtime: mtime || undefined };
+  const info: SessionInfo = {
+    path,
+    ...readSessionInfo(path),
+    sizeBytes: sizeBytes || undefined,
+    mtime: mtime || undefined,
+  };
   infoCache.set(path, { mtime, info });
   return info;
 }

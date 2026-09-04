@@ -276,6 +276,8 @@ export interface SessionInfo {
   lastEventAt?: number;
   /** number of compaction entries recorded across the whole session */
   compactionCount?: number;
+  /** on-disk size in bytes of the session JSONL file */
+  sizeBytes?: number;
   mtime?: number;
 }
 

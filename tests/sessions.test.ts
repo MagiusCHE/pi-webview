@@ -7,6 +7,7 @@ import {
   rmSync,
   utimesSync,
   readFileSync,
+  statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -254,6 +255,8 @@ test("readSessionInfo: conteggio su TUTTO il file e ultima attività dai timesta
     assert.equal(s.lastActivity, Date.parse("2026-07-01T12:29:00.000Z"));
     assert.equal(s.lastEventAt, Date.parse("2026-07-01T13:15:00.000Z"));
     assert.equal(s.compactionCount, 2);
+    // on-disk size of the jsonl file (used by the resume recap)
+    assert.equal(s.sizeBytes, statSync(path).size);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

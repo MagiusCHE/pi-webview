@@ -1729,24 +1729,40 @@ function formatSessionEventTime(timestamp: number): string {
   }).format(new Date(timestamp));
 }
 
+// Human-readable on-disk size for the resume recap ("824 KB", "12.3 MB")
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let i = -1;
+  do {
+    value /= 1024;
+    i++;
+  } while (value >= 1024 && i < units.length - 1);
+  const n = value >= 100 ? String(Math.round(value)) : value.toFixed(1);
+  return `${n} ${units[i]}`;
+}
+
 // Pure UI status: it is appended after history on every real resume and is
 // never written to the append-only session file.
 function addSessionResumedStatus(info: SessionInfo): void {
   const timestamp = info.lastEventAt ?? info.lastActivity ?? info.mtime;
   if (!timestamp || !Number.isFinite(timestamp)) return;
   const date = formatSessionEventTime(timestamp);
-  if (typeof info.compactionCount !== "number") {
-    addStatusLine(tpl(t("sessionResumed"), { date }));
-    return;
-  }
-  const key =
-    info.compactionCount === 1
-      ? "sessionResumedCompactionsOne"
-      : "sessionResumedCompactionsMany";
+  const size =
+    typeof info.sizeBytes === "number" && info.sizeBytes > 0
+      ? formatBytes(info.sizeBytes)
+      : "";
+  let base: string;
+  if (typeof info.compactionCount !== "number") base = "sessionResumed";
+  else if (info.compactionCount === 1) base = "sessionResumedCompactionsOne";
+  else base = "sessionResumedCompactionsMany";
+  const key = size ? `${base}Size` : base;
   addStatusLine(
     tpl(t(key), {
       date,
-      count: String(info.compactionCount),
+      size,
+      count: String(info.compactionCount ?? 0),
     }),
   );
 }

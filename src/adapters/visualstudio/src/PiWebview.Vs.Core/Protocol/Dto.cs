@@ -302,6 +302,9 @@ public sealed class SessionInfo
     [System.Text.Json.Serialization.JsonPropertyName("compactionCount")]
     public int? CompactionCount { get; set; }
 
+    [System.Text.Json.Serialization.JsonPropertyName("sizeBytes")]
+    public long? SizeBytes { get; set; }
+
     [System.Text.Json.Serialization.JsonPropertyName("mtime")]
     public long? Mtime { get; set; }
 }

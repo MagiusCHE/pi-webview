@@ -12,6 +12,7 @@
     "autoCompactAt": "auto-compact ≥ {pct}%",
     "autoCompactOff": "auto-compact: off",
     "balanceTitle": "Session cost / provider balance (green: normal, yellow: low, red: nearly depleted)",
+    "bridgeDisconnected": "The connection to the piw bridge was interrupted. You can try reloading the window.",
     "bridgeUrlPlaceholder": "ws://127.0.0.1:PORT?token=…",
     "cancel": "Cancel",
     "changeWorkspaceAsk": "What should happen to the current session?",

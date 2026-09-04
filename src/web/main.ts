@@ -344,13 +344,20 @@ async function connect(url: string): Promise<void> {
 }
 
 function setupTransport(tr: Transport): void {
+  let connectionOpened = false;
+  let disconnectReported = false;
+
   tr.onStatus((s) => {
+    // Ignore late events from a transport intentionally replaced by connect().
+    if (transport !== tr) return;
+
     statusState =
       s.state === "open" ? "open" : s.state === "connecting" ? "connecting" : "closed";
     updateStatus();
     els.send.disabled = s.state !== "open";
     updateSendButton();
     if (s.state === "open") {
+      connectionOpened = true;
       els.connectPanel.hidden = true;
       requestConfig();
       if (!demoMode) {
@@ -364,6 +371,12 @@ function setupTransport(tr: Transport): void {
     } else if (s.state === "closed") {
       endSessionLoading();
       hideBootLoader();
+      // A WebSocket error is normally followed by close: report an established
+      // bridge connection loss once, but not an initial connection failure.
+      if (runtime.mode === "standalone" && connectionOpened && !disconnectReported) {
+        disconnectReported = true;
+        appendSystemBox("error", t("bridgeDisconnected"));
+      }
     }
   });
   tr.onFrame(handleFrame);

@@ -1,7 +1,7 @@
 {
   "name": "pi-webview",
   "displayName": "pi-webview",
-  "version": "0.2.15",
+  "version": "0.2.16",
   "description": "WebView UI for the pi coding agent: standalone in the browser and inside VS Code",
   "publisher": "magiusche",
   "icon": "media/icon.png",
@@ -92,6 +92,7 @@
   "dependencies": {
     "dompurify": "^3.4.14",
     "marked": "^18.0.10",
+    "qrcode-terminal": "^0.12.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

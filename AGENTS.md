@@ -103,7 +103,9 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   VS Code + Visual Studio, confronto di versione coi vsix inclusi) + vsix
   companion inclusi + **standalone**
   (UI buildata `dist/web`, bridge `dist/bridge.cjs` e bin npm `piw` per aprire la
-  UI nel browser da shell — `src/bridge/piw.ts`)
+  UI nel browser da shell — `src/bridge/piw.ts`); `scripts/` contiene utility
+  CLI multipiattaforma aggiuntive, incluso `piw-public.mjs`, bundle e bin
+  `piw-public` distribuito nello stesso package
 - `tests/` — test unitari (`pnpm test`, `node --test tests/`)
 - `tools/` — script di sviluppo (es. `check-package-manager.mjs`)
 - `dist/` — output build, **gitignored**, specchia `src/`
@@ -188,7 +190,13 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   tutte le interfacce. L'accesso non-loopback richiede il link autenticato
   stampato da `piw`. Dietro un reverse proxy locale, il bridge considera
   `X-Forwarded-For`/`X-Forwarded-Proto` solo se il peer diretto è loopback,
-  preservando autenticazione remota e WebSocket `ws://`/`wss://` corretti
+  preservando autenticazione remota e WebSocket `ws://`/`wss://` corretti.
+  Il comando multipiattaforma `piw-public <port> (--ip <IPv4> | --tailscale)
+[--wait]` usa l'IPv4 esplicito o rileva quello Tailscale, chiede conferma solo
+  se deve fermare un bridge `piw` già attivo, genera sempre un token nuovo e
+  mostra URL autenticato + QR nel terminale; `piw` e `piw-public` vengono
+  linkati/rimossi insieme dall'estensione pi
+  (`~/.local/bin` su Unix, shim `.cmd` in `%APPDATA%\\npm` su Windows)
 - **Refresh standalone**: la pagina sostituisce `?new=1` con `?s=<sessionId>`
   appena pi espone il file sessione. Il path locale non compare nell'URL: al
   refresh il bridge risolve l'id e riprende la sessione nel `cwd` salvato nel

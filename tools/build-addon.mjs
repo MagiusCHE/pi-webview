@@ -1,6 +1,6 @@
 // Assembles the pi package (installable with `pi install ./packages/pi-webview`):
 // 1) builds the pi-side extension → packages/pi-webview/dist/extension.js (ESM)
-// 2) builds bridge + standalone CLI → packages/pi-webview/dist/bridge.cjs + piw.js
+// 2) builds bridge + standalone CLIs → bridge.cjs, piw.js, piw-public.js
 // 3) copies the built UI (dist/web) and the companion vsixes (VS Code + Visual
 //    Studio) into the package
 
@@ -64,9 +64,19 @@ await build({
   banner: { js: "#!/usr/bin/env node" },
   logLevel: "info",
 });
-// The local development install points directly at this file. A clean rebuild
-// creates it as 0644, while npm normally applies executable mode to package bins.
+// `piw-public` CLI: cross-platform public-binding launcher with terminal QR code.
+await build({
+  entryPoints: ["scripts/piw-public.mjs"],
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  outfile: "packages/pi-webview/dist/piw-public.js",
+  logLevel: "info",
+});
+// The local development install points directly at these files. A clean rebuild
+// creates them as 0644, while npm normally applies executable mode to package bins.
 chmodSync("packages/pi-webview/dist/piw.js", 0o755);
+chmodSync("packages/pi-webview/dist/piw-public.js", 0o755);
 
 rmSync("packages/pi-webview/dist/web", { recursive: true, force: true });
 cpSync("dist/web", "packages/pi-webview/dist/web", { recursive: true });

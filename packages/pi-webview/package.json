@@ -1,6 +1,6 @@
 {
   "name": "@magiusche/pi-webview",
-  "version": "0.2.15",
+  "version": "0.2.16",
   "description": "WebView UI for the pi coding agent, integrated into the IDE (VS Code first)",
   "type": "module",
   "license": "MIT",
@@ -19,7 +19,8 @@
     "url": "https://github.com/MagiusCHE/pi-webview"
   },
   "bin": {
-    "piw": "dist/piw.js"
+    "piw": "dist/piw.js",
+    "piw-public": "dist/piw-public.js"
   },
   "files": [
     "dist",

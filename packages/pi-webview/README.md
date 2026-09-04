@@ -35,6 +35,20 @@ The default bind remains loopback-only. `--ip <IPv4>` (also accepted as `--host 
 
 A reverse proxy on the same machine may keep `piw` loopback-only and forward HTTP/WebSocket traffic to it. The bridge trusts `X-Forwarded-For` and `X-Forwarded-Proto` only when the direct peer is loopback, so remote token checks remain active and HTTPS proxies receive a `wss://` URL.
 
+### Public-access QR launcher
+
+The cross-platform `piw-public` launcher starts `piw` on a requested port and IPv4 address with idle shutdown disabled, creates a **new authentication token**, and prints both the complete remote URL and a terminal QR code. The address can be supplied explicitly or detected through Tailscale:
+
+```bash
+piw-public 7361 --ip 192.168.1.20
+piw-public 7361 --tailscale
+piw-public 7361 --tailscale --wait # keep a shortcut-launched terminal open
+```
+
+If a managed `piw` bridge is already active, the launcher shows its port and asks for confirmation before stopping it. Declining leaves the existing bridge untouched; if no bridge is active, no confirmation is shown. A non-interactive invocation never stops an existing bridge because it cannot obtain confirmation. `--tailscale` requires the Tailscale CLI to be installed and connected; `--ip` has no Tailscale dependency. QR rendering is built in and does not require `qrencode`.
+
+The generated URL contains a private bearer credential. Expose the selected address only on a trusted network and do not publish, log, or share the URL.
+
 ### One bridge per system
 
 `piw` is single-instance: if a bridge is already running, a new invocation **does not start a second one** — it just opens a new browser tab (with a new session). The active bridge is recorded in `~/.pi/pi-webview/bridge.json` and validated at every startup (pid + health check), so a crash never leaves a stale lock.
@@ -126,9 +140,9 @@ Try it without installing permanently:
 pi -e npm:@magiusche/pi-webview
 ```
 
-### The `piw` link (no install scripts)
+### Launcher links (no install scripts)
 
-This package has **no npm install scripts** (nothing to approve, no `npm warn install-scripts`). The `piw` link on your `PATH` (`~/.local/bin/piw`, or `%APPDATA%\npm\piw.cmd` on Windows) is created by the extension at the **first pi start** (and re-created at every pi start if missing). So: install the package, start pi once, and `piw` works. If you need `piw` before the first pi start, just start pi (or create the link manually).
+This package has **no npm install scripts** (nothing to approve, no `npm warn install-scripts`). The `piw` and `piw-public` links on your `PATH` (`~/.local/bin/<name>`, or `%APPDATA%\npm\<name>.cmd` on Windows) are created together by the extension at the **first pi start** and re-created whenever either is missing. So: install the package, start pi once, and both launchers work. If you need them before the first pi start, just start pi or create the links manually.
 
 ### Uninstalling
 
@@ -141,18 +155,18 @@ This package has **no npm install scripts** (nothing to approve, no `npm warn in
 It removes, in order:
 
 1. the IDE companion extension (`magiusche.pi-webview-ide`, if installed in VS Code — via `code --uninstall-extension`),
-2. the `piw` link on your `PATH` (`~/.local/bin/piw` / `%APPDATA%\npm\piw.cmd` — only if it points to this package, never user files), and
+2. the `piw` and `piw-public` links on your `PATH` (`~/.local/bin/<name>` / `%APPDATA%\npm\<name>.cmd` — only when they point to this package, never user files), and
 3. the package itself from pi (`pi remove npm:@magiusche/pi-webview` — il prefisso `npm:` è richiesto, come per `pi install`).
 
 Then **restart pi** to finish (and **reload the VS Code window** if the companion was removed).
 
-If `pi remove` fails, or you already removed the package manually, do it by hand: `pi remove npm:@magiusche/pi-webview` (il prefisso `npm:` è richiesto); if the `piw` link is left behind (now a dangling symlink), remove it manually: `rm ~/.local/bin/piw` (it is a symlink; verify with `ls -la`).
+If `pi remove` fails, or you already removed the package manually, do it by hand: `pi remove npm:@magiusche/pi-webview` (the `npm:` prefix is required). If launcher links remain as dangling symlinks, verify them with `ls -la` and remove `~/.local/bin/piw` and `~/.local/bin/piw-public` manually.
 
 ## How it works
 
-Both entry points run the **same centralized companion logic** (`ensureCompanions` in `src/bridge/companions.ts`):
+The extension and standalone bridge run the **same centralized companion logic** (`ensureCompanions` in `src/bridge/companions.ts`):
 
-- **`pi` start (the extension)**: (1) checks the **VS Code companion** against the bundled VSIX (installs/updates if missing or outdated; idempotent; the `code` CLI is resolved from `PATH` or known install locations, falling back to direct vsix extraction into the extensions folder when no CLI exists; silent when VS Code is not installed; disable with `PI_WEBVIEW_AUTO_INSTALL=0`), (2) checks the **Visual Studio companion** on Windows (vswhere → `VSIXInstaller /instanceIds:` for **each** VS 2022/2026 instance, silent when no VS or no bundled vsix) and (3) re-creates the **`piw` link** on your `PATH` if missing (the package has no install scripts — this is the only way the link is created; it never touches user files, only its own link).
+- **`pi` start (the extension)**: (1) checks the **VS Code companion** against the bundled VSIX (installs/updates if missing or outdated; idempotent; the `code` CLI is resolved from `PATH` or known install locations, falling back to direct vsix extraction into the extensions folder when no CLI exists; silent when VS Code is not installed; disable with `PI_WEBVIEW_AUTO_INSTALL=0`), (2) checks the **Visual Studio companion** on Windows (vswhere → `VSIXInstaller /instanceIds:` for **each** VS 2022/2026 instance, silent when no VS or no bundled vsix) and (3) re-creates the **`piw` and `piw-public` links** on your `PATH` if either is missing (the package has no install scripts; it never touches user files, only its own links).
 - **`piw` start (standalone bridge)**: runs the **same check for both companions** (VS Code + Visual Studio), printing the outcome to the console.
 
 Every install/update/error is reported — in the pi.dev TUI and in the webview (via `ui.notify`, `pi-webview: …`) and on the `piw` console (`piw: …`). Only two cases stay silent: the target app is not installed, or the installed companion already matches the bundled VSIX.
@@ -163,7 +177,7 @@ The companion can also be installed explicitly:
 /piw install
 ```
 
-(or `code --install-extension companion/pi-webview-ide.vsix` from the package dir), then **reload the VS Code window** — a **pi** icon appears in the activity bar with the webview chat. Subcommands: `status | install | reinstall | uninstall` (`/piw` for the list). `install` installs only what is missing or outdated and ensures the `piw` launcher link; `reinstall` forces a full reinstall of the companions and re-creates the `piw` link. `uninstall` removes both the companion and the `piw` link.
+(or `code --install-extension companion/pi-webview-ide.vsix` from the package dir), then **reload the VS Code window** — a **pi** icon appears in the activity bar with the webview chat. Subcommands: `status | install | reinstall | uninstall` (`/piw` for the list). `install` installs only what is missing or outdated and ensures both launcher links; `reinstall` forces a full reinstall of the companions and re-creates both links. `uninstall` removes the companions and both links.
 
 The companion spawns `pi --mode rpc` and bridges the UI via `postMessage` (same UI and protocol as standalone; editor selection flows directly to the webview).
 

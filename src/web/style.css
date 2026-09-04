@@ -703,6 +703,81 @@ header {
   pointer-events: none;
 }
 
+/* pi update button: yellow shield (kept on hover; background gives the feedback) */
+#btn-update-pi {
+  color: var(--warn);
+}
+#btn-update-pi:hover {
+  color: var(--warn);
+}
+/* attention: the shield zooms in, trembles (fast irregular rotation of a
+   few degrees while large), then zooms back to its original size, until the
+   user reviews the available updates */
+#btn-update-pi svg {
+  animation: update-shield-attract 2.6s ease-in-out infinite;
+}
+@keyframes update-shield-attract {
+  0% {
+    transform: scale(1) rotate(0deg);
+  }
+  12% {
+    transform: scale(1.45) rotate(0deg);
+  }
+  /* hold large: fast irregular rotation, a few degrees -x/+x */
+  16% {
+    transform: scale(1.45) rotate(-7deg);
+  }
+  20% {
+    transform: scale(1.45) rotate(6deg);
+  }
+  24% {
+    transform: scale(1.45) rotate(-8deg);
+  }
+  28% {
+    transform: scale(1.45) rotate(5deg);
+  }
+  32% {
+    transform: scale(1.45) rotate(-6deg);
+  }
+  36% {
+    transform: scale(1.45) rotate(8deg);
+  }
+  40% {
+    transform: scale(1.45) rotate(-5deg);
+  }
+  44% {
+    transform: scale(1.45) rotate(7deg);
+  }
+  48% {
+    transform: scale(1.45) rotate(-8deg);
+  }
+  52% {
+    transform: scale(1.45) rotate(6deg);
+  }
+  56% {
+    transform: scale(1.45) rotate(-5deg);
+  }
+  60% {
+    transform: scale(1.45) rotate(8deg);
+  }
+  64% {
+    transform: scale(1.45) rotate(-7deg);
+  }
+  68% {
+    transform: scale(1.45) rotate(4deg);
+  }
+  72% {
+    transform: scale(1.45) rotate(0deg);
+  }
+  /* zoom back to the original size */
+  86% {
+    transform: scale(1) rotate(0deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
 /* --- thread (centered, left-aligned text) --- */
 #messages {
   flex: 1 1 auto;
@@ -879,6 +954,14 @@ header {
 }
 .startup-items {
   color: var(--fg-secondary);
+  word-break: break-word;
+}
+
+/* pi core outdated note: emphasized (the header button performs the update) */
+.startup-update {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
   word-break: break-word;
 }
 
@@ -1954,6 +2037,50 @@ footer {
   box-sizing: border-box;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+/* update review dialog (shield click): what will be installed */
+.update-modal-dialog {
+  width: min(30rem, 92vw);
+}
+.update-modal-desc {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--fg-secondary);
+  line-height: 1.5;
+}
+.update-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.update-row-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.update-row-versions {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-secondary);
+  flex-shrink: 0;
+}
+.update-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .modal-head {
   display: flex;

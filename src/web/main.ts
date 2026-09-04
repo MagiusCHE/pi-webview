@@ -35,7 +35,11 @@ import {
   type UiAction,
 } from "../ide/events.ts";
 import { applyTheme, watchThemeChanges } from "./theme.ts";
-import type { StatsBarPosition, ThemePreference } from "../ide/protocol.ts";
+import type {
+  StatsBarPosition,
+  ThemePreference,
+  UpdateAvailable,
+} from "../ide/protocol.ts";
 import { currentLocale, setLocale, t, tpl, isLocaleId, type LocaleId } from "./i18n.ts";
 import { runtime } from "./environment.ts";
 import { renderMarkdown } from "./markdown.ts";
@@ -65,6 +69,7 @@ import {
   newChatIcon,
   thinkingBlocksIcon,
   settingsIcon,
+  updateIcon,
   chatIcon,
   folderIcon,
   scrollDownIcon,
@@ -84,6 +89,14 @@ const els = {
   sessionSearch: document.getElementById("session-search") as HTMLInputElement,
   sessionItems: document.getElementById("session-items") as HTMLDivElement,
   settingsBtn: document.getElementById("btn-settings") as HTMLButtonElement,
+  updatePi: document.getElementById("btn-update-pi") as HTMLButtonElement,
+  updateModal: document.getElementById("update-modal") as HTMLDivElement,
+  updateModalTitle: document.getElementById("update-modal-title") as HTMLSpanElement,
+  updateModalDesc: document.getElementById("update-modal-desc") as HTMLParagraphElement,
+  updateList: document.getElementById("update-list") as HTMLDivElement,
+  updateClose: document.getElementById("btn-update-close") as HTMLButtonElement,
+  updateCancel: document.getElementById("btn-update-cancel") as HTMLButtonElement,
+  updateConfirm: document.getElementById("btn-update-confirm") as HTMLButtonElement,
   settingsModal: document.getElementById("settings-modal") as HTMLDivElement,
   settingsClose: document.getElementById("btn-settings-close") as HTMLButtonElement,
   settingsModalTitle: document.getElementById("settings-modal-title") as HTMLSpanElement,
@@ -540,6 +553,11 @@ function applyUiStrings(): void {
   els.connectBtn.textContent = t("connect");
   els.send.title = t("send");
   els.newChat.title = t("newChat");
+  els.updatePi.title = t("updateAvailableTooltip");
+  els.updateModalTitle.textContent = t("updateModalTitle");
+  els.updateModalDesc.textContent = t("updateModalDesc");
+  els.updateCancel.textContent = t("cancel");
+  els.updateConfirm.textContent = t("confirm");
   updateThinkingBlocksButton();
   els.btnModel.title = t("model");
   els.btnThinking.title = t("thinkingLevel");
@@ -1568,6 +1586,7 @@ document.addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeSettings();
+    closeUpdateModal();
     els.sessionMenu.hidden = true;
   }
 });
@@ -2132,7 +2151,9 @@ async function loadHistory(): Promise<void> {
   loadingHistoryLoaded = true;
   flushLoadingLogs();
   if (sessionLoading) armLoadingQuiet();
-  if (!sessionHasMessages) void maybeShowStartupBanner();
+  // welcome banner only on empty sessions (checked inside); the header update
+  // button is refreshed on any session (resumed ones included)
+  void maybeShowStartupBanner();
 }
 
 async function fetchThinkingSettings(): Promise<void> {
@@ -4841,7 +4862,35 @@ function buildStartupBanner(data: StartupInfo): HTMLElement {
   section(t("startupContext"), data.contextFiles);
   section(t("startupSkills"), data.skills);
   section(t("startupExtensions"), data.extensions);
+  // outdated pi core / npm extensions: highlighted note(s) (the header
+  // button performs the update)
+  if (data.updateAvailable) appendStartupUpdateRow(card, data.updateAvailable);
   return card;
+}
+
+// the pi-side check may finish AFTER the startup-info file was written:
+// append the row to the already-rendered banner when the second request
+// finally reports an available update (pi core and/or npm extensions)
+function appendStartupUpdateRow(card: HTMLElement, ua: UpdateAvailable): void {
+  if (ua.core && !card.querySelector(".startup-update-core")) {
+    const row = document.createElement("div");
+    row.className = "startup-section startup-update startup-update-core";
+    row.textContent = tpl(t("startupUpdateNote"), {
+      current: ua.core.current,
+      latest: ua.core.latest,
+    });
+    card.appendChild(row);
+  }
+  if (ua.extensions.length > 0 && !card.querySelector(".startup-update-exts")) {
+    const row = document.createElement("div");
+    row.className = "startup-section startup-update startup-update-exts";
+    row.textContent = tpl(t("startupExtensionsUpdateNote"), {
+      list: ua.extensions
+        .map((e) => `${e.name}: v${e.current} → v${e.latest}`)
+        .join(", "),
+    });
+    card.appendChild(row);
+  }
 }
 
 async function maybeShowStartupBanner(): Promise<void> {
@@ -4849,23 +4898,60 @@ async function maybeShowStartupBanner(): Promise<void> {
   if (!res?.ok) return;
   const info = (res.data as { info?: StartupInfo | null } | undefined)?.info;
   if (!info) return;
-  if (
-    info.contextFiles.length === 0 &&
-    info.skills.length === 0 &&
-    info.extensions.length === 0
-  ) {
-    return;
+  // header update button: ANY session (new or resumed) — the check is
+  // pi-side, done at process load; the welcome banner below stays
+  // new-session-only
+  els.updatePi.hidden = !info.updateAvailable;
+  updateInfo = info.updateAvailable ?? null;
+  // one delayed re-request: the pi-side update check (npm registry lookups)
+  // may complete right after the startup-info file was written for this
+  // session (or a resumed one, after a window reload)
+  if (!info.updateAvailable) {
+    setTimeout(() => {
+      void refreshStartupUpdate();
+    }, 4000);
   }
-  // only while the chat has no real messages yet (new/empty session): the
-  // check is on the DATA (set by loadHistory), not the DOM — boot/loading
-  // log boxes may already sit in the thread
+  const hasResources =
+    info.contextFiles.length > 0 || info.skills.length > 0 || info.extensions.length > 0;
+  if (!hasResources && !info.updateAvailable) return;
+  // welcome banner: only while the chat has no real messages yet (new/empty
+  // session): the check is on the DATA (set by loadHistory), not the DOM —
+  // boot/loading log boxes may already sit in the thread
   if (sessionHasMessages) return;
   const wrapper = addMsg("status");
-  wrapper.appendChild(buildStartupBanner(info));
+  const card = buildStartupBanner(info);
+  startupBannerCard = card;
+  wrapper.appendChild(card);
   // above any boot/loading log boxes flushed at the end of the resume
   els.thread.prepend(wrapper);
   scrollToBottom();
 }
+
+// second pass: if the update check finished after the first startup-info
+// read, surface the header button (any session) and the banner note while
+// the chat is still empty
+async function refreshStartupUpdate(): Promise<void> {
+  const res = await ideRequest({ type: "getStartupInfo" });
+  if (!res?.ok) return;
+  const info = (res.data as { info?: StartupInfo | null } | undefined)?.info;
+  if (!info?.updateAvailable) return;
+  updateInfo = info.updateAvailable;
+  els.updatePi.hidden = false;
+  if (sessionHasMessages) return; // button only; the banner is new-session-only
+  if (startupBannerCard) {
+    appendStartupUpdateRow(startupBannerCard, info.updateAvailable);
+  } else {
+    const wrapper = addMsg("status");
+    const card = buildStartupBanner(info);
+    startupBannerCard = card;
+    wrapper.appendChild(card);
+    els.thread.prepend(wrapper);
+  }
+  scrollToBottom();
+}
+
+// last rendered startup banner card (null → not rendered this session)
+let startupBannerCard: HTMLElement | null = null;
 
 type SelectionPanel = HTMLDivElement & {
   editorSelection?: ActiveEditorSelection;
@@ -5139,6 +5225,7 @@ const SCROLL_BTN_MARGIN = 220;
 
 els.scrollBottom.innerHTML = scrollDownIcon();
 els.newChat.innerHTML = newChatIcon();
+els.updatePi.innerHTML = updateIcon();
 updateThinkingBlocksButton();
 els.settingsBtn.innerHTML = settingsIcon();
 els.scrollBottom.title = t("scrollToBottom");
@@ -6871,6 +6958,57 @@ els.newChat.addEventListener("click", () => {
   } else {
     window.open(location.origin + "/?new=1", "_blank");
   }
+});
+// pi core / extensions update: the header shield opens a review dialog with
+// the exact installed → cloud versions; confirming runs the update through
+// the normal chat channel (extension command, pi executes it)
+let updateInfo: UpdateAvailable | null = null;
+
+function updateRow(name: string, current: string, latest: string): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "update-row";
+  const nameEl = document.createElement("span");
+  nameEl.className = "update-row-name";
+  nameEl.textContent = name;
+  const verEl = document.createElement("span");
+  verEl.className = "update-row-versions";
+  verEl.textContent = tpl(t("updateVersionRange"), { from: current, to: latest });
+  row.append(nameEl, verEl);
+  return row;
+}
+
+function openUpdateModal(): void {
+  const ua = updateInfo;
+  if (!ua || (!ua.core && ua.extensions.length === 0)) return;
+  els.updateList.replaceChildren();
+  if (ua.core) {
+    els.updateList.append(
+      updateRow(t("updateCoreName"), ua.core.current, ua.core.latest),
+    );
+  }
+  for (const ext of ua.extensions) {
+    els.updateList.append(updateRow(ext.name, ext.current, ext.latest));
+  }
+  els.updateModal.hidden = false;
+}
+
+function closeUpdateModal(): void {
+  els.updateModal.hidden = true;
+}
+
+function proceedUpdate(): void {
+  closeUpdateModal();
+  els.updatePi.hidden = true; // one-shot: after the update, restart pi
+  els.input.value = "/piw update.pi.core.exts";
+  sendOrStop();
+}
+
+els.updatePi.addEventListener("click", openUpdateModal);
+els.updateClose.addEventListener("click", closeUpdateModal);
+els.updateCancel.addEventListener("click", closeUpdateModal);
+els.updateConfirm.addEventListener("click", proceedUpdate);
+els.updateModal.addEventListener("click", (e) => {
+  if (e.target === els.updateModal) closeUpdateModal();
 });
 
 // --- message history (↑/↓ with empty input) ----------------------------------

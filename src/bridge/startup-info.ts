@@ -9,11 +9,15 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import type { PackageUpdate, UpdateAvailable } from "../ide/protocol.ts";
 
 export interface StartupInfo {
   contextFiles: string[];
   skills: string[];
   extensions: string[];
+  /** newer pi core and/or npm-installed extensions (checked by the pi
+   *  extension; absent/null → up-to-date or check not finished) */
+  updateAvailable?: UpdateAvailable | null;
 }
 
 const startupDir = (): string => join(homedir(), ".pi", "pi-webview");
@@ -45,10 +49,45 @@ export function readStartupInfo(pid?: number): StartupInfo | null {
     ) {
       return null;
     }
+    const ua = info.updateAvailable;
+    // tolerant parsing of { core, extensions } (malformed pieces are dropped
+    // rather than failing the whole banner info)
+    let updateAvailable: UpdateAvailable | undefined;
+    if (ua !== undefined && ua !== null && typeof ua === "object") {
+      const coreRaw = (ua as { core?: unknown }).core;
+      let core: { current: string; latest: string } | null = null;
+      if (
+        coreRaw !== null &&
+        coreRaw !== undefined &&
+        typeof coreRaw === "object" &&
+        typeof (coreRaw as { current?: unknown }).current === "string" &&
+        typeof (coreRaw as { latest?: unknown }).latest === "string"
+      ) {
+        core = {
+          current: (coreRaw as { current: string }).current,
+          latest: (coreRaw as { latest: string }).latest,
+        };
+      }
+      const extRaw = (ua as { extensions?: unknown }).extensions;
+      const extensions: PackageUpdate[] = Array.isArray(extRaw)
+        ? extRaw
+            .filter(
+              (e): e is PackageUpdate =>
+                e !== null &&
+                typeof e === "object" &&
+                typeof (e as { name?: unknown }).name === "string" &&
+                typeof (e as { current?: unknown }).current === "string" &&
+                typeof (e as { latest?: unknown }).latest === "string",
+            )
+            .map((e) => ({ name: e.name, current: e.current, latest: e.latest }))
+        : [];
+      updateAvailable = { core, extensions };
+    }
     return {
       contextFiles: info.contextFiles,
       skills: info.skills,
       extensions: info.extensions,
+      updateAvailable,
     };
   } catch {
     return null;

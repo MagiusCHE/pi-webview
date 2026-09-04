@@ -14,7 +14,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import {
   appendFileSync,
   existsSync,
@@ -43,6 +43,9 @@ import {
   formatCompanionNotes,
   companionReloadHints,
 } from "../../src/bridge/companions.ts";
+import { resolveDirectNode } from "../../src/bridge/spawn.ts";
+import { checkPiUpdate, locatePi } from "./lib/update-check.ts";
+import type { UpdateAvailable } from "./lib/update-check.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -426,6 +429,66 @@ export default async function (pi: PiApi): Promise<void> {
     }
   };
 
+  // pi core + npm extensions update check (best effort, NON-blocking):
+  // starts in parallel with the companion ensure below, so it is usually
+  // done by the first session_start. Feeds the webview startup banner +
+  // header update button. `process.cwd()` is the session's cwd at load
+  // time: covers the project-scoped package list too.
+  let updateCheckResult: UpdateAvailable | null = null;
+  type StartupInfoFile = {
+    contextFiles: string[];
+    skills: string[];
+    extensions: string[];
+    updateAvailable: UpdateAvailable | null;
+  };
+  // per-process, NON-session file the webview host reads on demand
+  // (getStartupInfo): never written to the session jsonl
+  const writeStartupInfoFile = (info: StartupInfoFile): void => {
+    try {
+      const dir = join(homedir(), ".pi", "pi-webview");
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, `startup-info-${process.pid}.json`);
+      const tmp = `${file}.tmp`;
+      writeFileSync(tmp, JSON.stringify(info));
+      renameSync(tmp, file);
+    } catch {
+      // never break the session start because of the banner
+    }
+  };
+  void checkPiUpdate({ projectDir: process.cwd() })
+    .then((r) => {
+      updateCheckResult = r;
+      // the file may have been written at session_start while this check was
+      // still running: merge the result in so the header update button
+      // appears even on a resumed session (window reload)
+      if (r) {
+        try {
+          const file = join(
+            homedir(),
+            ".pi",
+            "pi-webview",
+            `startup-info-${process.pid}.json`,
+          );
+          const existing = JSON.parse(
+            readFileSync(file, "utf8"),
+          ) as Partial<StartupInfoFile>;
+          writeStartupInfoFile({
+            contextFiles: existing.contextFiles ?? [],
+            skills: existing.skills ?? [],
+            extensions: existing.extensions ?? [],
+            updateAvailable: r,
+          });
+        } catch {
+          // file absent (check finished before session_start) → the
+          // session_start handler writes it with updateCheckResult set
+        }
+      }
+    })
+    .catch(() => {
+      updateCheckResult = null; // checkPiUpdate never throws — belt & braces
+    });
+  let updateRunning = false;
+
   // at load: BLOCKS pi.dev startup until the check/installs are done (the
   // core awaits the extension factory), so the user always sees what is
   // happening (console + install log) and startup never proceeds with a
@@ -461,6 +524,8 @@ export default async function (pi: PiApi): Promise<void> {
     contextFiles: string[];
     skills: string[];
     extensions: string[];
+    /** newer pi core on npm (null → up-to-date / check not finished) */
+    updateAvailable: UpdateAvailable | null;
   } => {
     // Context: global agent dir + AGENTS.md/CLAUDE.md from cwd up to the root
     const contextFiles: string[] = [];
@@ -514,48 +579,34 @@ export default async function (pi: PiApi): Promise<void> {
     const extensions = [...extByPath.values()]
       .map(compactExtensionLabel)
       .sort((a, b) => a.localeCompare(b));
-    return { contextFiles, skills, extensions };
+    return {
+      contextFiles,
+      skills,
+      extensions,
+      updateAvailable: updateCheckResult,
+    };
   };
 
-  pi.on("session_start", (event, ctx) => {
-    const e = event as { reason?: string };
+  pi.on("session_start", (_event, ctx) => {
     const c = ctx as {
       mode?: string;
       cwd?: string;
-      sessionManager?: { getEntries?: () => { type?: string }[] };
     };
     // the webview is the only consumer: the TUI renders its own banner
     if (c.mode && c.mode !== "rpc") return;
-    let hasMessages = false;
-    try {
-      hasMessages = (c.sessionManager?.getEntries?.() ?? []).some(
-        (en) => en.type === "message",
-      );
-    } catch {
-      // entries not ready yet: fall through to the empty check below
-    }
-    const isNew = e.reason === "new" || (e.reason === "startup" && !hasMessages);
-    if (!isNew) return;
+    // written on EVERY session start (new and resumed): the welcome banner is
+    // rendered only while the chat is empty, but the header update button
+    // needs updateAvailable on resumed sessions too (window reload)
     const info = collectStartupInfo(c.cwd ?? process.cwd());
     if (
       info.contextFiles.length === 0 &&
       info.skills.length === 0 &&
-      info.extensions.length === 0
+      info.extensions.length === 0 &&
+      !info.updateAvailable
     ) {
       return;
     }
-    try {
-      // NON-session file (one per pi process): the webview host reads it via
-      // the getStartupInfo IDE request — never written to the session jsonl
-      const dir = join(homedir(), ".pi", "pi-webview");
-      mkdirSync(dir, { recursive: true });
-      const file = join(dir, `startup-info-${process.pid}.json`);
-      const tmp = `${file}.tmp`;
-      writeFileSync(tmp, JSON.stringify(info));
-      renameSync(tmp, file);
-    } catch {
-      // never break the session start because of the banner
-    }
+    writeStartupInfoFile(info);
   });
 
   // deferred registration: getCommands() is a stub that THROWS during load
@@ -743,9 +794,93 @@ export default async function (pi: PiApi): Promise<void> {
             notify(lines.join("\n"), "info");
             return;
           }
+          case "update.pi.core.exts": {
+            // Update pi core + ALL installed packages: `pi update --all --approve`.
+            // Runs in a child process; the running pi keeps the old code in
+            // memory until it is restarted. --approve trusts project-local
+            // files so the child never prompts (non-interactive run).
+            if (updateRunning) {
+              notify(
+                "pi-webview: a pi update is already running — wait for it to finish.",
+                "info",
+              );
+              return;
+            }
+            updateRunning = true;
+            notify(
+              "pi-webview: updating pi core and all installed packages (pi update --all --approve). This can take a couple of minutes.",
+              "info",
+            );
+            const tail = (out: string): string =>
+              out.trim().split("\n").slice(-12).join("\n");
+            try {
+              const bin = await locatePi();
+              if (!bin) throw new Error("the pi binary could not be located");
+              // Windows: pi is an npm .cmd shim → node + cli.js directly
+              const direct = resolveDirectNode(bin);
+              const updateArgs = ["update", "--all", "--approve"];
+              const runUpdate = (
+                cwd?: string,
+              ): Promise<{
+                stdout: string;
+                stderr: string;
+              }> =>
+                execFileAsync(
+                  direct ? direct.node : bin,
+                  direct ? [direct.script, ...updateArgs] : updateArgs,
+                  {
+                    timeout: 10 * 60_000,
+                    maxBuffer: 8 * 1024 * 1024,
+                    windowsHide: true,
+                    cwd,
+                  },
+                );
+              let stdout = "";
+              let stderr = "";
+              try {
+                ({ stdout, stderr } = await runUpdate());
+              } catch (firstErr) {
+                // npm 12+ refuses to run inside a pnpm-managed project
+                // (EBADDEVENGINES from devEngines, even for version lookups),
+                // and pi's own update then fails with "Could not determine
+                // latest pi version". Retry once from a NEUTRAL cwd: user
+                // packages are global, a project cwd only adds project-local
+                // ones (see docs/issues/pi-core).
+                const sig = `${
+                  (firstErr as { stdout?: string }).stdout ?? ""
+                }\n${(firstErr as { stderr?: string }).stderr ?? ""}`;
+                if (
+                  sig.includes("EBADDEVENGINES") ||
+                  sig.includes("Could not determine latest pi version")
+                ) {
+                  ({ stdout, stderr } = await runUpdate(tmpdir()));
+                } else {
+                  throw firstErr;
+                }
+              }
+              notify(
+                `pi-webview: update finished. Restart pi to load the new version.\n${tail(`${stdout}\n${stderr ?? ""}`)}`,
+                "info",
+              );
+            } catch (err) {
+              const e = err as {
+                stdout?: string;
+                stderr?: string;
+                code?: number;
+              };
+              const out = tail(`${e.stdout ?? ""}\n${e.stderr ?? ""}`);
+              notify(
+                `pi-webview: update failed${e.code !== undefined ? ` (exit ${e.code})` : ""}. ${out || (err instanceof Error ? err.message : String(err))}`,
+                "error",
+              );
+            } finally {
+              updateRunning = false;
+            }
+            return;
+          }
           default:
             notify(
-              "pi-webview: subcommands: status | install | reinstall | uninstall",
+              "pi-webview: subcommands: status | install | reinstall | uninstall | update.pi.core.exts",
               "info",
             );
         }

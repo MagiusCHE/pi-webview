@@ -177,7 +177,17 @@ The companion can also be installed explicitly:
 /piw install
 ```
 
-(or `code --install-extension companion/pi-webview-ide.vsix` from the package dir), then **reload the VS Code window** — a **pi** icon appears in the activity bar with the webview chat. Subcommands: `status | install | reinstall | uninstall` (`/piw` for the list). `install` installs only what is missing or outdated and ensures both launcher links; `reinstall` forces a full reinstall of the companions and re-creates both links. `uninstall` removes the companions and both links.
+(or `code --install-extension companion/pi-webview-ide.vsix` from the package dir), then **reload the VS Code window** — a **pi** icon appears in the activity bar with the webview chat. Subcommands: `status | install | reinstall | uninstall | update.pi.core.exts` (`/piw` for the list). `install` installs only what is missing or outdated and ensures both launcher links; `reinstall` forces a full reinstall of the companions and re-creates both links. `uninstall` removes the companions and both links.
+
+### Updating pi and the extensions
+
+When the pi core is outdated, the webview shows a note in the new-session banner and an **update button in the header**. Clicking it (or typing the command) runs:
+
+```
+/piw update.pi.core.exts
+```
+
+which executes `pi update --all --approve` in a child process: it updates the pi core (the `@earendil-works/pi-coding-agent` npm package) and **all installed extensions/packages**, never prompting. The running pi keeps the old code in memory — **restart pi** to load the updated version (reload the IDE window for the companions).
 
 The companion spawns `pi --mode rpc` and bridges the UI via `postMessage` (same UI and protocol as standalone; editor selection flows directly to the webview).
 

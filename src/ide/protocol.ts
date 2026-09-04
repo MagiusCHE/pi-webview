@@ -318,6 +318,22 @@ export interface SessionSettings {
   notifications?: "desktop" | "vscode" | "off";
 }
 
+/** one outdated npm package (pi core or an installed extension) */
+export interface PackageUpdate {
+  name: string;
+  current: string;
+  latest: string;
+}
+
+/** update check result (startup banner + header update button): `core`
+ *  non-null when the pi core is outdated, `extensions` with a newer npm
+ *  registry version. Present only when at least one of the two is non-empty
+ *  (checked by the pi extension; absent/null → up-to-date or not finished). */
+export interface UpdateAvailable {
+  core: { current: string; latest: string } | null;
+  extensions: PackageUpdate[];
+}
+
 /** loaded resources for the new-session welcome banner (Context/Skills/
  *  Extensions). NON-persistent: read from a per-process file (startup-info.ts),
  *  never part of the session jsonl. */
@@ -325,6 +341,10 @@ export interface StartupInfo {
   contextFiles: string[];
   skills: string[];
   extensions: string[];
+  /** pi core and/or npm-installed extensions with a newer version
+   *  (checked by the pi extension; absent/null → up-to-date or check not
+   *  finished) */
+  updateAvailable?: UpdateAvailable | null;
 }
 
 /** description of a registered flag (from `pi --help` → Extension CLI Flags) */

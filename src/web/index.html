@@ -55,6 +55,12 @@
         disabled
       ></button>
       <button
+        id="btn-update-pi"
+        class="icon-btn"
+        title="Aggiorna pi e le estensioni"
+        hidden
+      ></button>
+      <button
         id="btn-settings"
         class="icon-btn"
         title="Impostazioni"
@@ -189,6 +195,26 @@
             <button id="cli-apply" class="btn-primary" type="button">Applica</button>
             <span class="settings-hint" id="cli-apply-hint">…</span>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- update dialog: what will be updated (pi core and/or npm extensions) -->
+    <div id="update-modal" class="modal-backdrop" hidden>
+      <div class="modal update-modal-dialog">
+        <div class="modal-head">
+          <span id="update-modal-title" class="modal-title">Aggiornamenti</span>
+          <button id="btn-update-close" class="icon-btn" type="button" title="Chiudi">
+            ✕
+          </button>
+        </div>
+        <p id="update-modal-desc" class="update-modal-desc"></p>
+        <div id="update-list" class="update-list"></div>
+        <div class="update-modal-actions">
+          <button id="btn-update-cancel" class="btn" type="button">Annulla</button>
+          <button id="btn-update-confirm" class="btn-primary" type="button">
+            Conferma
+          </button>
         </div>
       </div>
     </div>

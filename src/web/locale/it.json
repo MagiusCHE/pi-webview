@@ -39,6 +39,7 @@
     "copy": "Copia",
     "crossWorkspaceSessionAsk": "Questa sessione appartiene a un altro workspace. Cosa vuoi fare?",
     "deleteAsk": "Eliminare la sessione \"{name}\"? Non si può annullare.",
+    "deleteAskCurrent": "Eliminare la sessione in uso \"{name}\"? Passerai a una nuova sessione. Non si può annullare.",
     "deleteFailed": "Eliminazione non riuscita",
     "deleteSession": "Elimina",
     "demoAssistant": "Sono **pi**, un agente di coding.\n\nPosso:\n- eseguire comandi e leggere l'output\n- modificare file con `edit`\n- cercare nel web\n\n> Esempio di codice inline: `const x = 1`\n\n```ts\nconst greet = (name: string) => `Ciao, ${name}!`;\n```\n\nMaggiori info su [pi.dev](https://pi.dev)",

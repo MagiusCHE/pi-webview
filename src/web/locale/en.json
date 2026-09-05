@@ -39,6 +39,7 @@
     "copy": "Copy",
     "crossWorkspaceSessionAsk": "This session belongs to another workspace. What would you like to do?",
     "deleteAsk": "Delete session \"{name}\"? This cannot be undone.",
+    "deleteAskCurrent": "Delete the session in use \"{name}\"? You will be switched to a new session. This cannot be undone.",
     "deleteFailed": "Delete failed",
     "deleteSession": "Delete",
     "demoAssistant": "I'm **pi**, a coding agent.\n\nI can:\n- run commands and read their output\n- edit files with `edit`\n- search the web\n\n> Inline code example: `const x = 1`\n\n```ts\nconst greet = (name: string) => `Hello, ${name}!`;\n```\n\nMore at [pi.dev](https://pi.dev)",

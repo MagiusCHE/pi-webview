@@ -1485,22 +1485,27 @@ async function renameSessionFlow(path: string): Promise<void> {
 
 async function deleteSessionFlow(path: string): Promise<void> {
   const s = sessions.find((x) => x.path === path);
+  const isCurrent = path === currentSessionPath;
   const label = s ? sessionLabel(s) : t("newSession");
-  const ok = await showConfirm(tpl(t("deleteAsk"), { name: label }));
+  const ok = await showConfirm(
+    tpl(isCurrent ? t("deleteAskCurrent") : t("deleteAsk"), { name: label }),
+  );
   if (!ok) return;
-  const res = await ideRequest({ type: "deleteSession", path });
-  if (!res?.ok) {
-    addStatusLine(t("deleteFailed"));
-    return;
-  }
-  // current session deleted → start with a new session
-  if (path === currentSessionPath) {
+  // Deleting the CURRENT session: switch to a fresh one FIRST, so pi stops
+  // writing to the old file before it is unlinked (no entries lost to the
+  // deleted inode, no zombie file recreated under the running session).
+  if (isCurrent) {
     els.thread.textContent = "";
     try {
       await rpcRequest({ type: "new_session" });
     } catch {
-      // new_session failed: refreshSessions realigns with the pi state
+      // new_session failed: delete anyway, refreshSessions realigns
     }
+  }
+  const res = await ideRequest({ type: "deleteSession", path });
+  if (!res?.ok) {
+    addStatusLine(t("deleteFailed"));
+    return;
   }
   els.sessionMenu.hidden = false; // stays open: shows the updated list
   await refreshSessions();

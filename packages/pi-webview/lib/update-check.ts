@@ -8,9 +8,11 @@
 //   2. latest version: `npm view <package> version --json` against the
 //      configured registry (honors ~/.npmrc; a registry-less sandbox →
 //      lookup fails → check silently skipped: BEST-EFFORT by design)
-//   3. result cached in ~/.pi/pi-webview/update-check.json for 1h (one
-//      registry call per pi process is the norm, even with several
-//      session_starts in the same process lifetime)
+//   3. NO cache: every pi process runs the check LIVE at load (a fresh
+//      release must be seen at the next session start, not an hour later),
+//      plus on demand via the webview (the `/piw update.check` command).
+//      The check is non-blocking and best-effort; a few registry lookups
+//      per pi load is the accepted cost
 //
 // It also checks the INSTALLED pi extensions (pi package list sources with
 // the `npm:` prefix — user settings `~/.pi/agent/settings.json` plus
@@ -23,19 +25,11 @@
 // binary must not break the extension load or the webview boot.
 
 import { spawnSync } from "node:child_process";
-import {
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-  renameSync,
-  existsSync,
-  statSync,
-} from "node:fs";
+import { readFileSync, mkdirSync, existsSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 export const PI_PACKAGE = "@earendil-works/pi-coding-agent";
-export const CACHE_TTL_MS = 60 * 60 * 1000; // 1h
 
 /** one outdated npm package (pi core or an extension) */
 export interface PackageUpdate {
@@ -57,24 +51,6 @@ export interface CheckOptions {
   /** for the project-scoped package list (`<dir>/.pi/settings.json` +
    *  `<dir>/.pi/npm` installs) */
   projectDir?: string;
-  now?: number; // injectable for tests
-}
-
-interface PackageCache {
-  at: number;
-  current: string;
-  /** null → up-to-date at check time */
-  latest: string | null;
-}
-
-interface CacheEntry {
-  at: number;
-  /** pi core (absent when `pi --version` was unavailable) */
-  current?: string;
-  /** pi core latest (null → up-to-date or lookup failed) */
-  latest?: string | null;
-  /** npm-installed extensions, keyed by package name */
-  packages?: Record<string, PackageCache>;
 }
 
 // --- pi binary location ------------------------------------------------------
@@ -282,93 +258,19 @@ function installedExtensionVersion(
   return null;
 }
 
-// --- cache -------------------------------------------------------------------
-
-/** ~/.pi/pi-webview/update-check.json */
-export function updateCheckFile(home: string): string {
-  return join(home, ".pi", "pi-webview", "update-check.json");
-}
-
-function isPackageCache(v: unknown): v is PackageCache {
-  if (!v || typeof v !== "object") return false;
-  const p = v as Record<string, unknown>;
-  return (
-    typeof p.at === "number" &&
-    typeof p.current === "string" &&
-    (p.latest === null || typeof p.latest === "string")
-  );
-}
-
-/** tolerant reader: any malformed entry → null (a corrupt cache must never
- *  break the check — it just gets rewritten) */
-export function readCache(file: string): CacheEntry | null {
-  try {
-    const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
-    if (typeof raw.at !== "number") return null;
-    if (raw.current !== undefined && typeof raw.current !== "string") return null;
-    if (
-      raw.latest !== undefined &&
-      !(raw.latest === null || typeof raw.latest === "string")
-    ) {
-      return null;
-    }
-    const entry: CacheEntry = { at: raw.at };
-    if (typeof raw.current === "string") entry.current = raw.current;
-    if (raw.latest === null || typeof raw.latest === "string") {
-      entry.latest = raw.latest as string | null;
-    }
-    if (raw.packages && typeof raw.packages === "object") {
-      const packages: Record<string, PackageCache> = {};
-      for (const [k, v] of Object.entries(raw.packages as Record<string, unknown>)) {
-        if (isPackageCache(v)) packages[k] = v;
-      }
-      entry.packages = packages;
-    }
-    return entry;
-  } catch {
-    return null;
-  }
-}
-
-function writeCache(file: string, entry: CacheEntry): void {
-  try {
-    const dir = file.slice(0, file.lastIndexOf("/"));
-    mkdirSync(dir, { recursive: true });
-    const tmp = `${file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(entry));
-    renameSync(tmp, file);
-  } catch {
-    // cache is an optimization — never fatal
-  }
-}
-
 // --- the check -----------------------------------------------------------------
 
-/** full check, best-effort: returns the outdated pieces (core and/or
- *  extensions) or null when everything is up-to-date / not checkable.
- *  NEVER throws. */
+/** full check, LIVE (no cache: fresh registry lookups on every call),
+ *  best-effort: returns the outdated pieces (core and/or extensions) or
+ *  null when everything is up-to-date / not checkable. NEVER throws. */
 export async function checkPiUpdate(
   opts: CheckOptions = {},
 ): Promise<UpdateAvailable | null> {
   const home = opts.home ?? homedir();
-  const now = opts.now ?? Date.now();
-  const file = updateCheckFile(home);
-  const cached = readCache(file);
 
-  // --- pi core (unchanged behavior: one cached lookup per running version) ---
+  // --- pi core (LIVE lookup: no cache) ---
   const current = currentVersion();
-  let coreLatest: string | null = null;
-  if (current) {
-    // fresh core cache for the SAME running version → reuse the lookup
-    const freshCore =
-      cached !== null &&
-      cached.current === current &&
-      (cached.latest === null || typeof cached.latest === "string") &&
-      now - cached.at < CACHE_TTL_MS;
-    coreLatest = freshCore
-      ? (cached.latest as string | null)
-      : parseLatestVersion(latestVersion());
-  }
+  const coreLatest = current ? parseLatestVersion(latestVersion()) : null;
   const core: { current: string; latest: string } | null =
     current && coreLatest !== null && compareVersions(current, coreLatest) < 0
       ? { current, latest: coreLatest }
@@ -377,50 +279,21 @@ export async function checkPiUpdate(
   // --- npm-installed extensions (local/git sources skipped upstream) ---------
   const names = npmExtensionNames(home, opts.projectDir);
   const extensions: PackageUpdate[] = [];
-  const packages: Record<string, PackageCache> = { ...(cached?.packages ?? {}) };
   if (names.length > 0) {
+    // LIVE per-package lookup (no cache)
     const results = await Promise.all(
       names.map(async (name): Promise<PackageUpdate & { _installed: string | null }> => {
         const installed = installedExtensionVersion(home, opts.projectDir, name);
         if (!installed) return { name, current: "", latest: "", _installed: null };
-        const c = packages[name];
-        // fresh per-package cache for the SAME installed version → reuse
-        if (c && c.current === installed && now - c.at < CACHE_TTL_MS) {
-          return {
-            name,
-            current: installed,
-            latest: c.latest ?? "",
-            _installed: installed,
-          };
-        }
         const latest = parseLatestVersion(latestVersion(name)) ?? "";
         return { name, current: installed, latest, _installed: installed };
       }),
     );
     for (const r of results) {
       if (!r._installed) continue;
-      const outdated = r.latest !== "" && compareVersions(r.current, r.latest) < 0;
-      if (outdated)
+      if (r.latest !== "" && compareVersions(r.current, r.latest) < 0)
         extensions.push({ name: r.name, current: r.current, latest: r.latest });
-      packages[r.name] = {
-        at: now,
-        current: r.current,
-        latest: outdated ? r.latest : null,
-      };
     }
-  }
-
-  // --- cache (core entry + per-package entries; negative results cached too) --
-  if (current) {
-    writeCache(file, {
-      at: now,
-      current,
-      latest: coreLatest,
-      packages,
-    });
-  } else if (names.length > 0) {
-    // no pi binary found: still persist the per-package results
-    writeCache(file, { at: now, packages });
   }
 
   if (!core && extensions.length === 0) return null;

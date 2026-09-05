@@ -182,7 +182,14 @@ export type IdeRequest =
   | { type: "storeSteerQueue"; items: SteerQueueItem[]; id?: string }
   | { type: "getSteerQueue"; id?: string }
   | { type: "notifyDesktop"; title: string; body: string; id?: string }
-  | { type: "debugNotify"; count: number; id?: string };
+  | { type: "debugNotify"; count: number; id?: string }
+  /** restart the pi process (same path as applying CLI flags): the webview
+   *  gets connection_closed(reason restart) + pi_restarted and re-initializes
+   *  transparently, resuming the current session */
+  | { type: "restartPi"; id?: string }
+  /** host-driven webview reload (re-serve the document): the pi process
+   *  survives, the page re-initializes from pi's live state */
+  | { type: "reloadWebview"; id?: string };
 
 /** queued message (steering): only persisted text (no images) */
 export interface SteerQueueItem {
@@ -345,6 +352,11 @@ export interface StartupInfo {
    *  (checked by the pi extension; absent/null → up-to-date or check not
    *  finished) */
   updateAvailable?: UpdateAvailable | null;
+  /** unix ms of the last COMPLETED update check (live, no cache):
+   *  absent → the check has not finished yet; the webview polls this
+   *  timestamp to detect when a manual re-check (`/piw update.check`)
+   *  landed */
+  updateCheckedAt?: number;
 }
 
 /** description of a registered flag (from `pi --help` → Extension CLI Flags) */

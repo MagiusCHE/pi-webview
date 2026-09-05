@@ -117,6 +117,19 @@ public partial class PiToolWindowControl : UserControl
             "piw.local", webDir, CoreWebView2HostResourceAccessKind.Allow);
         wv.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
         wv.CoreWebView2.Settings.IsStatusBarEnabled = false;
+        // host-driven reload (webview "reloadWebview" request): re-navigate
+        // with a cache-busting query so the folder-mapped document is
+        // re-served instead of the cached copy. Marshalled on the WPF
+        // dispatcher: the request can arrive from a non-UI thread.
+        _host.OnReloadWebview = () =>
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var core = _web?.CoreWebView2;
+                if (core is null) return;
+                core.Navigate("https://piw.local/index.html?reload=" + Environment.TickCount);
+            }));
+        };
         wv.CoreWebView2.Navigate("https://piw.local/index.html");
     }
 

@@ -18,6 +18,8 @@ export interface StartupInfo {
   /** newer pi core and/or npm-installed extensions (checked by the pi
    *  extension; absent/null → up-to-date or check not finished) */
   updateAvailable?: UpdateAvailable | null;
+  /** unix ms of the last COMPLETED update check (absent → not finished) */
+  updateCheckedAt?: number;
 }
 
 const startupDir = (): string => join(homedir(), ".pi", "pi-webview");
@@ -52,7 +54,7 @@ export function readStartupInfo(pid?: number): StartupInfo | null {
     const ua = info.updateAvailable;
     // tolerant parsing of { core, extensions } (malformed pieces are dropped
     // rather than failing the whole banner info)
-    let updateAvailable: UpdateAvailable | undefined;
+    let updateAvailable: UpdateAvailable | null | undefined;
     if (ua !== undefined && ua !== null && typeof ua === "object") {
       const coreRaw = (ua as { core?: unknown }).core;
       let core: { current: string; latest: string } | null = null;
@@ -83,11 +85,14 @@ export function readStartupInfo(pid?: number): StartupInfo | null {
         : [];
       updateAvailable = { core, extensions };
     }
+    const checkedAt = info.updateCheckedAt;
+    const updateCheckedAt = typeof checkedAt === "number" ? checkedAt : undefined;
     return {
       contextFiles: info.contextFiles,
       skills: info.skills,
       extensions: info.extensions,
       updateAvailable,
+      updateCheckedAt,
     };
   } catch {
     return null;

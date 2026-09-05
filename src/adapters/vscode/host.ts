@@ -811,6 +811,31 @@ export abstract class PiWebviewHost {
         this.postSelection();
         this.respond(req.id, true);
         return;
+      case "restartPi": {
+        // restart pi with the current session + flags (same path as the CLI
+        // flags "Applica"): the webview gets connection_closed(reason
+        // restart) + pi_restarted and re-initializes transparently
+        this.respond(req.id, true);
+        this.restartPi();
+        return;
+      }
+      case "reloadWebview": {
+        // the webview HTML is served by the host ONCE (webview.html): a
+        // client-side location.reload() leaves a blank page because the
+        // iframe never re-fetches the document. Reassign it here; the
+        // timestamp comment guarantees a different string, so VS Code
+        // swaps the iframe. The pi process survives; the fresh page
+        // re-initializes (get_state resumes the current session).
+        this.respond(req.id, true);
+        if (this.webview) {
+          const stamp = `<!-- reload ${Date.now()} -->`;
+          this.webview.html = this.webviewHtml(this.webview).replace(
+            "</head>",
+            `${stamp}</head>`,
+          );
+        }
+        return;
+      }
       default:
         this.respond(
           req.id,

@@ -174,9 +174,33 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   durante lo streaming, collassato per default (click per aprire)
 - **Header**: niente brand/stato testuale — dropdown sessioni (lista da
   `src/bridge/sessions.ts`, `~/.pi/agent/sessions/`; switch via
-  `switch_session` RPC + ricarica cronologia) + dot connessione + gear
-  (settings: lingua e tema in pannello). `color-scheme` per tema sui form
-  nativi (dropdown che rispettano il tema)
+  `switch_session` RPC + ricarica cronologia) + dot connessione + pulsante
+  reload + gear (settings: lingua e tema in pannello). `color-scheme` per
+  tema sui form nativi (dropdown che rispettano il tema)
+- **Pulsante reload**: riavvia il processo pi (IdeRequest `restartPi`,
+  gestito dai 3 host con la stessa meccanica dell'apply dei CLI flags:
+  `connection_closed(reason restart)` + `pi_restarted` → re-init trasparente,
+  sessione corrente ripresa) e poi ricarica la pagina (standalone:
+  `location.reload`; IDE: `reloadWebview`, re-servita dall'host). Il prompt
+  `/reload` non viene mai inviato a pi
+- **Controllo aggiornamenti (scudo header)**: il check pi core + estensioni
+  npm è **live, senza cache** (modulo `packages/pi-webview/lib/update-check.ts`):
+  ogni avvio di pi lo esegue non bloccante a load dell'estensione e il
+  risultato va nello startup-info per-pid con `updateCheckedAt` (timestamp
+  dell'ultimo check completato). Lo scudo è SEMPRE visibile: azzurro = tutto
+  all'ultima versione (click → check manuale ORA via `/piw update.check` +
+  polling di `getStartupInfo` finché `updateCheckedAt` supera il momento del
+  click; se emerge un aggiornamento → scudo giallo + dialog), giallo pulsante
+  = aggiornamento disponibile (click → dialog di revisione →
+  `/piw update.pi.core.exts`). I 3 host servono `getStartupInfo` dallo stesso
+  file `~/.pi/pi-webview/startup-info-<pid>.json`
+- **Comandi TUI di pi nel composer**: `/compact`, `/new` e `/name` ripetono
+  le azioni GUI omonime (compact RPC, nuova sessione, rename della sessione
+  corrente via `set_session_name`). I comandi senza equivalente webview
+  (`/reload`, `/login`, `/logout`, `/import`, `/share`, `/scoped-models`,
+  `/changelog`, `/hotkeys`, `/quit`, `/model`, `/thinking`) non vengono mai
+  inviati a pi (né prompt né steering): mostrano solo un messaggio in chat
+  («validi solo da terminale»)
 - **Barra stato**: posizione (`above`/`below`/`topbar`) e compattezza sono
   preferenze globali indipendenti. Gli slot `setStatus` sono identificati dal
   `statusKey` RPC: click con conferma per nasconderli, ripristino dai settings;

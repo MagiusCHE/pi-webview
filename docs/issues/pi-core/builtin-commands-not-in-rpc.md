@@ -2,6 +2,8 @@
 
 - **Componente**: pi-core (`modes/rpc/rpc-mode.js` + `core/agent-session.js`)
 - **Scoperto**: 2026-08-24 (piano 0003 — command palette)
+- **Verificato**: 2026-09-05 su pi 0.85.1 (23 built-in; leak confermato via composer
+  e via steering)
 - **Stato**: aperto — da valutare se è un bug o un limite voluto
 
 ## Problema 1 — `get_commands` non include i built-in
@@ -13,10 +15,12 @@
 - **skill** (`skill:<name>`).
 
 I **comandi built-in** (`/compact`, `/new`, `/model`, `/export`, `/fork`… —
-`BUILTIN_SLASH_COMMANDS` in `core/slash-commands.js`, 22 voci) **non
-compaiono**: esistono solo nel TUI (`interactive-mode.js`
-`createBaseAutocompleteProvider`). Un client RPC non ha modo di conoscere la
-lista dei built-in se non copiandola a mano.
+`BUILTIN_SLASH_COMMANDS` in `core/slash-commands.js`, 23 voci: settings, model,
+tree, thinking, scoped-models, export, import, share, copy, name, session,
+changelog, hotkeys, fork, clone, trust, login, logout, new, compact, resume,
+reload, quit) **non compaiono**: esistono solo nel TUI
+(`interactive-mode.js` `createBaseAutocompleteProvider`). Un client RPC non ha
+modo di conoscere la lista dei built-in se non copiandola a mano.
 
 ## Problema 2 — i built-in non vengono eseguiti via `prompt`
 
@@ -33,15 +37,31 @@ non c'è quel passaggio.
 
 - La palette non può elencare i built-in (devono essere una lista statica nel
   client, oppure mappati su RPC native dove esistono: `compact`, `new_session`,
-  `set_model`, `export_html`, `fork`, `clone`, `get_tree`, `reload`…).
-- Inviare un built-in come testo non fa nulla di utile.
+  `set_model`, `export_html`, `fork`, `clone`, `get_tree`…).
+- Inviare un built-in come testo non fa nulla di utile: il testo arriva al
+  modello LLM come prompt (leak). Vale anche per il **steering**: un built-in
+  accodato durante un turn viene consegnato a `prompt()` e finisce nello stesso
+  modo.
+
+## Mitigazione lato pi-webview (2026-09-05)
+
+La webview intercetta i built-in digitati nel composer PRIMA dell'invio
+(`sendOrStop`): `/compact`, `/new`, `/name` ripetono l'azione GUI omonima; i
+comandi senza equivalente webview (`/reload`, `/login`, `/logout`, `/import`,
+`/share`, `/scoped-models`, `/changelog`, `/hotkeys`, `/quit`, `/model`,
+`/thinking`) non vengono mai inviati a pi (né prompt né steering) e mostrano
+solo un messaggio in chat. `/reload` è coperto dal pulsante reload
+(IdeRequest `restartPi`: riavvio del processo pi + reload della pagina).
+Vedi `docs/commands-todo.md` → "Decisione attuale".
 
 ## Nota
 
 Alcuni built-in hanno già RPC native equivalenti (vedi sopra): in questi casi
 il client può mapparli. Per quelli senza RPC (`/import`, `/share`, `/login`,
 `/logout`, `/changelog`, `/hotkeys`, `/scoped-models`) non c'è percorso via
-RPC.
+RPC. Attenzione: **non esiste** la RPC `reload` (verificato in pi 0.85.1:
+`rpc-mode.js` elenca tutti i casi gestiti; `/reload` del TUI non ha
+controparte RPC).
 
 ## Fix suggerito (upstream)
 

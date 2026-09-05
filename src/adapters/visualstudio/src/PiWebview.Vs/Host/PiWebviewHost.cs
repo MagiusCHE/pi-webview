@@ -60,6 +60,11 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
     /// <summary>Output channel to the webview (set by the control).</summary>
     public Action<string>? PostJson { get; set; }
 
+    /// <summary>Reload the webview document (set by the control): re-navigate
+    /// the WebView2 so the folder-mapped page is re-served. The pi process
+    /// survives; the fresh page re-initializes from pi's live state.</summary>
+    public Action? OnReloadWebview { get; set; }
+
     // --- workspace -------------------------------------------------------------
 
     public string? Workspace() => _jtf.Run<string?>(async () => WorkspaceSync());
@@ -403,6 +408,11 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
 
     public UserConfigStore Config => _config;
     public SessionStore Sessions => _sessions;
+
+    /// <summary>OS id of the running pi process (null when not started).
+    /// Serves the per-process startup-info file (welcome banner + update
+    /// shield) — mirrors the VS Code host's pi.pid usage.</summary>
+    public int? PiPid => _pi?.Pid;
     public IPiHostCallbacks Callbacks => _cb;
     public DTE2 Dte => _dte;
     public JoinableTaskFactory Jtf => _jtf;

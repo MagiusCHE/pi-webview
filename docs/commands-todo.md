@@ -14,24 +14,24 @@
 
 ## Da valutare (uno per uno)
 
-| Comando          | Descrizione (da pi)                                              | Stato RPC                      | Proposta UI                                                                          | Deciso |
-| ---------------- | ---------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------ | ------ |
-| `/session`       | Show session info and stats                                      | `get_state`                    | Pannello/status con info sessione (file, id, messaggi, costo)                        | ⏳     |
-| `/export`        | Export session (HTML default, o path .html/.jsonl)               | `export_html`                  | Pulsante "esporta" (menu sessione) con scelta formato                                | ⏳     |
-| `/fork`          | Create a new fork from a previous user message                   | `fork`                         | Azione "fork" su un messaggio (menu contestuale)                                     | ⏳     |
-| `/clone`         | Duplicate the current session                                    | `clone`                        | Pulsante "duplica sessione" (dropdown sessioni)                                      | ⏳     |
-| `/tree`          | Navigate session tree (switch branches)                          | `get_tree`                     | Vista rami/derivazioni della sessione                                                | ⏳     |
-| `/copy`          | Copy last agent message to clipboard                             | `get_last_assistant_text`      | Pulsante copia sull'ultimo messaggio (già esistente per i blocchi codice; estendere) | ⏳     |
-| `/reload`        | Reload keybindings, extensions, skills, prompts, themes, context | `reload`                       | Pulsante "ricarica estensioni" (impostazioni)                                        | ⏳     |
-| `/login`         | Configure provider authentication                                | — (no RPC)                     | Maschera provider nella maschera impostazioni                                        | ⏳     |
-| `/logout`        | Remove provider authentication                                   | —                              | Idem, con revoca                                                                     | ⏳     |
-| `/import`        | Import and resume a session from JSONL                           | — (no RPC)                     | Apri file .jsonl → fork/resume                                                       | ⏳     |
-| `/share`         | Share session as secret gist                                     | — (no RPC)                     | Pulsante condividi (menu sessione)                                                   | ⏳     |
-| `/scoped-models` | Enable/disable models for cycling                                | —                              | Selettore modelli nel popover modelli                                                | ⏳     |
-| `/changelog`     | Show changelog entries                                           | —                              | Voce "changelog" in impostazioni                                                     | ⏳     |
-| `/hotkeys`       | Show all keyboard shortcuts                                      | —                              | Pannello scorciatoie (impostazioni)                                                  | ⏳     |
-| `skill:<name>`   | Skill di pi (espansione prompt)                                  | get_commands (sorgente skill)  | Picker skill (es. menu in composer, come allegati)                                   | ⏳     |
-| Template prompt  | Template utente (espansione prompt)                              | get_commands (sorgente prompt) | Picker template (menu in composer)                                                   | ⏳     |
+| Comando          | Descrizione (da pi)                                              | Stato RPC                        | Proposta UI                                                                          | Deciso |
+| ---------------- | ---------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------ | ------ |
+| `/session`       | Show session info and stats                                      | `get_state`                      | Pannello/status con info sessione (file, id, messaggi, costo)                        | ⏳     |
+| `/export`        | Export session (HTML default, o path .html/.jsonl)               | `export_html`                    | Pulsante "esporta" (menu sessione) con scelta formato                                | ⏳     |
+| `/fork`          | Create a new fork from a previous user message                   | `fork`                           | Azione "fork" su un messaggio (menu contestuale)                                     | ⏳     |
+| `/clone`         | Duplicate the current session                                    | `clone`                          | Pulsante "duplica sessione" (dropdown sessioni)                                      | ⏳     |
+| `/tree`          | Navigate session tree (switch branches)                          | `get_tree`                       | Vista rami/derivazioni della sessione                                                | ⏳     |
+| `/copy`          | Copy last agent message to clipboard                             | `get_last_assistant_text`        | Pulsante copia sull'ultimo messaggio (già esistente per i blocchi codice; estendere) | ⏳     |
+| `/reload`        | Reload keybindings, extensions, skills, prompts, themes, context | — (no RPC, verificato pi 0.85.1) | Pulsante reload nell'header: `restartPi` (riavvio processo pi) + reload pagina       | ✅     |
+| `/login`         | Configure provider authentication                                | — (no RPC)                       | Maschera provider nella maschera impostazioni                                        | ⏳     |
+| `/logout`        | Remove provider authentication                                   | —                                | Idem, con revoca                                                                     | ⏳     |
+| `/import`        | Import and resume a session from JSONL                           | — (no RPC)                       | Apri file .jsonl → fork/resume                                                       | ⏳     |
+| `/share`         | Share session as secret gist                                     | — (no RPC)                       | Pulsante condividi (menu sessione)                                                   | ⏳     |
+| `/scoped-models` | Enable/disable models for cycling                                | —                                | Selettore modelli nel popover modelli                                                | ⏳     |
+| `/changelog`     | Show changelog entries                                           | —                                | Voce "changelog" in impostazioni                                                     | ⏳     |
+| `/hotkeys`       | Show all keyboard shortcuts                                      | —                                | Pannello scorciatoie (impostazioni)                                                  | ⏳     |
+| `skill:<name>`   | Skill di pi (espansione prompt)                                  | get_commands (sorgente skill)    | Picker skill (es. menu in composer, come allegati)                                   | ⏳     |
+| Template prompt  | Template utente (espansione prompt)                              | get_commands (sorgente prompt)   | Picker template (menu in composer)                                                   | ⏳     |
 
 ## Decisione attuale
 
@@ -40,3 +40,20 @@ estensioni** (sorgente `extension` di `get_commands`). Tutto il resto di questa
 tabella è escluso dall'implementazione finché non lo valutiamo e decidiamo
 una UI dedicata. → si aggiorna la tabella spostando la riga in una sezione
 "implementati" quando deciso.
+
+**Comandi built-in digitati nel composer** (piano 0003, sezione
+"intercettazione built-in"): pi in RPC mode intercetta SOLO i comandi delle
+estensioni — i built-in scritti nel composer verrebbero inviati al modello
+come prompt (leak, verificato in pi 0.85.1: `agent-session.js`
+`_tryExecuteExtensionCommand` gestisce solo le estensioni). La webview
+intercetta quindi nel composer:
+
+- `/compact`, `/new`, `/name <nome>` → ripetono l'azione GUI omonima
+  (compact RPC, nuova sessione, rename sessione corrente via
+  `set_session_name`)
+- `/reload`, `/login`, `/logout`, `/import`, `/share`, `/scoped-models`,
+  `/changelog`, `/hotkeys`, `/quit`, `/model`, `/thinking` → **mai** inviati a
+  pi (né prompt né steering): solo un messaggio in chat «validi solo da
+  terminale»
+- ogni altro `/xyz` sconosciuto → comportamento precedente (invio + avviso),
+  perché un messaggio legittimo può iniziare con `/`

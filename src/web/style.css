@@ -47,6 +47,7 @@
   --hover: var(--vscode-list-hoverBackground, rgb(255 255 255 / 0.07));
   --code-bg: var(--vscode-textCodeBlock-background, #0d0f11);
   --ok: var(--vscode-charts-green, #7bd88f);
+  --update-ok: var(--vscode-charts-blue, #5aa9e6);
   --warn: var(--vscode-charts-yellow, #f0c674);
   --err: var(--vscode-charts-red, #e06c75);
   /* diff tool: FIXED green/red (the charts of the VS Code theme can be
@@ -97,6 +98,7 @@
   --hover: var(--vscode-list-hoverBackground, rgb(0 0 0 / 0.05));
   --code-bg: var(--vscode-textCodeBlock-background, rgb(0 0 0 / 0.03));
   --ok: var(--vscode-charts-green, #2e8b57);
+  --update-ok: var(--vscode-charts-blue, #2b7bb9);
   --warn: var(--vscode-charts-yellow, #b8860b);
   --err: var(--vscode-charts-red, #c73542);
   /* diff tool: FIXED green/red (the charts of the VS Code theme can be
@@ -703,17 +705,21 @@ header {
   pointer-events: none;
 }
 
-/* pi update button: yellow shield (kept on hover; background gives the feedback) */
-#btn-update-pi {
+/* pi update shield: ALWAYS visible — blue when everything is up-to-date
+   (click runs the version check NOW), yellow when an update is available
+   (click opens the review dialog); dimmed while a manual check is in flight */
+#btn-update-pi.update-pi-ok,
+#btn-update-pi.update-pi-ok:hover {
+  color: var(--update-ok);
+}
+#btn-update-pi.update-pi-warn,
+#btn-update-pi.update-pi-warn:hover {
   color: var(--warn);
 }
-#btn-update-pi:hover {
-  color: var(--warn);
-}
-/* attention: the shield zooms in, trembles (fast irregular rotation of a
+/* attention: the yellow shield zooms in, trembles (fast irregular rotation of a
    few degrees while large), then zooms back to its original size, until the
    user reviews the available updates */
-#btn-update-pi svg {
+#btn-update-pi.update-pi-warn svg {
   animation: update-shield-attract 2.6s ease-in-out infinite;
 }
 @keyframes update-shield-attract {

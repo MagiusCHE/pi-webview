@@ -757,6 +757,14 @@ function main(): void {
         respond(req.id ?? "", { ok: true, data: { items: steerQueueStore.items } });
         return;
       }
+      // restart pi with the current session + flags (same path as the CLI
+      // flags "Applica"): the webview gets connection_closed(reason restart)
+      // + pi_restarted and re-initializes transparently
+      if (req.type === "restartPi") {
+        respond(req.id ?? "", { ok: true });
+        restartPi(currentSessionPath, readSessionCliFlags(currentSessionPath ?? ""));
+        return;
+      }
       // standalone: the webview shows browser notifications itself — nothing to do
       if (req.type === "notifyDesktop") {
         respond(req.id ?? "", { ok: true });

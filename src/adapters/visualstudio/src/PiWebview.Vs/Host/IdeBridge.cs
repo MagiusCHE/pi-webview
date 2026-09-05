@@ -245,6 +245,55 @@ public static class IdeBridge
                         host.PostIdeResponse(Fail(req, ex.Message));
                     }
                     return;
+                case "getStartupInfo":
+                {
+                    // new-session welcome banner + header update shield: a
+                    // per-pi-process file written by the pi-side extension
+                    // (never part of the session jsonl). Passed through as-is
+                    // (tolerant: absent/malformed file → info null).
+                    var pid = host.PiPid;
+                    JsonElement? info = null;
+                    if (pid is not null)
+                    {
+                        var file = Path.Combine(
+                            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                            ".pi", "pi-webview", $"startup-info-{pid}.json");
+                        try
+                        {
+                            using var doc = JsonDocument.Parse(File.ReadAllText(file));
+                            var root = doc.RootElement;
+                            if (root.ValueKind == JsonValueKind.Object &&
+                                root.TryGetProperty("contextFiles", out var contextFiles) && contextFiles.ValueKind == JsonValueKind.Array &&
+                                root.TryGetProperty("skills", out var skills) && skills.ValueKind == JsonValueKind.Array &&
+                                root.TryGetProperty("extensions", out var extensions) && extensions.ValueKind == JsonValueKind.Array)
+                            {
+                                info = root.Clone();
+                            }
+                        }
+                        catch
+                        {
+                            // missing or malformed file → info stays null
+                        }
+                    }
+                    host.PostIdeResponse(Ok(req, new Dictionary<string, object?> { ["info"] = info ?? null }));
+                    return;
+                }
+                case "restartPi":
+                    // restart the pi process with the current session (same
+                    // path as setCliFlags "Applica"): the webview gets
+                    // connection_closed(restart) + pi_restarted and
+                    // re-initializes transparently.
+                    host.PostIdeResponse(Ok(req, null));
+                    await host.RestartPiAsync().ConfigureAwait(false);
+                    return;
+                case "reloadWebview":
+                    // host-driven webview reload: the control re-navigates the
+                    // WebView2 (folder-mapped, re-served from disk). The pi
+                    // process survives; the fresh page re-initializes from pi's
+                    // live state (same contract as the VS Code companion).
+                    host.PostIdeResponse(Ok(req, null));
+                    host.OnReloadWebview?.Invoke();
+                    return;
                 case "clipboardWrite":
                     if (req.Text is null) { host.PostIdeResponse(Fail(req, "clipboardWrite: missing text")); return; }
                     await host.Jtf.SwitchToMainThreadAsync();

@@ -69,6 +69,7 @@ import {
   newChatIcon,
   thinkingBlocksIcon,
   settingsIcon,
+  reloadIcon,
   updateIcon,
   chatIcon,
   folderIcon,
@@ -89,6 +90,7 @@ const els = {
   sessionSearch: document.getElementById("session-search") as HTMLInputElement,
   sessionItems: document.getElementById("session-items") as HTMLDivElement,
   settingsBtn: document.getElementById("btn-settings") as HTMLButtonElement,
+  reload: document.getElementById("btn-reload") as HTMLButtonElement,
   updatePi: document.getElementById("btn-update-pi") as HTMLButtonElement,
   updateModal: document.getElementById("update-modal") as HTMLDivElement,
   updateModalTitle: document.getElementById("update-modal-title") as HTMLSpanElement,
@@ -553,7 +555,6 @@ function applyUiStrings(): void {
   els.connectBtn.textContent = t("connect");
   els.send.title = t("send");
   els.newChat.title = t("newChat");
-  els.updatePi.title = t("updateAvailableTooltip");
   els.updateModalTitle.textContent = t("updateModalTitle");
   els.updateModalDesc.textContent = t("updateModalDesc");
   els.updateCancel.textContent = t("cancel");
@@ -561,7 +562,9 @@ function applyUiStrings(): void {
   updateThinkingBlocksButton();
   els.btnModel.title = t("model");
   els.btnThinking.title = t("thinkingLevel");
+  applyUpdateShield(); // shield tooltip follows the current state (re-locale)
   els.settingsBtn.title = t("settings");
+  els.reload.title = t("reload");
   els.sessionBtn.title = t("sessions");
   els.sessionSearch.placeholder = t("searchSessions");
   els.lang.title = t("language");
@@ -1452,6 +1455,22 @@ function showPrompt(initialValue: string, title: string): Promise<string | null>
   });
 }
 
+// set the name of the CURRENT session: the name lives in pi's memory
+// (set_session_name RPC); the session box and the title are updated locally.
+// Shared by the session-box rename and the /name command.
+async function applyCurrentSessionName(newName: string): Promise<void> {
+  const res = await rpcRequest({ type: "set_session_name", name: newName });
+  if (!res.success) {
+    addStatusLine(t("renameFailed"));
+    return;
+  }
+  const idx = sessions.findIndex((x) => x.path === currentSessionPath);
+  const cur = idx >= 0 ? sessions[idx] : undefined;
+  if (cur) sessions[idx] = { ...cur, name: newName };
+  populateSessionMenu();
+  void refreshSessionTitle(); // updates box and title
+}
+
 async function renameSessionFlow(path: string): Promise<void> {
   const s = sessions.find((x) => x.path === path);
   if (!s) return;
@@ -1461,26 +1480,19 @@ async function renameSessionFlow(path: string): Promise<void> {
   if (next === null) return; // cancelled
   const newName = next.trim();
   if (!newName || newName === initial) return; // empty or unchanged
-  const current = path === currentSessionPath;
-  if (current) {
-    // current session: the name lives in pi's memory (RPC)
-    const res = await rpcRequest({ type: "set_session_name", name: newName });
-    if (!res.success) {
-      addStatusLine(t("renameFailed"));
-      return;
-    }
-  } else {
-    const res = await ideRequest({ type: "renameSession", path, name: newName });
-    if (!res?.ok) {
-      addStatusLine(t("renameFailed"));
-      return;
-    }
+  if (path === currentSessionPath) {
+    await applyCurrentSessionName(newName);
+    return;
+  }
+  const res = await ideRequest({ type: "renameSession", path, name: newName });
+  if (!res?.ok) {
+    addStatusLine(t("renameFailed"));
+    return;
   }
   const idx = sessions.findIndex((x) => x.path === path);
   const cur = idx >= 0 ? sessions[idx] : undefined;
   if (cur) sessions[idx] = { ...cur, name: newName };
   populateSessionMenu();
-  if (current) void refreshSessionTitle(); // updates box and title
 }
 
 async function deleteSessionFlow(path: string): Promise<void> {
@@ -3188,6 +3200,12 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       disarmWaitingResponse();
       const msg = (evt.message as string | undefined) ?? (evt.title as string) ?? "";
       if (msg) addStatusLine(msg);
+      // a manual shield check just finished (outcome box in the chat) →
+      // re-enable the shield right away, even on a host that cannot report
+      // the startup-info timestamp the poll is watching for
+      if (updateChecking && isUpdateCheckOutcome(String(msg))) {
+        void finishManualUpdateCheckFromOutcome();
+      }
       return;
     }
     default:
@@ -4903,11 +4921,13 @@ async function maybeShowStartupBanner(): Promise<void> {
   if (!res?.ok) return;
   const info = (res.data as { info?: StartupInfo | null } | undefined)?.info;
   if (!info) return;
-  // header update button: ANY session (new or resumed) — the check is
-  // pi-side, done at process load; the welcome banner below stays
-  // new-session-only
-  els.updatePi.hidden = !info.updateAvailable;
+  // header update shield: ALWAYS visible on any session (new or resumed) —
+  // blue = up-to-date (click re-checks NOW), yellow = update available.
+  // The check is pi-side, done LIVE at process load (no cache); the welcome
+  // banner below stays new-session-only
+  els.updatePi.hidden = false;
   updateInfo = info.updateAvailable ?? null;
+  applyUpdateShield();
   // one delayed re-request: the pi-side update check (npm registry lookups)
   // may complete right after the startup-info file was written for this
   // session (or a resumed one, after a window reload)
@@ -4941,7 +4961,7 @@ async function refreshStartupUpdate(): Promise<void> {
   const info = (res.data as { info?: StartupInfo | null } | undefined)?.info;
   if (!info?.updateAvailable) return;
   updateInfo = info.updateAvailable;
-  els.updatePi.hidden = false;
+  applyUpdateShield();
   if (sessionHasMessages) return; // button only; the banner is new-session-only
   if (startupBannerCard) {
     appendStartupUpdateRow(startupBannerCard, info.updateAvailable);
@@ -5233,6 +5253,7 @@ els.newChat.innerHTML = newChatIcon();
 els.updatePi.innerHTML = updateIcon();
 updateThinkingBlocksButton();
 els.settingsBtn.innerHTML = settingsIcon();
+els.reload.innerHTML = reloadIcon();
 els.scrollBottom.title = t("scrollToBottom");
 els.scrollBottom.addEventListener("click", () => {
   // Rejoin the live bottom immediately. A smooth scroll targets the old
@@ -5959,6 +5980,24 @@ els.trust.addEventListener("click", (e) => {
   openTrustPopover();
 });
 
+// Built-in pi TUI commands with NO piw counterpart: pi in RPC mode does not
+// execute them (the text would leak to the model), so the webview must not
+// send them as prompts or queue them in steering: only an informative line
+// in the chat (they work from the terminal).
+const TERMINAL_ONLY_COMMANDS = new Set([
+  "reload",
+  "login",
+  "logout",
+  "import",
+  "share",
+  "scoped-models",
+  "changelog",
+  "hotkeys",
+  "quit",
+  "model",
+  "thinking",
+]);
+
 function sendOrStop(): void {
   if (!transport) return;
   // /settings is the same special case as pi.dev TUI: opens the panel
@@ -5966,6 +6005,43 @@ function sendOrStop(): void {
   if (els.input.value.trim().toLowerCase() === "/settings") {
     if (els.settingsModal.hidden) openSettings();
     return;
+  }
+  // Built-in pi TUI commands: the ones with a native UI action repeat that
+  // action (same code path as the GUI button); the terminal-only ones get
+  // the informative line above and are never sent to pi.
+  const commandMatch = /^\/([^\s/]+)/.exec(els.input.value.trim());
+  const commandName = commandMatch?.[1]?.toLowerCase();
+  if (commandName) {
+    if (TERMINAL_ONLY_COMMANDS.has(commandName)) {
+      appendSystemBox("warn", t("terminalOnlyCommands"));
+      return;
+    }
+    if (commandName === "compact") {
+      // same action as the compact UI button (context gauge)
+      els.input.value = "";
+      resetInputHeight();
+      startCompactionFromUi();
+      return;
+    }
+    if (commandName === "new") {
+      // same action as the "new session" button in the session box
+      els.input.value = "";
+      resetInputHeight();
+      void startNewSession();
+      return;
+    }
+    if (commandName === "name") {
+      // same action as the rename in the session box (current session)
+      const name = els.input.value.trim().slice("/name".length).trim();
+      if (!name) {
+        appendSystemBox("warn", t("nameUsage"));
+        return;
+      }
+      els.input.value = "";
+      resetInputHeight();
+      void applyCurrentSessionName(name);
+      return;
+    }
   }
   if (blockedResumeModel) {
     addStatusLine(tpl(t("resumeModelUnavailable"), { model: blockedResumeModel }));
@@ -6964,10 +7040,122 @@ els.newChat.addEventListener("click", () => {
     window.open(location.origin + "/?new=1", "_blank");
   }
 });
-// pi core / extensions update: the header shield opens a review dialog with
-// the exact installed → cloud versions; confirming runs the update through
-// the normal chat channel (extension command, pi executes it)
+// pi core / extensions update: the header shield is ALWAYS visible —
+// blue = up-to-date (click runs the check NOW, live, no cache: pi-side
+// `/piw update.check`, the webview polls the startup-info timestamp),
+// yellow = update available (click opens a review dialog with the exact
+// installed → cloud versions; confirming runs the update through the normal
+// chat channel — extension command, pi executes it)
 let updateInfo: UpdateAvailable | null = null;
+let updateChecking = false;
+// true only while a MANUAL shield check is in flight (not while an update is
+// running via proceedUpdate): the check-outcome notify is a completion signal
+let manualCheckOutcomePending = false;
+
+/** shield visual state: blue (up-to-date) / yellow (update available) /
+ *  dimmed while a manual check is in flight; the tooltip follows the state */
+function applyUpdateShield(): void {
+  if (updateChecking) {
+    els.updatePi.disabled = true;
+    els.updatePi.title = t("updateCheckingTooltip");
+    return;
+  }
+  els.updatePi.disabled = false;
+  if (updateInfo) {
+    els.updatePi.classList.add("update-pi-warn");
+    els.updatePi.classList.remove("update-pi-ok");
+    els.updatePi.title = t("updateAvailableTooltip");
+  } else {
+    els.updatePi.classList.add("update-pi-ok");
+    els.updatePi.classList.remove("update-pi-warn");
+    els.updatePi.title = t("updateUpToDateTooltip");
+  }
+}
+
+// true when the chat message is the outcome of the manual shield check
+// (pi-webview extension ui.notify, rendered in every environment via
+// extension_ui_request): up to date / updates available / check failed /
+// already running
+function isUpdateCheckOutcome(msg: string): boolean {
+  return (
+    msg.includes("pi-webview:") &&
+    (/up to date/.test(msg) || /update check/.test(msg) || /updates? available/.test(msg))
+  );
+}
+
+// the outcome box landed in the chat → the pi-side check has finished (the
+// startup-info file is written BEFORE the notify). Settle the shield here:
+// this path also works when the IDE host predates the startup-info
+// updateCheckedAt field (new webview page + old in-memory host code, e.g.
+// after a webview reload without a window reload) where the timestamp poll
+// below can never match
+async function finishManualUpdateCheckFromOutcome(): Promise<void> {
+  if (!manualCheckOutcomePending) return; // poll (or an earlier notify) already settled
+  manualCheckOutcomePending = false;
+  updateChecking = false;
+  // refresh from the freshest startup-info the host can serve; a host
+  // without the field simply keeps the last known state
+  const res = await ideRequest({ type: "getStartupInfo" });
+  const info = res?.ok
+    ? (res.data as { info?: StartupInfo | null } | undefined)?.info
+    : undefined;
+  if (info) updateInfo = info.updateAvailable ?? null;
+  applyUpdateShield();
+  // update found → the shield becomes the yellow one and the review dialog
+  // opens, exactly as on a normal update-available click
+  if (updateInfo) openUpdateModal();
+}
+
+// blue shield click: run the version check NOW via the extension command
+// (pi-side, LIVE — no cache), then wait for the outcome: the timestamp poll
+// (new hosts) settles it as soon as the pi process stamps a newer
+// updateCheckedAt, and the outcome notify in the chat settles it in every
+// environment (see isUpdateCheckOutcome / finishManualUpdateCheckFromOutcome)
+async function runManualUpdateCheck(): Promise<void> {
+  if (updateChecking || demoMode) return;
+  updateChecking = true;
+  manualCheckOutcomePending = true;
+  applyUpdateShield();
+  const startedAt = Date.now();
+  els.input.value = "/piw update.check";
+  sendOrStop();
+  const deadline = startedAt + 5 * 60_000; // a few lookups; generous margin
+  const poll = (): void => {
+    void (async () => {
+      // settled elsewhere (the outcome notify in the chat, or an earlier poll
+      // tick): the check DID complete — stop silently, never time out
+      if (!manualCheckOutcomePending) return;
+      const res = await ideRequest({ type: "getStartupInfo" });
+      const info = res?.ok
+        ? (res.data as { info?: StartupInfo | null } | undefined)?.info
+        : undefined;
+      if (
+        info &&
+        typeof info.updateCheckedAt === "number" &&
+        info.updateCheckedAt > startedAt
+      ) {
+        updateInfo = info.updateAvailable ?? null;
+        updateChecking = false;
+        manualCheckOutcomePending = false;
+        applyUpdateShield();
+        // update found → the shield becomes the yellow one and the review
+        // dialog opens, exactly as on a normal update-available click
+        if (updateInfo) openUpdateModal();
+        return;
+      }
+      if (Date.now() > deadline) {
+        updateChecking = false;
+        manualCheckOutcomePending = false;
+        applyUpdateShield();
+        appendSystemBox("warn", t("updateCheckTimeout"));
+        return;
+      }
+      setTimeout(poll, 1500);
+    })();
+  };
+  // first poll only after the command has had time to reach pi
+  setTimeout(poll, 2000);
+}
 
 function updateRow(name: string, current: string, latest: string): HTMLElement {
   const row = document.createElement("div");
@@ -7003,17 +7191,67 @@ function closeUpdateModal(): void {
 
 function proceedUpdate(): void {
   closeUpdateModal();
-  els.updatePi.hidden = true; // one-shot: after the update, restart pi
+  // the update takes minutes and ends with a pi restart (page re-init, which
+  // re-runs the load-time check): keep the shield in the checking state
+  updateInfo = null;
+  updateChecking = true;
+  applyUpdateShield();
   els.input.value = "/piw update.pi.core.exts";
   sendOrStop();
 }
 
-els.updatePi.addEventListener("click", openUpdateModal);
+els.updatePi.addEventListener("click", () => {
+  if (demoMode || updateChecking) return;
+  if (updateInfo) {
+    openUpdateModal(); // yellow → review the available updates
+    return;
+  }
+  void runManualUpdateCheck(); // blue → check for new releases NOW
+});
 els.updateClose.addEventListener("click", closeUpdateModal);
 els.updateCancel.addEventListener("click", closeUpdateModal);
 els.updateConfirm.addEventListener("click", proceedUpdate);
 els.updateModal.addEventListener("click", (e) => {
   if (e.target === els.updateModal) closeUpdateModal();
+});
+
+// --- full reload: restart the pi process + reload the webview page -----------
+let reloadInProgress = false;
+
+els.reload.addEventListener("click", async () => {
+  if (demoMode || reloadInProgress) return;
+  // confirmation only when an operation is in progress (model turn or
+  // compaction); otherwise the reload goes straight ahead, no dialog
+  if (working || compacting) {
+    const msg =
+      runtime.mode === "standalone"
+        ? t("reloadConfirmStandalone")
+        : t("reloadConfirmIde");
+    if (!(await showConfirm(msg))) return;
+  }
+  reloadInProgress = true;
+  els.reload.disabled = true;
+  // restart the pi process (loads updated core/extensions): the webview gets
+  // connection_closed(reason restart) + pi_restarted and re-initializes
+  // transparently (same path as applying CLI flags)
+  await ideRequest({ type: "restartPi" });
+  // margin until the host re-spawned pi: the fresh page re-initializes from
+  // scratch and retries get_state until pi is ready
+  await new Promise((r) => setTimeout(r, 500));
+  if (runtime.mode === "standalone") {
+    // the page is served by the bridge from disk: a plain reload re-runs the
+    // (possibly updated) UI and resumes the current session (session id in
+    // the URL)
+    location.reload();
+    return;
+  }
+  // IDE: the host re-serves the webview document. A client-side
+  // location.reload() is not enough in VS Code: the host-provided HTML is
+  // served once and the blank iframe never re-fetches it (the host
+  // reassigns webview.html / re-navigates).
+  const res = await ideRequest({ type: "reloadWebview" });
+  if (!res?.ok) location.reload(); // legacy host: old best-effort path
+  // the host swapped the document: this page is gone
 });
 
 // --- message history (↑/↓ with empty input) ----------------------------------

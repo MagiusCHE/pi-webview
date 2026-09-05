@@ -64,6 +64,11 @@ public sealed class PiProcess : IAsyncDisposable
 
     public bool Running => _proc is not null;
 
+    /// <summary>OS id of the running pi process (null when not started):
+    /// the per-process files under ~/.pi/pi-webview (e.g. startup-info-
+    /// &lt;pid&gt;.json) are keyed by it.</summary>
+    public int? Pid => _proc?.Id;
+
     public void Start()
     {
         lock (_gate)

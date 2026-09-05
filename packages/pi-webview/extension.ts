@@ -435,11 +435,15 @@ export default async function (pi: PiApi): Promise<void> {
   // header update button. `process.cwd()` is the session's cwd at load
   // time: covers the project-scoped package list too.
   let updateCheckResult: UpdateAvailable | null = null;
+  // unix ms of the last COMPLETED check (load or manual): lets the webview
+  // poll the startup-info file and tell when a re-check finished
+  let updateCheckedAt: number | null = null;
   type StartupInfoFile = {
     contextFiles: string[];
     skills: string[];
     extensions: string[];
     updateAvailable: UpdateAvailable | null;
+    updateCheckedAt?: number;
   };
   // per-process, NON-session file the webview host reads on demand
   // (getStartupInfo): never written to the session jsonl
@@ -458,36 +462,38 @@ export default async function (pi: PiApi): Promise<void> {
   void checkPiUpdate({ projectDir: process.cwd() })
     .then((r) => {
       updateCheckResult = r;
+      updateCheckedAt = Date.now();
       // the file may have been written at session_start while this check was
-      // still running: merge the result in so the header update button
-      // appears even on a resumed session (window reload)
-      if (r) {
-        try {
-          const file = join(
-            homedir(),
-            ".pi",
-            "pi-webview",
-            `startup-info-${process.pid}.json`,
-          );
-          const existing = JSON.parse(
-            readFileSync(file, "utf8"),
-          ) as Partial<StartupInfoFile>;
-          writeStartupInfoFile({
-            contextFiles: existing.contextFiles ?? [],
-            skills: existing.skills ?? [],
-            extensions: existing.extensions ?? [],
-            updateAvailable: r,
-          });
-        } catch {
-          // file absent (check finished before session_start) → the
-          // session_start handler writes it with updateCheckResult set
-        }
+      // still running: merge the result (and the timestamp) in so the header
+      // update button appears even on a resumed session (window reload) and
+      // the webview's manual re-check polling sees the completion
+      try {
+        const file = join(
+          homedir(),
+          ".pi",
+          "pi-webview",
+          `startup-info-${process.pid}.json`,
+        );
+        const existing = JSON.parse(
+          readFileSync(file, "utf8"),
+        ) as Partial<StartupInfoFile>;
+        writeStartupInfoFile({
+          contextFiles: existing.contextFiles ?? [],
+          skills: existing.skills ?? [],
+          extensions: existing.extensions ?? [],
+          updateAvailable: r,
+          updateCheckedAt: updateCheckedAt ?? undefined,
+        });
+      } catch {
+        // file absent (check finished before session_start) → the
+        // session_start handler writes it with updateCheckResult set
       }
     })
     .catch(() => {
       updateCheckResult = null; // checkPiUpdate never throws — belt & braces
     });
   let updateRunning = false;
+  let updateCheckRunning = false;
 
   // at load: BLOCKS pi.dev startup until the check/installs are done (the
   // core awaits the extension factory), so the user always sees what is
@@ -526,6 +532,8 @@ export default async function (pi: PiApi): Promise<void> {
     extensions: string[];
     /** newer pi core on npm (null → up-to-date / check not finished) */
     updateAvailable: UpdateAvailable | null;
+    /** last completed check, unix ms (absent → check not finished) */
+    updateCheckedAt?: number;
   } => {
     // Context: global agent dir + AGENTS.md/CLAUDE.md from cwd up to the root
     const contextFiles: string[] = [];
@@ -584,6 +592,7 @@ export default async function (pi: PiApi): Promise<void> {
       skills,
       extensions,
       updateAvailable: updateCheckResult,
+      updateCheckedAt: updateCheckedAt ?? undefined,
     };
   };
 
@@ -619,7 +628,7 @@ export default async function (pi: PiApi): Promise<void> {
   const registerCommand = (): void => {
     pi.registerCommand("piw", {
       description:
-        "Manage the webview IDE integration (status, install, reinstall, uninstall)",
+        "Manage the webview IDE integration (status, install, reinstall, uninstall, update checks)",
       handler: async (args, ctx) => {
         const [sub] = args.trim().split(/\s+/, 1);
         const notify = ctx.ui.notify;
@@ -878,9 +887,54 @@ export default async function (pi: PiApi): Promise<void> {
             }
             return;
           }
+          case "update.check": {
+            // manual re-check from the webview header shield (blue =
+            // up-to-date): LIVE check (no cache), refresh the per-process
+            // startup-info file the webview polls, report the outcome in the
+            // chat. The webview switches the shield to the update state when
+            // the stamped updateCheckedAt lands with updateAvailable set.
+            if (updateCheckRunning) {
+              notify(
+                "pi-webview: an update check is already running — wait for it to finish.",
+                "info",
+              );
+              return;
+            }
+            updateCheckRunning = true;
+            try {
+              const r = await checkPiUpdate({ projectDir: process.cwd() });
+              const checkedAt = Date.now();
+              updateCheckResult = r;
+              updateCheckedAt = checkedAt;
+              const info = collectStartupInfo(process.cwd());
+              writeStartupInfoFile({
+                ...info,
+                updateAvailable: r,
+                updateCheckedAt: checkedAt,
+              });
+              const parts: string[] = [];
+              if (r?.core) parts.push(`pi core v${r.core.current} → v${r.core.latest}`);
+              for (const e of r?.extensions ?? [])
+                parts.push(`${e.name} v${e.current} → v${e.latest}`);
+              notify(
+                parts.length > 0
+                  ? `pi-webview: updates available: ${parts.join("; ")}`
+                  : "pi-webview: pi core and all extensions are up to date.",
+                "info",
+              );
+            } catch (err) {
+              notify(
+                `pi-webview: update check failed: ${err instanceof Error ? err.message : String(err)}`,
+                "error",
+              );
+            } finally {
+              updateCheckRunning = false;
+            }
+            return;
+          }
           default:
             notify(
-              "pi-webview: subcommands: status | install | reinstall | uninstall | update.pi.core.exts",
+              "pi-webview: subcommands: status | install | reinstall | uninstall | update.check | update.pi.core.exts",
               "info",
             );
         }

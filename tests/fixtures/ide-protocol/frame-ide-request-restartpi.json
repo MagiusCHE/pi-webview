@@ -1,0 +1,4 @@
+{
+  "channel": "ide",
+  "payload": { "type": "restartPi", "id": "ide-1" }
+}

@@ -26,6 +26,7 @@ public sealed class UserConfigStore
         Theme = "system",
         HistoryLimit = 30,
         StatsBarPosition = "above",
+        AgenticThinking = false,
     };
 
     private UserConfig _config;
@@ -55,6 +56,7 @@ public sealed class UserConfigStore
                 Notifications = parsed.Notifications,
                 StatsBarPosition = parsed.StatsBarPosition ?? Default.StatsBarPosition,
                 StatsBarCompact = parsed.StatsBarCompact,
+                AgenticThinking = parsed.AgenticThinking,
                 HiddenStatusKeys = parsed.HiddenStatusKeys?
                     .Where(key => !string.IsNullOrWhiteSpace(key))
                     .Distinct(StringComparer.Ordinal)
@@ -102,6 +104,11 @@ public sealed class UserConfigStore
         {
             _config.StatsBarCompact = compact.GetBoolean();
         }
+        if (patch.TryGetValue("agenticThinking", out var agenticThinking) &&
+            agenticThinking.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            _config.AgenticThinking = agenticThinking.GetBoolean();
+        }
         if (patch.TryGetValue("hiddenStatusKeys", out var hidden) &&
             hidden.ValueKind == JsonValueKind.Array)
         {
@@ -134,6 +141,7 @@ public sealed class UserConfigStore
         Notifications = c.Notifications,
         StatsBarPosition = c.StatsBarPosition,
         StatsBarCompact = c.StatsBarCompact,
+        AgenticThinking = c.AgenticThinking,
         HiddenStatusKeys = c.HiddenStatusKeys is null ? null : new List<string>(c.HiddenStatusKeys),
     };
 }

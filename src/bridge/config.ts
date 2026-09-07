@@ -18,6 +18,7 @@ export const DEFAULT_CONFIG: UserConfig = {
   theme: "system",
   historyLimit: 120,
   statsBarPosition: "above",
+  agenticThinking: false,
 };
 
 // default thresholds of pi's automatic compaction (config ~/.pi/config.json)

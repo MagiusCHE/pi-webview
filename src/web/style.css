@@ -971,6 +971,95 @@ header {
   word-break: break-word;
 }
 
+/* --- optional agentic flow: one collapsible block for thoughts + tools --- */
+.agentic-thinking-card {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-elevated) 55%, var(--bg));
+  overflow: hidden;
+  text-align: left;
+}
+.agentic-thinking-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  padding: 4px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.agentic-thinking-head:hover {
+  background: var(--hover);
+}
+.agentic-thinking-spinner {
+  width: 13px;
+  height: 13px;
+}
+.agentic-thinking-label {
+  flex: 0 0 auto;
+  color: var(--fg-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.agentic-thinking-counts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 11.5px;
+}
+.agentic-thinking-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+.agentic-thinking-count::before {
+  content: "";
+  width: 1px;
+  height: 11px;
+  margin: 0 8px;
+  background: var(--border);
+}
+.agentic-thinking-count strong {
+  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+.agentic-thinking-timer {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.agentic-thinking-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 2px 9px 9px;
+  border-top: 1px solid var(--border);
+}
+.agentic-thinking-body[hidden] {
+  display: none;
+}
+.agentic-thinking-body > .thinking-card,
+.agentic-thinking-body > .tool-card {
+  margin-top: 0;
+}
+.agentic-thinking-member .thinking-head {
+  cursor: default;
+}
+.agentic-thinking-member .thinking-head:hover .thinking-label {
+  color: var(--fg-secondary);
+}
+
 /* --- thinking: loader while processing, content at the end --- */
 .thinking-card {
   width: 100%;

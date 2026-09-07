@@ -92,6 +92,7 @@ public sealed class UserConfigStoreTests : IDisposable
         Assert.Equal(30, store.Get().HistoryLimit);
         Assert.Equal("above", store.Get().StatsBarPosition);
         Assert.Null(store.Get().StatsBarCompact);
+        Assert.False(store.Get().AgenticThinking);
     }
 
     [Fact]
@@ -106,6 +107,7 @@ public sealed class UserConfigStoreTests : IDisposable
               "notifications": "desktop",
               "statsBarPosition": "topbar",
               "statsBarCompact": true,
+              "agenticThinking": true,
               "hiddenStatusKeys": ["mcp", "control", "mcp"]
             }
             """);
@@ -121,6 +123,7 @@ public sealed class UserConfigStoreTests : IDisposable
         Assert.Equal("desktop", reloaded.Notifications);
         Assert.Equal("topbar", reloaded.StatsBarPosition);
         Assert.True(reloaded.StatsBarCompact);
+        Assert.True(reloaded.AgenticThinking);
         Assert.Equal(new[] { "mcp", "control" }, reloaded.HiddenStatusKeys);
     }
 
@@ -134,6 +137,7 @@ public sealed class UserConfigStoreTests : IDisposable
               "historyLimit": 0,
               "statsBarPosition": "left",
               "statsBarCompact": "yes",
+              "agenticThinking": "yes",
               "hiddenStatusKeys": "mcp"
             }
             """);
@@ -144,6 +148,7 @@ public sealed class UserConfigStoreTests : IDisposable
         Assert.Equal(30, store.Get().HistoryLimit);
         Assert.Equal("above", store.Get().StatsBarPosition);
         Assert.Null(store.Get().StatsBarCompact);
+        Assert.False(store.Get().AgenticThinking);
         Assert.Null(store.Get().HiddenStatusKeys);
     }
 }

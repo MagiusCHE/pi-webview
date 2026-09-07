@@ -24,15 +24,17 @@ The terminal TUI of pi limits interaction: no rich markdown, no proper mouse/tex
 
 ### What works today
 
-- **Chat in the browser** (standalone): streaming markdown, thinking blocks with elapsed seconds, collapsible tool cards with command summaries, copy buttons, smart auto-scroll
-- **IDE integration**: the same UI in **VS Code**, **Visual Studio 2022** and **Visual Studio 2026**, distributed as a pi package with companion auto-install. VS Code includes editor selection context and native dialogs (`select`/`confirm`/`input` via `showQuickPick`/`showWarningMessage`/`showInputBox`); editor selection works only in the **sidebar view** (inhibited in editor-area panels, where focus would clear it)
-- **Sessions**: dropdown with current folder (`./…`) / All filter, switch, **fork of sessions from other folders** (same behavior as pi), new session; standalone browser refresh resumes the same session and workspace
-- **Composer controls**: model picker, thinking level, project **trust** (writes `~/.pi/agent/trust.json`, with confirmation for full access)
-- **Attachments**: paste and drag & drop of files and images — previews in chat; images sent inline when the model supports vision, otherwise as file paths
-- **Extension UI**: status and widget areas set by pi extensions (`setStatus`/`setWidget` via `extension_ui_request`) rendered live in the chat footer (see screenshot above); the status bar has independent placement/compactness controls and each source can be hidden with confirmation, then restored in settings
-- **Themes** (light/dark/system) and **i18n** (it/en), settings modal
-- **pi.dev CLI flags in settings** — dynamic per-session launch flags (e.g. `--session-control`), applied via a transparent pi restart, stored in the session file
-- **Extensibility base**: `pi --mode rpc` bridge, transport-agnostic UI (WebSocket standalone, `postMessage` in the IDE webview)
+- **Shared chat UI**: streaming markdown, thinking with elapsed time, collapsible tool cards, copy actions and smart auto-scroll in the browser and supported IDEs
+- **Optional Agentic thinking view**: groups consecutive thoughts and tool calls, reports live `thought`, `read`, `write`, `bash` and `tools` counters, and keeps `ask_user` and visible assistant text as explicit chain boundaries
+- **IDE integration**: the same UI in **VS Code**, **Visual Studio 2022** and **Visual Studio 2026**, distributed as a pi package with companion auto-install. VS Code includes editor selection context and native dialogs; selection is intentionally limited to the sidebar view
+- **Sessions**: folder filtering, switching, forking across workspaces, renaming, deletion and creation; resume summaries include activity, compactions and session-file size
+- **Browser-safe attachments**: paste, drag and drop, and a paperclip picker. Standalone selection happens on the browser device, then uploads the bytes to the bridge instead of browsing the bridge host filesystem
+- **Header operations**: host-level pi reload, an always-visible live update shield, session controls and connection state
+- **Extension UI**: `setStatus`/`setWidget` output rendered live; status placement, compactness and hidden sources are configurable
+- **Themes and localization**: light/dark/system themes and Italian/English UI
+- **pi.dev controls**: staged settings and dynamic per-session CLI flags, applied through transparent pi restarts
+- **RPC safety**: supported built-in slash commands are handled by the client so terminal-only commands cannot leak into model prompts
+- **Extensibility base**: `pi --mode rpc` bridge and a transport-agnostic UI using WebSocket, VS Code `postMessage` or Visual Studio WebView2
 
 ### Roadmap
 
@@ -41,16 +43,6 @@ The terminal TUI of pi limits interaction: no rich markdown, no proper mouse/tex
 - **Code highlighting** in markdown blocks, better diffs
 - **CI / test matrix** on Linux/macOS/Windows (VSIX build and release pipeline already in place: `pnpm release`)
 - **More locales** and more IDE adapters (e.g. open the bridge in a browser from JetBrains)
-
-## Features
-
-- **Full chat UI** — streaming markdown (`marked` + `DOMPurify`), thinking blocks with spinner + elapsed seconds, collapsible tool cards with command summaries, copy buttons on code blocks
-- **Standalone & IDE-ready** — a Node bridge spawns `pi --mode rpc` and exposes it over a local WebSocket; the same UI runs inside the VS Code webview via `postMessage` (transport-agnostic)
-- **Session management** — dropdown with the current session (first message / name, message count, relative age), folder filter (`./project` / All), session switching, fork of sessions from other folders (same behavior as pi), new session
-- **Model & controls in the composer** — switch model (list from pi), thinking level, project trust level (writes `~/.pi/agent/trust.json`, with confirmation for full access)
-- **Attachments** — paste or drag & drop files and images: previews in the composer and in chat; images sent inline when the model supports vision, otherwise as file paths (vision detected from the model's capabilities)
-- **Themes** — light / dark / system (default), following the OS and derived from `--vscode-*` tokens when in an IDE webview
-- **i18n** — Italian and English (pattern: JSON per language, browser locale detection, saved preference)
 
 ## Architecture
 
@@ -70,7 +62,7 @@ The terminal TUI of pi limits interaction: no rich markdown, no proper mouse/tex
 └──────────────────────────────────────────────────┘
 ```
 
-The bridge does **not** interpret messages: it forwards JSONL frames between pi (stdio) and the UI (WebSocket, loopback + auth token). This mirrors the lock-file pattern of the "Pi x IDE" extension.
+The bridge forwards pi JSONL frames between stdio and the authenticated WebSocket UI, while handling environment services such as sessions, configuration, attachments and trust. It is loopback-only by default; explicit IPv4 binding keeps token authentication mandatory for non-loopback clients.
 
 ## Requirements
 
@@ -157,7 +149,7 @@ User config lives in the OS user config directory:
 - macOS: `~/Library/Application Support/pi-webview/config.json`
 - Windows: `%APPDATA%\pi-webview\config.json`
 
-Currently stores the theme preference and the history limit; future settings will be added there.
+It stores global presentation preferences: theme, locale, history limit, notification default, status-bar placement and compactness, hidden status sources, and the optional Agentic thinking mode. Per-session CLI flags and notification overrides remain session data rather than global configuration.
 
 ## Project structure
 

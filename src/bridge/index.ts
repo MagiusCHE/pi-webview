@@ -690,8 +690,8 @@ function main(): void {
         return;
       }
       if (req.type === "pickFile") {
-        // standalone: the browser cannot open the VS Code dialog — the attach
-        // button is hidden outside the IDE; answer an error just in case
+        // Standalone uses its local HTML file picker and uploads the selected
+        // bytes with saveAttachment, so this host-only request is never needed.
         respond(req.id ?? "", {
           ok: false,
           error: "pickFile: solo nell'IDE (VS Code)",

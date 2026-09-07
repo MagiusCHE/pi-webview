@@ -51,6 +51,12 @@ import {
   type ToolSummary,
 } from "./tool-summary.ts";
 import {
+  agenticToolMetric,
+  emptyAgenticCounts,
+  type AgenticCounts,
+  type AgenticMetric,
+} from "./agentic-thinking.ts";
+import {
   attachEditorSelectionContext,
   stripEditorSelectionContext,
   type ActiveEditorSelection,
@@ -114,6 +120,13 @@ const els = {
   langLabel: document.getElementById("settings-lang-label") as HTMLLabelElement,
   historyInput: document.getElementById("settings-history-limit") as HTMLInputElement,
   historyLabel: document.getElementById("settings-history-label") as HTMLLabelElement,
+  agenticThinking: document.getElementById("agentic-thinking") as HTMLInputElement,
+  agenticThinkingLabel: document.getElementById(
+    "settings-agentic-thinking-label",
+  ) as HTMLLabelElement,
+  agenticThinkingNote: document.getElementById(
+    "settings-agentic-thinking-note",
+  ) as HTMLElement,
   notificationsLabel: document.getElementById(
     "settings-notifications-label",
   ) as HTMLLabelElement,
@@ -190,6 +203,7 @@ const els = {
   dropOverlayText: document.getElementById("drop-overlay-text") as HTMLSpanElement,
   send: document.getElementById("btn-send") as HTMLButtonElement,
   attachBtn: document.getElementById("btn-attach") as HTMLButtonElement,
+  browserFilePicker: document.getElementById("browser-file-picker") as HTMLInputElement,
   trust: document.getElementById("trust") as HTMLButtonElement,
   trustIcon: document.getElementById("trust-icon") as HTMLSpanElement,
   trustLabel: document.getElementById("trust-label") as HTMLSpanElement,
@@ -374,15 +388,17 @@ function setupTransport(tr: Transport): void {
     if (s.state === "open") {
       connectionOpened = true;
       els.connectPanel.hidden = true;
-      requestConfig();
-      if (!demoMode) {
-        void (async () => {
+      void (async () => {
+        // Config must be known before history rendering: presentation-only
+        // preferences such as agenticThinking apply to the complete reload.
+        await requestConfig();
+        if (!demoMode) {
           // loading begins NOW (before get_state): slow extensions logging
           // during the resume must land in the loader box, not in the chat
           beginSessionLoading();
           await refreshSessions(true);
-        })();
-      }
+        }
+      })();
     } else if (s.state === "closed") {
       endSessionLoading();
       hideBootLoader();
@@ -483,6 +499,8 @@ let notificationsDefault: "desktop" | "vscode" | "off" = "desktop";
 let statsBarPosition: StatsBarPosition = "above";
 /** truncation or multi-line wrapping, independent from placement */
 let statsBarCompact = true;
+/** global display preference: group each agent run's thoughts and tools */
+let agenticThinking = false;
 /** RPC setStatus keys hidden by the user (the only stable source id RPC exposes) */
 let hiddenStatusKeys: string[] = [];
 let sessionNotificationsOverride: "desktop" | "vscode" | "off" | undefined;
@@ -554,6 +572,7 @@ function applyUiStrings(): void {
   els.connectUrl.placeholder = t("bridgeUrlPlaceholder");
   els.connectBtn.textContent = t("connect");
   els.send.title = t("send");
+  els.attachBtn.title = t("attachBtn");
   els.newChat.title = t("newChat");
   els.updateModalTitle.textContent = t("updateModalTitle");
   els.updateModalDesc.textContent = t("updateModalDesc");
@@ -572,6 +591,12 @@ function applyUiStrings(): void {
   els.langLabel.textContent = t("language");
   els.historyLabel.textContent = t("historyLimit");
   els.historyInput.value = String(historyLimit);
+  els.agenticThinkingLabel.textContent = t("settingsAgenticThinking");
+  els.agenticThinkingLabel.title = t("settingsAgenticThinkingDesc");
+  els.agenticThinking.title = t("settingsAgenticThinkingDesc");
+  els.agenticThinkingNote.textContent = t("settingsAgenticThinkingDesc");
+  els.agenticThinking.checked = agenticThinking;
+  refreshAgenticThinkingSummaries();
   // settings modal: 4 sections (Info / Webview / pi.dev / CLI flags)
   els.settingsInfoTitle.textContent = t("settingsSectionInfo");
   els.settingsWebviewTitle.textContent = t("settingsSectionWebview");
@@ -705,45 +730,46 @@ function renderHiddenStatusSettings(): void {
   }
 }
 
-function requestConfig(): void {
-  void ideRequest({ type: "getConfig" }).then((res) => {
-    if (res?.ok && typeof res.data === "object" && res.data !== null) {
-      const cfg = res.data as Partial<UserConfig>;
-      if (cfg.theme && !forcedTheme) {
-        themePref = cfg.theme;
-        applyTheme(themePref);
-      }
-      const loc = cfg.locale ?? null;
-      if (isLocaleId(loc)) setLocale(loc);
-      if (typeof cfg.historyLimit === "number" && cfg.historyLimit >= 1) {
-        historyLimit = Math.floor(cfg.historyLimit);
-      }
-      if (
-        cfg.notifications === "desktop" ||
-        cfg.notifications === "vscode" ||
-        cfg.notifications === "off"
-      ) {
-        notificationsDefault = cfg.notifications;
-      }
-      const sbp = cfg.statsBarPosition;
-      const effectivePosition =
-        sbp === "above" || sbp === "below" || sbp === "topbar" ? sbp : statsBarPosition;
-      applyStatsBarPosition(effectivePosition);
-      const effectiveCompact = effectiveStatsBarCompact(
-        cfg.statsBarCompact,
-        effectivePosition,
-      );
-      applyStatsBarCompact(effectiveCompact);
-      // One-time migration from the old placement-dependent layout. Persisting
-      // the inferred value makes later position changes truly independent.
-      if (typeof cfg.statsBarCompact !== "boolean") {
-        persistWebviewConfig({ statsBarCompact: effectiveCompact });
-      }
-      hiddenStatusKeys = normalizeHiddenStatusKeys(cfg.hiddenStatusKeys);
-      renderStatusSlots();
-      applyUiStrings();
+async function requestConfig(): Promise<void> {
+  const res = await ideRequest({ type: "getConfig" });
+  if (res?.ok && typeof res.data === "object" && res.data !== null) {
+    const cfg = res.data as Partial<UserConfig>;
+    if (cfg.theme && !forcedTheme) {
+      themePref = cfg.theme;
+      applyTheme(themePref);
     }
-  });
+    const loc = cfg.locale ?? null;
+    if (isLocaleId(loc)) setLocale(loc);
+    if (typeof cfg.historyLimit === "number" && cfg.historyLimit >= 1) {
+      historyLimit = Math.floor(cfg.historyLimit);
+    }
+    if (
+      cfg.notifications === "desktop" ||
+      cfg.notifications === "vscode" ||
+      cfg.notifications === "off"
+    ) {
+      notificationsDefault = cfg.notifications;
+    }
+    const sbp = cfg.statsBarPosition;
+    const effectivePosition =
+      sbp === "above" || sbp === "below" || sbp === "topbar" ? sbp : statsBarPosition;
+    applyStatsBarPosition(effectivePosition);
+    const effectiveCompact = effectiveStatsBarCompact(
+      cfg.statsBarCompact,
+      effectivePosition,
+    );
+    applyStatsBarCompact(effectiveCompact);
+    // One-time migration from the old placement-dependent layout. Persisting
+    // the inferred value makes later position changes truly independent.
+    if (typeof cfg.statsBarCompact !== "boolean") {
+      persistWebviewConfig({ statsBarCompact: effectiveCompact });
+    }
+    agenticThinking = cfg.agenticThinking === true;
+    els.agenticThinking.checked = agenticThinking;
+    hiddenStatusKeys = normalizeHiddenStatusKeys(cfg.hiddenStatusKeys);
+    renderStatusSlots();
+    applyUiStrings();
+  }
 }
 
 function handleIdeResponse(res: IdeResponse): void {
@@ -771,6 +797,17 @@ function handleIdeResponse(res: IdeResponse): void {
     }
     if (typeof cfg.statsBarCompact === "boolean") {
       applyStatsBarCompact(cfg.statsBarCompact);
+    }
+    if (
+      typeof cfg.agenticThinking === "boolean" &&
+      cfg.agenticThinking !== agenticThinking
+    ) {
+      agenticThinking = cfg.agenticThinking;
+      els.agenticThinking.checked = agenticThinking;
+      // Enabling starts a fresh future chain. When disabling, keep the old
+      // pointer only long enough to clean up a pending waiting-only block.
+      if (agenticThinking) activeAgenticBlock = null;
+      agenticRunStartedAt = agenticThinking && working ? performance.now() : 0;
     }
     if (Object.prototype.hasOwnProperty.call(cfg, "hiddenStatusKeys")) {
       hiddenStatusKeys = normalizeHiddenStatusKeys(cfg.hiddenStatusKeys);
@@ -1642,6 +1679,17 @@ els.statsBarPos.addEventListener("change", () => {
 els.statsBarCompact.addEventListener("change", () => {
   applyStatsBarCompact(els.statsBarCompact.checked);
   persistWebviewConfig({ statsBarCompact });
+});
+
+// This preference changes only how future events are presented. Existing DOM
+// stays untouched; reloading the session reconstructs all history in the new mode.
+els.agenticThinking.addEventListener("change", () => {
+  agenticThinking = els.agenticThinking.checked;
+  // Enabling starts a fresh future chain. When disabling, keep the old
+  // pointer only long enough to clean up a pending waiting-only block.
+  if (agenticThinking) activeAgenticBlock = null;
+  agenticRunStartedAt = agenticThinking && working ? performance.now() : 0;
+  persistWebviewConfig({ agenticThinking });
 });
 
 // history limit: saved in the config and re-applied right away (truncates from the top)
@@ -2742,6 +2790,215 @@ chatBlockObserver.observe(els.thread, { childList: true, subtree: true });
 const chatSizeObserver = new ResizeObserver(() => scrollToBottom());
 chatSizeObserver.observe(els.thread);
 
+interface AgenticBlock {
+  wrapper: HTMLElement;
+  root: HTMLElement;
+  body: HTMLElement;
+  spinner: HTMLElement | null;
+  timer: HTMLElement;
+  startedAt: number | null;
+  clock: ReturnType<typeof setInterval> | null;
+}
+
+const AGENTIC_METRICS: AgenticMetric[] = ["thought", "read", "write", "bash", "tools"];
+const AGENTIC_LABELS: Record<AgenticMetric, string> = {
+  thought: "agenticThought",
+  read: "agenticRead",
+  write: "agenticWrite",
+  bash: "agenticBash",
+  tools: "agenticTools",
+};
+let activeAgenticBlock: AgenticBlock | null = null;
+let agenticRunStartedAt = 0;
+const runningAgenticBlocks = new Set<AgenticBlock>();
+
+function agenticCounts(root: HTMLElement): AgenticCounts {
+  return {
+    thought: Number(root.dataset.countThought ?? 0),
+    read: Number(root.dataset.countRead ?? 0),
+    write: Number(root.dataset.countWrite ?? 0),
+    bash: Number(root.dataset.countBash ?? 0),
+    tools: Number(root.dataset.countTools ?? 0),
+  };
+}
+
+function storeAgenticCounts(root: HTMLElement, counts: AgenticCounts): void {
+  root.dataset.countThought = String(counts.thought);
+  root.dataset.countRead = String(counts.read);
+  root.dataset.countWrite = String(counts.write);
+  root.dataset.countBash = String(counts.bash);
+  root.dataset.countTools = String(counts.tools);
+}
+
+function renderAgenticThinkingSummary(root: HTMLElement): void {
+  const label = root.querySelector<HTMLElement>(".agentic-thinking-label");
+  if (label) label.textContent = t("agenticThinking");
+  const summary = root.querySelector<HTMLElement>(".agentic-thinking-counts");
+  if (!summary) return;
+  summary.replaceChildren();
+  const counts = agenticCounts(root);
+  for (const metric of AGENTIC_METRICS) {
+    const count = counts[metric];
+    if (count <= 0) continue;
+    const item = document.createElement("span");
+    item.className = "agentic-thinking-count";
+    const name = document.createElement("span");
+    name.textContent = t(AGENTIC_LABELS[metric]);
+    const value = document.createElement("strong");
+    value.textContent = String(count);
+    item.append(name, value);
+    summary.appendChild(item);
+  }
+}
+
+function refreshAgenticThinkingSummaries(): void {
+  for (const root of els.thread.querySelectorAll<HTMLElement>(".agentic-thinking-card")) {
+    renderAgenticThinkingSummary(root);
+  }
+}
+
+function updateAgenticMetric(
+  root: HTMLElement,
+  metric: AgenticMetric,
+  delta: number,
+): void {
+  const counts = agenticCounts(root);
+  counts[metric] = Math.max(0, counts[metric] + delta);
+  storeAgenticCounts(root, counts);
+  renderAgenticThinkingSummary(root);
+}
+
+function createAgenticBlock(before?: HTMLElement | null, live = false): AgenticBlock {
+  const wrapper = addMsg("assistant");
+  wrapper.classList.add("agentic-thinking-wrapper");
+  if (before?.parentElement === els.thread) els.thread.insertBefore(wrapper, before);
+
+  const root = document.createElement("div");
+  root.className = "agentic-thinking-card";
+  storeAgenticCounts(root, emptyAgenticCounts());
+
+  const head = document.createElement("div");
+  head.className = "agentic-thinking-head";
+  head.setAttribute("role", "button");
+  head.tabIndex = 0;
+  const spinner = live ? document.createElement("span") : null;
+  if (spinner) spinner.className = "spinner agentic-thinking-spinner";
+  const label = document.createElement("span");
+  label.className = "agentic-thinking-label";
+  const counts = document.createElement("span");
+  counts.className = "agentic-thinking-counts";
+  const timer = document.createElement("span");
+  timer.className = "agentic-thinking-timer";
+  timer.hidden = !live;
+  if (spinner) head.appendChild(spinner);
+  head.append(label, counts, timer);
+
+  const body = document.createElement("div");
+  body.className = "agentic-thinking-body";
+  const toggle = (): void => {
+    setThinkingBodyExpanded(body, body.hidden);
+    updateThinkingBlocksButton();
+  };
+  head.addEventListener("click", toggle);
+  head.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    toggle();
+  });
+
+  root.append(head, body);
+  wrapper.appendChild(root);
+  setThinkingBodyExpanded(body, thinkingBlocksExpandedByDefault());
+  renderAgenticThinkingSummary(root);
+  updateThinkingBlocksButton();
+  const block: AgenticBlock = {
+    wrapper,
+    root,
+    body,
+    spinner,
+    timer,
+    startedAt: live ? agenticRunStartedAt || performance.now() : null,
+    clock: null,
+  };
+  if (live && block.startedAt !== null) {
+    timer.textContent = fmtToolTime(performance.now() - block.startedAt);
+    block.clock = setInterval(() => {
+      if (block.startedAt !== null) {
+        timer.textContent = fmtToolTime(performance.now() - block.startedAt);
+      }
+    }, 200);
+    runningAgenticBlocks.add(block);
+  }
+  return block;
+}
+
+function finishAgenticBlock(block: AgenticBlock, durationMs?: number): void {
+  if (block.clock) clearInterval(block.clock);
+  block.clock = null;
+  block.spinner?.remove();
+  block.spinner = null;
+  const elapsed =
+    durationMs ?? (block.startedAt === null ? null : performance.now() - block.startedAt);
+  if (elapsed !== null && elapsed >= 0) {
+    block.timer.hidden = false;
+    block.timer.textContent = fmtToolTime(elapsed);
+  }
+  block.startedAt = null;
+  runningAgenticBlocks.delete(block);
+}
+
+function finishRunningAgenticBlocks(): void {
+  for (const block of runningAgenticBlocks) finishAgenticBlock(block);
+}
+
+function breakAgenticChain(): void {
+  removeEmptyActiveAgenticBlock();
+  finishRunningAgenticBlocks();
+  activeAgenticBlock = null;
+  agenticRunStartedAt = 0;
+}
+
+function ensureLiveAgenticBlock(): AgenticBlock | null {
+  if (!agenticThinking) return null;
+  if (activeAgenticBlock?.root.isConnected) return activeAgenticBlock;
+  if (!currentMsg) openAssistantBubble();
+  // Once visible model text has started, subsequent thinking/tools form a new
+  // chain after that message instead of being inserted before it.
+  const before = markdownAccum.length > 0 ? undefined : currentMsg;
+  if (!agenticRunStartedAt) agenticRunStartedAt = performance.now();
+  activeAgenticBlock = createAgenticBlock(before, true);
+  return activeAgenticBlock;
+}
+
+function registerAgenticThought(card: HTMLElement): void {
+  const root = card.closest<HTMLElement>(".agentic-thinking-card");
+  if (!root || card.dataset.agenticThought === "true") return;
+  card.dataset.agenticThought = "true";
+  updateAgenticMetric(root, "thought", 1);
+}
+
+function registerAgenticTool(card: HTMLElement, name: string): void {
+  const root = card.closest<HTMLElement>(".agentic-thinking-card");
+  if (!root || !name) return;
+  const metric = agenticToolMetric(name);
+  const previous = card.dataset.agenticMetric as AgenticMetric | undefined;
+  if (previous === metric) return;
+  if (previous) updateAgenticMetric(root, previous, -1);
+  card.dataset.agenticMetric = metric;
+  updateAgenticMetric(root, metric, 1);
+}
+
+function removeEmptyActiveAgenticBlock(): void {
+  const block = activeAgenticBlock;
+  if (!block || block.body.hasChildNodes()) return;
+  const counts = agenticCounts(block.root);
+  if (AGENTIC_METRICS.some((metric) => counts[metric] > 0)) return;
+  finishAgenticBlock(block);
+  block.wrapper.remove();
+  activeAgenticBlock = null;
+  updateThinkingBlocksButton();
+}
+
 function openAssistantBubble(): void {
   // a SECOND stream_start for the same message (e.g. provider retry that
   // re-issues message_start without a message_end in between): REUSE the
@@ -2833,7 +3090,7 @@ function thinkingBlocksExpandedByDefault(): boolean {
 function thinkingBodies(): HTMLElement[] {
   return Array.from(
     els.thread.querySelectorAll<HTMLElement>(
-      ".thinking-card.thought-card > .thinking-content",
+      ".thinking-card.thought-card:not(.agentic-thinking-member) > .thinking-content, .agentic-thinking-body",
     ),
   );
 }
@@ -2841,7 +3098,10 @@ function thinkingBodies(): HTMLElement[] {
 function setThinkingBodyExpanded(body: HTMLElement, expanded: boolean): void {
   body.hidden = !expanded;
   const head = body.previousElementSibling;
-  if (head?.classList.contains("thinking-head")) {
+  if (
+    head?.classList.contains("thinking-head") ||
+    head?.classList.contains("agentic-thinking-head")
+  ) {
     head.setAttribute("aria-expanded", String(expanded));
   }
 }
@@ -2859,15 +3119,24 @@ function updateThinkingBlocksButton(): void {
   els.thinkingBlocks.setAttribute("aria-expanded", String(allExpanded));
 }
 
-function activateThinkingCard(card: HTMLElement, body: HTMLElement): void {
+function activateThinkingCard(
+  card: HTMLElement,
+  body: HTMLElement,
+  insideAgenticBlock = false,
+): void {
   card.classList.add("thought-card");
-  setThinkingBodyExpanded(body, thinkingBlocksExpandedByDefault());
+  if (insideAgenticBlock) card.classList.add("agentic-thinking-member");
+  setThinkingBodyExpanded(
+    body,
+    insideAgenticBlock ? true : thinkingBlocksExpandedByDefault(),
+  );
 }
 
 function wireThinkingHead(head: HTMLElement, body: HTMLElement): void {
   head.setAttribute("role", "button");
   head.tabIndex = 0;
   const toggle = (): void => {
+    if (body.closest(".agentic-thinking-card")) return;
     setThinkingBodyExpanded(body, body.hidden);
     updateThinkingBlocksButton();
   };
@@ -2943,7 +3212,9 @@ function flushThinkingContentRender(): void {
 }
 
 function ensureThinkingLoader(): HTMLElement {
-  if (!thinkingEl && thinkingSlot) {
+  const agenticBlock = ensureLiveAgenticBlock();
+  const destination = agenticBlock?.body ?? thinkingSlot;
+  if (!thinkingEl && destination) {
     thinkingEl = document.createElement("div");
     thinkingEl.className = "thinking-card";
     const { head, spinner, timer } = makeThinkingHead();
@@ -2953,12 +3224,15 @@ function ensureThinkingLoader(): HTMLElement {
     thinkingContentEl.className = "thinking-content";
     thinkingRenderedLength = 0;
     thinkingTextNode = null;
-    activateThinkingCard(thinkingEl, thinkingContentEl);
-    wireThinkingHead(head, thinkingContentEl);
+    activateThinkingCard(thinkingEl, thinkingContentEl, !!agenticBlock);
+    if (!agenticBlock) wireThinkingHead(head, thinkingContentEl);
     thinkingEl.append(head, thinkingContentEl);
-    thinkingSlot.appendChild(thinkingEl);
+    destination.appendChild(thinkingEl);
+    registerAgenticThought(thinkingEl);
     updateThinkingBlocksButton();
-    applyToolChain(); // first thinking block: evaluate the 3px gap with the previous one
+    if (!agenticBlock) {
+      applyToolChain(); // first thinking block: evaluate the 3px gap with the previous one
+    }
     startThinkingTimer();
     scrollToBottom();
   }
@@ -3020,11 +3294,13 @@ function armWaitingResponse(): void {
 
 function showWaitingBlock(): void {
   if (waitingCardEl) return;
-  // Materialize the assistant bubble before the provider stream if needed.
-  // Keeping waiting in the real thinking slot avoids an empty sibling message
-  // and therefore prevents either vertical gap from changing on promotion.
+  // In agentic mode waiting is part of the current consecutive chain from the
+  // beginning. The first content decides whether the block continues
+  // (thinking/tool) or closes before visible text / ask_user.
   if (!currentMsg || !thinkingSlot) openAssistantBubble();
-  if (!thinkingSlot) return;
+  const agenticBlock = agenticThinking ? ensureLiveAgenticBlock() : null;
+  const destination = agenticBlock?.body ?? thinkingSlot;
+  if (!destination) return;
   const card = document.createElement("div");
   card.className = "thinking-card waiting-card";
   waitingCardEl = card;
@@ -3047,14 +3323,10 @@ function showWaitingBlock(): void {
   content.className = "thinking-content";
   content.hidden = true;
   waitingContentEl = content;
-  wireThinkingHead(head, content);
+  if (!agenticBlock) wireThinkingHead(head, content);
   card.appendChild(content);
-  if (markdownAccum.length > 0 && currentMsg) {
-    currentMsg.appendChild(card);
-  } else {
-    thinkingSlot.appendChild(card);
-    applyToolChain();
-  }
+  destination.appendChild(card);
+  if (!agenticBlock) applyToolChain();
   const tick = (now: number): void => {
     if (!waitingTimerEl) {
       waitingClock = null;
@@ -3091,7 +3363,20 @@ function promoteWaitingToThinking(): void {
   thinkingContentEl = waitingContentEl;
   thinkingRenderedLength = 0;
   thinkingTextNode = null;
-  if (thinkingContentEl) activateThinkingCard(card, thinkingContentEl);
+  const agenticBlock = agenticThinking ? ensureLiveAgenticBlock() : null;
+  if (agenticBlock && card.parentElement !== agenticBlock.body) {
+    agenticBlock.body.appendChild(card);
+  }
+  const insideAgenticBlock = card.closest(".agentic-thinking-card") !== null;
+  if (thinkingContentEl) {
+    activateThinkingCard(card, thinkingContentEl, insideAgenticBlock);
+    if (insideAgenticBlock) {
+      const oldHead = thinkingContentEl.previousElementSibling as HTMLElement | null;
+      oldHead?.removeAttribute("role");
+      oldHead?.removeAttribute("tabindex");
+      registerAgenticThought(card);
+    }
+  }
   startThinkingTimer(waitingStartedAt);
   waitingCardEl = null;
   waitingTimerEl = null;
@@ -3102,7 +3387,7 @@ function promoteWaitingToThinking(): void {
   scrollToBottom();
 }
 
-function disarmWaitingResponse(): void {
+function disarmWaitingResponse(preserveEmptyAgentic = false): void {
   if (waitingTimeout) {
     clearTimeout(waitingTimeout);
     waitingTimeout = null;
@@ -3119,6 +3404,7 @@ function disarmWaitingResponse(): void {
   waitingSpinnerEl = null;
   waitingLabelEl = null;
   waitingContentEl = null;
+  if (!preserveEmptyAgentic) removeEmptyActiveAgenticBlock();
 }
 
 // --- footer slots filled by the pi EXTENSIONS (ctx.ui.setStatus) -----------
@@ -3587,15 +3873,46 @@ async function fetchSessionStats(): Promise<void> {
 
 // --- tool cards with copy ----------------------------------------------------
 
-function ensureToolCard(name?: string): HTMLElement {
+function ensureToolCard(name?: string, outsideAgentic = false): HTMLElement {
   if (!toolsEl && currentMsg) {
     // real name if already known (toolcall_start), otherwise a neutral placeholder
     toolsEl = buildToolCard({ id: "", name: name || t("tool"), args: "" });
     toolsPre = toolsEl.querySelector<HTMLPreElement>("pre");
-    currentMsg.appendChild(toolsEl);
-    applyToolChainIfToolFirst(); // first tool block: evaluate the 3px gap
+    if (outsideAgentic) {
+      const wrapper = addMsg("assistant");
+      wrapper.appendChild(toolsEl);
+      toolsEl.dataset.outsideAgentic = "true";
+    } else {
+      const agenticBlock = ensureLiveAgenticBlock();
+      (agenticBlock?.body ?? currentMsg).appendChild(toolsEl);
+      if (name) registerAgenticTool(toolsEl, name);
+      if (!agenticBlock) {
+        applyToolChainIfToolFirst(); // first tool block: evaluate the 3px gap
+      }
+    }
   }
   return toolsEl as HTMLElement;
+}
+
+function moveAskUserOutsideAgentic(card: HTMLElement): void {
+  if (card.dataset.outsideAgentic === "true") return;
+  const root = card.closest<HTMLElement>(".agentic-thinking-card");
+  const oldWrapper = root?.closest<HTMLElement>(".agentic-thinking-wrapper");
+  const metric = card.dataset.agenticMetric as AgenticMetric | undefined;
+  if (root && metric) updateAgenticMetric(root, metric, -1);
+  delete card.dataset.agenticMetric;
+  breakAgenticChain();
+  const wrapper = addMsg("assistant");
+  wrapper.appendChild(card);
+  card.dataset.outsideAgentic = "true";
+  if (
+    root &&
+    !root.querySelector(".agentic-thinking-body")?.hasChildNodes() &&
+    !AGENTIC_METRICS.some((key) => agenticCounts(root)[key] > 0)
+  ) {
+    oldWrapper?.remove();
+    updateThinkingBlocksButton();
+  }
 }
 
 // --- copy (single component, same style everywhere) ---------------------------
@@ -3697,6 +4014,7 @@ let lastAssistantText = "";
 function finalizeMessage(msg: FinalizedMessage): void {
   if (currentText) {
     // thinking before the text: the slot is already before .md in the DOM
+    const hadStreamedText = markdownAccum.length > 0;
     if (thinkingEl && !thinkingContentRendered) finishThinking();
     if (msg.thinking.trim() && !thinkingContentRendered) {
       const card = document.createElement("div");
@@ -3705,14 +4023,19 @@ function finalizeMessage(msg: FinalizedMessage): void {
       const body = document.createElement("div");
       body.className = "thinking-content";
       body.textContent = msg.thinking.trim();
-      activateThinkingCard(card, body);
-      wireThinkingHead(head, body);
+      const agenticBlock = ensureLiveAgenticBlock();
+      activateThinkingCard(card, body, !!agenticBlock);
+      if (!agenticBlock) wireThinkingHead(head, body);
       card.append(head, body);
-      thinkingSlot?.appendChild(card);
+      (agenticBlock?.body ?? thinkingSlot)?.appendChild(card);
+      registerAgenticThought(card);
       updateThinkingBlocksButton();
       thinkingContentRendered = true;
     }
     if (thinkingSlot && !thinkingSlot.hasChildNodes()) thinkingSlot.remove();
+    // Some providers only expose the authoritative text at message_end. It is
+    // still a visible-content boundary before any following tool calls.
+    if (msg.text.trim() && !hadStreamedText) breakAgenticChain();
     markdownAccum = msg.text;
     currentText.innerHTML = renderMarkdown(msg.text);
     enhanceCodeBlocks(currentText);
@@ -3722,6 +4045,7 @@ function finalizeMessage(msg: FinalizedMessage): void {
       const first = toolCalls[0];
       if (first) {
         if (toolsEl) {
+          if (first.name === "ask_user") moveAskUserOutsideAgentic(toolsEl);
           renderToolHeader(
             toolsEl.querySelector(".tool-name")!,
             toolSummary(first.name, first.args, workspacePath ?? undefined),
@@ -3733,6 +4057,7 @@ function finalizeMessage(msg: FinalizedMessage): void {
           if (header && !header.querySelector(".copy-btn"))
             addCopyButton(header, first.args);
           if (first.id) toolCardsById.set(first.id, toolsEl as HTMLElement);
+          if (first.name !== "ask_user") registerAgenticTool(toolsEl, first.name);
         } else {
           createToolCard(first);
         }
@@ -3761,7 +4086,16 @@ function finalizeMessage(msg: FinalizedMessage): void {
 
 function createToolCard(tc: ToolCallInfo): void {
   const card = buildToolCard(tc);
-  currentMsg?.appendChild(card);
+  if (tc.name === "ask_user") {
+    breakAgenticChain();
+    const wrapper = addMsg("assistant");
+    wrapper.appendChild(card);
+    card.dataset.outsideAgentic = "true";
+  } else {
+    const agenticBlock = ensureLiveAgenticBlock();
+    (agenticBlock?.body ?? currentMsg)?.appendChild(card);
+    registerAgenticTool(card, tc.name);
+  }
   if (tc.id) toolCardsById.set(tc.id, card);
 }
 
@@ -3838,7 +4172,11 @@ function buildToolCard(tc: ToolCallInfo): HTMLElement {
   return d;
 }
 
-function buildThinkingCard(content: string, durationMs = 0): HTMLElement {
+function buildThinkingCard(
+  content: string,
+  durationMs = 0,
+  insideAgenticBlock = false,
+): HTMLElement {
   const card = document.createElement("div");
   card.className = "thinking-card";
   const head = document.createElement("div");
@@ -3859,8 +4197,8 @@ function buildThinkingCard(content: string, durationMs = 0): HTMLElement {
   const body = document.createElement("div");
   body.className = "thinking-content";
   body.textContent = content;
-  activateThinkingCard(card, body);
-  wireThinkingHead(head, body);
+  activateThinkingCard(card, body, insideAgenticBlock);
+  if (!insideAgenticBlock) wireThinkingHead(head, body);
   card.append(head, body);
   return card;
 }
@@ -4304,6 +4642,19 @@ function handleToolExecution(evt: RpcEvent): void {
 
 function renderRpcEvent(evt: RpcEvent): void {
   trackWorking(evt);
+  if (evt.type === "agent_start") {
+    finishRunningAgenticBlocks();
+    activeAgenticBlock = null;
+    agenticRunStartedAt = agenticThinking ? performance.now() : 0;
+  } else if (evt.type === "turn_start" && agenticThinking && !agenticRunStartedAt) {
+    agenticRunStartedAt = performance.now();
+  }
+  if (evt.type === "agent_end" || evt.type === "agent_settled") {
+    removeEmptyActiveAgenticBlock();
+    finishRunningAgenticBlocks();
+    activeAgenticBlock = null;
+    agenticRunStartedAt = 0;
+  }
   // steering: deliver at pi.dev's point (after the turn's tool calls) and
   // reconciliation with the native pi queue
   if (evt.type === "turn_end") {
@@ -4403,13 +4754,15 @@ function renderRpcEvent(evt: RpcEvent): void {
     els.cliApplyHint.textContent = "";
     savedCliValues = currentCliValues();
     if (compacting) finishCompaction(true, "restart");
-    requestConfig();
-    if (!demoMode) {
-      // same loading semantics as the boot: extensions logging during the
-      // re-init go under the spinner, the loader ends when they settle
-      beginSessionLoading();
-      void refreshSessions(true);
-    }
+    void (async () => {
+      await requestConfig();
+      if (!demoMode) {
+        // same loading semantics as the boot: extensions logging during the
+        // re-init go under the spinner, the loader ends when they settle
+        beginSessionLoading();
+        await refreshSessions(true);
+      }
+    })();
   }
   // UI requests of the pi extensions (ctx.ui.*) → webview modals (standalone)
   if (evt.type === "extension_ui_request") {
@@ -4478,11 +4831,11 @@ function renderRpcEvent(evt: RpcEvent): void {
       openAssistantBubble();
       break;
     case "text_delta":
-      // Providers may emit several consecutive thinking content blocks. The
-      // clock stays live across their individual thinking_end events and ends
-      // only when the message actually transitions to visible text.
+      // Visible model text is a hard boundary: close the current consecutive
+      // thinking/tool chain before rendering the text itself.
       if (thinkingEl && !thinkingContentRendered) finishThinking();
       disarmWaitingResponse();
+      breakAgenticChain();
       markdownAccum += action.delta;
       scheduleMarkdownRender();
       scrollToBottom();
@@ -4516,7 +4869,9 @@ function renderRpcEvent(evt: RpcEvent): void {
       if (thinkingEl && !thinkingContentRendered) finishThinking();
       // the name arrives with toolcall_start (partial.content[index].name):
       // the card is born ALREADY with the real name, no "tool" placeholder
-      disarmWaitingResponse();
+      // Keep an empty agentic shell for normal tools so the waiting card is
+      // replaced in place; ask_user closes it below.
+      disarmWaitingResponse(agenticThinking);
       {
         const tc = action.toolCall;
         if (tc.name) {
@@ -4525,8 +4880,9 @@ function renderRpcEvent(evt: RpcEvent): void {
           if (tc.name === "ask_user") {
             askUserQuestionCounter = 0;
             currentAskUserToolId = "";
+            breakAgenticChain();
           }
-          const card = ensureToolCard(tc.name);
+          const card = ensureToolCard(tc.name, tc.name === "ask_user");
           // the timer starts AS SOON AS the card is born (args generation
           // included), not at tool_execution_start: while the diff counters
           // scroll the timer already runs. startToolTimer is idempotent (the
@@ -4565,7 +4921,7 @@ function renderRpcEvent(evt: RpcEvent): void {
     case "tool_args_delta":
       // Fallback for providers/older pi versions that omit toolcall_start.
       if (thinkingEl && !thinkingContentRendered) finishThinking();
-      disarmWaitingResponse();
+      disarmWaitingResponse(agenticThinking);
       const fallbackCard = ensureToolCard();
       startToolTimer(fallbackCard);
       setToolExecutionStatus(fallbackCard, "running");
@@ -4619,9 +4975,11 @@ function renderRpcEvent(evt: RpcEvent): void {
       break;
     case "tool_call":
       if (thinkingEl && !thinkingContentRendered) finishThinking();
-      disarmWaitingResponse();
+      disarmWaitingResponse(agenticThinking);
       if (toolsEl) {
         const tcName = action.toolCall.name;
+        if (tcName === "ask_user") moveAskUserOutsideAgentic(toolsEl);
+        else registerAgenticTool(toolsEl, tcName);
         // ask_user: the row shows the question/answer (split cards or answer
         // from the inline dialog) — do NOT overwrite it with the args at tool_call_end
         if (toolsEl.dataset.answered !== "true" && toolsEl.dataset.askUser !== "true") {
@@ -4653,10 +5011,12 @@ function renderRpcEvent(evt: RpcEvent): void {
       }
       break;
     case "message_end":
+      // Remove waiting first. In agentic mode preserve its shell until the
+      // authoritative message decides whether thinking/tools fill it or a
+      // visible-text / ask_user boundary removes it.
+      disarmWaitingResponse(agenticThinking);
       finalizeMessage(action.message);
-      // A message that produced no content (empty/error) left the waiting card
-      // hanging. The next provider request, if any, gets its own turn_start.
-      disarmWaitingResponse();
+      removeEmptyActiveAgenticBlock();
       break;
     case "system_note":
       // one box per level (error/warn/info), like the terminal console
@@ -5062,7 +5422,29 @@ function contentToText(content: unknown): string {
 
 // faithful history: text, thinking and CARDS of the used tools (like the live view)
 function renderHistory(messages: unknown[]): void {
+  finishRunningAgenticBlocks();
   els.thread.textContent = "";
+  activeAgenticBlock = null;
+  agenticRunStartedAt = 0;
+  let historyAgenticBlock: AgenticBlock | null = null;
+  let historyAgenticStartedAt = 0;
+  const finishHistoryAgenticBlock = (endedAt: number): void => {
+    if (!historyAgenticBlock) return;
+    const duration =
+      historyAgenticStartedAt > 0 && endedAt >= historyAgenticStartedAt
+        ? endedAt - historyAgenticStartedAt
+        : undefined;
+    finishAgenticBlock(historyAgenticBlock, duration);
+    historyAgenticBlock = null;
+    historyAgenticStartedAt = 0;
+  };
+  const ensureHistoryAgenticBlock = (startedAt: number): AgenticBlock => {
+    if (!historyAgenticBlock?.root.isConnected) {
+      historyAgenticBlock = createAgenticBlock();
+      historyAgenticStartedAt = startedAt;
+    }
+    return historyAgenticBlock;
+  };
   toolCardsById.clear();
   clearToolTimers();
   toolOutputPre.clear();
@@ -5084,6 +5466,7 @@ function renderHistory(messages: unknown[]): void {
     };
     const ts = parseTs(msg);
     if (msg.role === "user") {
+      finishHistoryAgenticBlock(lastTs);
       const wrapper = addMsg("user");
       const bubble = document.createElement("div");
       bubble.className = "bubble user";
@@ -5105,6 +5488,7 @@ function renderHistory(messages: unknown[]): void {
       const raw = contentToText(msg.content);
       const text = raw.replace(/<sender_info>[\s\S]*?<\/sender_info>/g, "").trim();
       if (!text) continue;
+      finishHistoryAgenticBlock(lastTs);
       const wrapper = addMsg("user");
       const card = buildSessionCard(
         (msg as { customType?: string }).customType ?? "session",
@@ -5121,11 +5505,11 @@ function renderHistory(messages: unknown[]): void {
         assistantTs > 0 && lastTs > 0 && assistantTs >= lastTs ? assistantTs - lastTs : 0;
       const textParts: string[] = [];
       const thinkingCards: HTMLElement[] = [];
-      const toolCards: HTMLElement[] = [];
+      const toolGroups: Array<{ name: string; cards: HTMLElement[] }> = [];
       for (const b of blocks) {
         if (b.type === "text" && typeof b.text === "string") textParts.push(b.text);
         else if (b.type === "thinking" && typeof b.thinking === "string")
-          thinkingCards.push(buildThinkingCard(b.thinking, thinkDur));
+          thinkingCards.push(buildThinkingCard(b.thinking, thinkDur, agenticThinking));
         else if (b.type === "toolCall" && typeof b.name === "string") {
           // same construction as the runtime; args can be a JSON string or an object
           const raw = b.arguments;
@@ -5144,7 +5528,7 @@ function renderHistory(messages: unknown[]): void {
             const questions = parseAskUserQuestions(argsJson);
             if (questions && questions.length > 0) {
               const cards = splitAskUserCard(card, b.id, questions);
-              toolCards.push(...cards);
+              toolGroups.push({ name: b.name, cards });
               continue;
             }
           }
@@ -5152,36 +5536,69 @@ function renderHistory(messages: unknown[]): void {
           if (b.name === "write") {
             renderWriteLines(card, writeLinesFromArgs(argsJson));
           }
-          toolCards.push(card);
+          toolGroups.push({ name: b.name, cards: [card] });
         }
       }
       const text = textParts.join("\n").trim();
+      const toolCards = toolGroups.flatMap((group) => group.cards);
       if (!text && thinkingCards.length === 0 && toolCards.length === 0) continue;
-      const wrapper = addMsg("assistant");
-      // 3px aggregation evaluated at creation: the message starts with
-      // thinking/tool (thinking present, or only tools without text) and the
-      // previous one ends with thinking/tool
-      const startsThinkTool =
-        thinkingCards.length > 0 || (text === "" && toolCards.length > 0);
-      const prevMsg = wrapper.previousElementSibling;
-      if (
-        startsThinkTool &&
-        prevMsg?.classList.contains("msg") &&
-        msgEndsWithThinkTool(prevMsg as Element)
-      ) {
-        wrapper.classList.add("tool-chain");
-        wrapper.style.marginTop = "-11px";
+
+      if (agenticThinking) {
+        if (thinkingCards.length > 0) {
+          const agenticBlock = ensureHistoryAgenticBlock(lastTs);
+          for (const card of thinkingCards) agenticBlock.body.appendChild(card);
+          for (let i = 0; i < thinkingCards.length; i += 1) {
+            updateAgenticMetric(agenticBlock.root, "thought", 1);
+          }
+        }
+
+        // Visible model text always terminates the preceding consecutive chain.
+        if (text) {
+          finishHistoryAgenticBlock(assistantTs);
+          const wrapper = addMsg("assistant");
+          const md = document.createElement("div");
+          md.className = "md";
+          md.innerHTML = renderMarkdown(text);
+          enhanceCodeBlocks(md);
+          wrapper.appendChild(md);
+        }
+
+        for (const group of toolGroups) {
+          if (group.name === "ask_user") {
+            finishHistoryAgenticBlock(assistantTs);
+            const wrapper = addMsg("assistant");
+            for (const card of group.cards) wrapper.appendChild(card);
+            continue;
+          }
+          const agenticBlock = ensureHistoryAgenticBlock(assistantTs || lastTs);
+          for (const card of group.cards) agenticBlock.body.appendChild(card);
+          updateAgenticMetric(agenticBlock.root, agenticToolMetric(group.name), 1);
+        }
+      } else {
+        const wrapper = addMsg("assistant");
+        // 3px aggregation evaluated at creation: the message starts with
+        // thinking/tool and the previous one ends with thinking/tool.
+        const startsThinkTool =
+          thinkingCards.length > 0 || (text === "" && toolCards.length > 0);
+        const prevMsg = wrapper.previousElementSibling;
+        if (
+          startsThinkTool &&
+          prevMsg?.classList.contains("msg") &&
+          msgEndsWithThinkTool(prevMsg as Element)
+        ) {
+          wrapper.classList.add("tool-chain");
+          wrapper.style.marginTop = "-11px";
+        }
+        for (const card of thinkingCards) wrapper.appendChild(card);
+        if (text) {
+          const md = document.createElement("div");
+          md.className = "md";
+          md.innerHTML = renderMarkdown(text);
+          enhanceCodeBlocks(md);
+          wrapper.appendChild(md);
+        }
+        for (const card of toolCards) wrapper.appendChild(card);
       }
-      // order like in live: thinking → text → tool cards
-      for (const c of thinkingCards) wrapper.appendChild(c);
-      if (text) {
-        const md = document.createElement("div");
-        md.className = "md";
-        md.innerHTML = renderMarkdown(text);
-        enhanceCodeBlocks(md);
-        wrapper.appendChild(md);
-      }
-      for (const c of toolCards) wrapper.appendChild(c);
       // failed turn (provider error): the session entry keeps the error —
       // surface it in history too (terminal parity)
       const errMsg =
@@ -5229,7 +5646,9 @@ function renderHistory(messages: unknown[]): void {
           scrollToBottom();
         }
       } else {
-        // nessun match (es. sessioni vecchie): card risultato separata
+        // Without a matching agent tool call (for example an interactive shell
+        // command), the result does not belong to an agentic flow.
+        finishHistoryAgenticBlock(lastTs);
         const wrapper = addMsg("assistant");
         wrapper.appendChild(
           buildResultCard(msg.toolName ?? "bash", output, msg.isError === true),
@@ -5238,6 +5657,7 @@ function renderHistory(messages: unknown[]): void {
     }
     if (ts > 0) lastTs = ts; // base for the next thinking duration
   }
+  finishHistoryAgenticBlock(lastTs);
   updateThinkingBlocksButton();
   stickToBottom = true;
   scrollToBottom(true);
@@ -7010,11 +7430,31 @@ window.addEventListener(
 );
 
 els.send.addEventListener("click", sendOrStop);
-els.attachBtn.title = t("attachBtn");
 els.attachBtn.innerHTML = attachFileIcon(); // graffetta SVG del set icone (niente emoji)
-els.attachBtn.hidden = !runtime.isVsCode; // native file dialog only in the IDE
+els.browserFilePicker.addEventListener("change", () => {
+  const files = Array.from(els.browserFilePicker.files ?? []);
+  // Reset immediately so selecting the same file again still emits change.
+  els.browserFilePicker.value = "";
+  if (files.length === 0) return;
+  void (async () => {
+    els.attachBtn.disabled = true;
+    try {
+      // File objects come from the browser-side picker: their bytes are read
+      // locally and uploaded through saveAttachment. No client path is sent.
+      for (const file of files) await handlePastedFile(file);
+    } finally {
+      els.attachBtn.disabled = false;
+    }
+  })();
+});
 els.attachBtn.addEventListener("click", () => {
   if (els.attachBtn.disabled) return;
+  if (!runtime.isVsCode) {
+    // Standalone (including a browser on another machine) must browse the
+    // browser device, never the bridge host filesystem.
+    els.browserFilePicker.click();
+    return;
+  }
   void (async () => {
     els.attachBtn.disabled = true;
     try {
@@ -7023,7 +7463,7 @@ els.attachBtn.addEventListener("click", () => {
         res?.ok && Array.isArray((res.data as { paths?: string[] } | undefined)?.paths)
           ? (res.data as { paths: string[] }).paths
           : [];
-      for (const p of paths) void attachPathFromDrop(p);
+      for (const p of paths) await attachPathFromDrop(p);
     } finally {
       els.attachBtn.disabled = false;
     }
@@ -7231,6 +7671,17 @@ els.reload.addEventListener("click", async () => {
   }
   reloadInProgress = true;
   els.reload.disabled = true;
+  if (runtime.mode === "standalone") {
+    // Restart is best-effort in the browser. Never await its response: when
+    // the WebSocket is already closed (or dies after the click), ideRequest
+    // would otherwise delay the local page reload until its 8s timeout.
+    void ideRequest({ type: "restartPi" });
+    // Give a connected bridge a short margin to restart pi. With an already
+    // closed connection reload immediately so the page can reconnect.
+    const delay = statusState === "open" ? 500 : 0;
+    setTimeout(() => location.reload(), delay);
+    return;
+  }
   // restart the pi process (loads updated core/extensions): the webview gets
   // connection_closed(reason restart) + pi_restarted and re-initializes
   // transparently (same path as applying CLI flags)
@@ -7238,13 +7689,6 @@ els.reload.addEventListener("click", async () => {
   // margin until the host re-spawned pi: the fresh page re-initializes from
   // scratch and retries get_state until pi is ready
   await new Promise((r) => setTimeout(r, 500));
-  if (runtime.mode === "standalone") {
-    // the page is served by the bridge from disk: a plain reload re-runs the
-    // (possibly updated) UI and resumes the current session (session id in
-    // the URL)
-    location.reload();
-    return;
-  }
   // IDE: the host re-serves the webview document. A client-side
   // location.reload() is not enough in VS Code: the host-provided HTML is
   // served once and the blank iframe never re-fetches it (the host

@@ -35,6 +35,12 @@ The default bind remains loopback-only. `--ip <IPv4>` (also accepted as `--host 
 
 A reverse proxy on the same machine may keep `piw` loopback-only and forward HTTP/WebSocket traffic to it. The bridge trusts `X-Forwarded-For` and `X-Forwarded-Proto` only when the direct peer is loopback, so remote token checks remain active and HTTPS proxies receive a `wss://` URL.
 
+### Browser-local attachments
+
+The paperclip in standalone mode opens the browser’s native file picker. This matters when the browser and bridge run on different machines: the picker shows files from the **browser device**, never the remote bridge filesystem. The browser reads the selected files and uploads their name, MIME type and bytes; it does not send a local path. The bridge stores a temporary copy so pi and its tools can access it.
+
+Paste, drag and drop, multiple selection and image previews use the same upload path. In VS Code the paperclip continues to use the IDE’s native file dialog.
+
 ### Public-access QR launcher
 
 The cross-platform `piw-public` launcher starts `piw` on a requested port and IPv4 address with idle shutdown disabled, creates a **new authentication token**, and prints both the complete remote URL and a terminal QR code. The address can be supplied explicitly or detected through Tailscale:
@@ -129,7 +135,7 @@ pi install npm:@magiusche/pi-webview
 >   You can also install explicitly with **`/piw install`** (or reinstall
 >   with **`/piw reinstall`**) from a pi terminal: the command reports every
 >   step as it runs (e.g. "VS Code: checking code CLI…", "Visual Studio
->   2026: installing 0.2.3 (per-user)…"), or manually
+>   2026: installing the bundled version (per-user)…"), or manually
 >   (`code --install-extension companion/pi-webview-ide.vsix`
 >   / `VSIXInstaller /q companion/pi-webview-visualstudio.vsix` from the package
 >   dir), then reload the window / restart Visual Studio.
@@ -177,17 +183,18 @@ The companion can also be installed explicitly:
 /piw install
 ```
 
-(or `code --install-extension companion/pi-webview-ide.vsix` from the package dir), then **reload the VS Code window** — a **pi** icon appears in the activity bar with the webview chat. Subcommands: `status | install | reinstall | uninstall | update.pi.core.exts` (`/piw` for the list). `install` installs only what is missing or outdated and ensures both launcher links; `reinstall` forces a full reinstall of the companions and re-creates both links. `uninstall` removes the companions and both links.
+(or `code --install-extension companion/pi-webview-ide.vsix` from the package dir), then **reload the VS Code window** — a **pi** icon appears in the activity bar with the webview chat. Subcommands: `status | install | reinstall | uninstall | update.check | update.pi.core.exts` (`/piw` for the list). `install` installs only what is missing or outdated and ensures both launcher links; `reinstall` forces a full reinstall of the companions and re-creates both links. `uninstall` removes the companions and both links.
 
 ### Updating pi and the extensions
 
-When the pi core is outdated, the webview shows a note in the new-session banner and an **update button in the header**. Clicking it (or typing the command) runs:
+The shield in the header is always visible. Every pi process performs a fresh, non-blocking registry check for pi core and npm-installed extensions; results are not cached:
 
-```
-/piw update.pi.core.exts
-```
+- **blue shield**: everything is current. Clicking it runs `/piw update.check` immediately and refreshes the result in place;
+- **yellow animated shield**: updates are available. Clicking it opens a review dialog before running `/piw update.pi.core.exts`.
 
-which executes `pi update --all --approve` in a child process: it updates the pi core (the `@earendil-works/pi-coding-agent` npm package) and **all installed extensions/packages**, never prompting. The running pi keeps the old code in memory — **restart pi** to load the updated version (reload the IDE window for the companions).
+The update command executes `pi update --all --approve` in a child process. It updates the `@earendil-works/pi-coding-agent` core package and all installed npm extensions without prompting. Local and git extension sources are intentionally excluded from registry comparisons.
+
+The running process keeps its loaded code until pi is restarted. The reload button in the header restarts pi, resumes the current session and reloads the page or IDE webview. In standalone mode the page reload is local and still happens if the bridge connection has already dropped; restarting pi is best-effort in that case.
 
 The companion spawns `pi --mode rpc` and bridges the UI via `postMessage` (same UI and protocol as standalone; editor selection flows directly to the webview).
 
@@ -203,16 +210,19 @@ The companion spawns `pi --mode rpc` and bridges the UI via `postMessage` (same 
 
 ## Features
 
-- **Full chat UI** — streaming markdown (`marked` + `DOMPurify`), thinking blocks with spinner and elapsed time, collapsible tool cards with command summaries, copy buttons
-- **Sessions** — switch, filter by folder, fork of sessions from other folders (same behavior as pi), new session; in standalone browser mode, a session from another workspace can instead move the current workspace to its original folder and resume there without a fork, and refreshing the browser resumes the same session in its saved workspace
-- **Composer controls** — model picker, thinking level, project trust (writes `~/.pi/agent/trust.json`, with confirmation for full access)
-- **Attachments** — paste or drag & drop of files and images, with inline previews
-- **Editor selection context** — when pi-webview runs in the **sidebar view**, selecting text in the editor shows a discreet one-line selection block (attach context for your messages). **In editor-area panels** ("new chat in a new panel") the selection mode is **inhibited**: a webview panel steals editor focus, which would clear the attached selection — so the block is hidden there and selection works only from the sidebar.
-- **Extension status** — status/widget lines set by pi extensions (`setStatus` / `setWidget`) rendered live in the chat footer; status placement and compact/multi-line layout are independent settings, and clicking a status source hides it after confirmation (hidden sources can be restored in settings)
-- **Themes** (light/dark/system) and **i18n** (it/en)
-- **Settings modal** — four groups: (1) info, (2) webview preferences (language, theme, history limit, notifications, status-bar position/compactness and hidden status sources), (3) staged pi.dev settings, including new-session model/thinking defaults, and (4) **pi.dev CLI launch flags**, listed **dynamically** from the flags registered by pi and its extensions (`pi --help` → "Extension CLI Flags", e.g. `--session-control` from pi-agent-extensions; a flag appears only if its extension is installed). Applying restart-backed changes resumes the current session transparently; if work is in progress pi asks for confirmation and dequeues/stops first.
+- **Full chat UI** — streaming Markdown (`marked` + `DOMPurify`), thinking with elapsed time, collapsible tool cards, copy actions and smart auto-scroll
+- **Agentic thinking** — optional global presentation mode, disabled by default. It groups each consecutive thinking/tool chain in one collapsible block with a global spinner, elapsed timer and live counters for `thought`, `read`, `write` (`write` + `edit`), `bash` and other `tools`. Thinking remains expanded inside the block; individual tools keep their normal collapsible behavior. Visible assistant text and `ask_user` close the chain, and a later thought/tool starts a new block. `Waiting for response` stays inside the active block until the first content determines the next state
+- **Sessions** — switch, rename, delete, filter by folder, fork across workspaces and create new sessions. Resume summaries include relative activity, compaction count and session-file size. Browser refresh resumes the same session in its saved workspace
+- **Composer controls** — model picker, thinking level and project trust, with confirmation before granting full access
+- **Attachments** — paperclip picker, paste and drag and drop, multiple files and inline image previews. Browser mode selects files on the browser device and uploads their bytes to the bridge
+- **Editor selection context** — available in the VS Code sidebar. It is intentionally inhibited in editor-area panels because focusing a panel clears the active editor context
+- **Built-in commands** — `/compact`, `/new` and `/name` map to their webview actions. Terminal-only commands are blocked locally with an explanatory chat message instead of being sent to the model
+- **Header controls** — session picker, connection state, reload and live update shield
+- **Extension status** — `setStatus`/`setWidget` output rendered in the footer; placement, compactness and hidden sources are configurable
+- **Themes and localization** — light/dark/system themes and Italian/English UI
+- **Settings modal** — webview preferences include language, theme, history limit, Agentic thinking, notification defaults, status-bar layout and hidden sources. Staged pi.dev settings include new-session model/thinking defaults and dynamic extension CLI flags
 
-  CLI flags are **per-session**: they are stored as a `pi-webview-cli-flags` custom entry **inside the session's `.jsonl` file** (last one wins — never in the shared settings), so each open session keeps its own flags and the settings storage never grows with the session count. New sessions start without flags; forks inherit the parent's flags entry.
+CLI flags are **per-session**: they are stored as a `pi-webview-cli-flags` custom entry inside the session `.jsonl` file, so each session retains its launch configuration. New sessions start without flags; forks inherit the parent entry. Changing Agentic thinking affects future events only; reloading the session re-renders its complete history without modifying the JSONL.
 
 ## Security
 

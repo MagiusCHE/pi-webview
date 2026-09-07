@@ -392,6 +392,9 @@ export interface UserConfig {
   /** compact truncation (true) or multi-line wrapping (false), independently
    *  from the bar placement. Missing preserves the legacy placement behavior. */
   statsBarCompact?: boolean;
+  /** group all thinking and tool calls of an agent run in one collapsible
+   *  presentation block. Global UI preference; never persisted in sessions. */
+  agenticThinking?: boolean;
   /** setStatus keys hidden by the user. RPC exposes the key as the stable
    *  identifier of the status source. */
   hiddenStatusKeys?: string[];

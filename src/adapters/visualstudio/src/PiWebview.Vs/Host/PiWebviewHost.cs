@@ -425,16 +425,6 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
 
     public Task<CliFlagInfo[]> AvailableFlagsAsync() => FetchAvailableFlagsAsync();
 
-    /// <summary>Steering queue persisted per workspace (survives restarts).
-    /// File: %APPDATA%\pi-webview\steer-queue-<sha1(workspace)>.json</summary>
-    public static string SteerQueuePath(string workspace)
-    {
-        using var sha = System.Security.Cryptography.SHA1.Create();
-        var hash = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(workspace));
-        var hex = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
-        return Path.Combine(UserConfigPaths.Dir(), $"steer-queue-{hex}.json");
-    }
-
     public async Task DisposeAsync()
     {
         if (_pi is not null)

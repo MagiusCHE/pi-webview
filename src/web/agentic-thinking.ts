@@ -16,6 +16,13 @@ export const emptyAgenticCounts = (): AgenticCounts => ({
   tools: 0,
 });
 
+/** The live shell must identify an initial provider wait before real activity. */
+export function agenticHeaderLabelKey(
+  waitingOnly: boolean,
+): "waitingResponse" | "agenticThinking" {
+  return waitingOnly ? "waitingResponse" : "agenticThinking";
+}
+
 /** Maps concrete tool names to the compact categories shown in the header. */
 export function agenticToolMetric(name: string): Exclude<AgenticMetric, "thought"> {
   switch (name.toLowerCase()) {

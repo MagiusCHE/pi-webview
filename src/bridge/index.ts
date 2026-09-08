@@ -748,15 +748,6 @@ function main(): void {
         }
         return;
       }
-      if (req.type === "storeSteerQueue") {
-        steerQueueStore.items = req.items;
-        respond(req.id ?? "", { ok: true });
-        return;
-      }
-      if (req.type === "getSteerQueue") {
-        respond(req.id ?? "", { ok: true, data: { items: steerQueueStore.items } });
-        return;
-      }
       // restart pi with the current session + flags (same path as the CLI
       // flags "Applica"): the webview gets connection_closed(reason restart)
       // + pi_restarted and re-initializes transparently
@@ -849,9 +840,6 @@ function main(): void {
   // keep-alive needed); the countdown starts when the last tab closes.
   let activeConnections = 0;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
-  // persistent steering queue (standalone: in memory for the bridge lifetime)
-  const steerQueueStore: { items: { text: string }[] } = { items: [] };
-
   const startIdleTimer = () => {
     if (opts.idleTimeoutMs <= 0 || activeConnections > 0) return;
     if (idleTimer) clearTimeout(idleTimer);

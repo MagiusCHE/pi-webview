@@ -2070,29 +2070,6 @@ footer {
 .steer-row:hover {
   background: var(--hover);
 }
-/* messages ALREADY sent to pi, waiting for injection: muted + spinner; NOT
-   dequeuable (the pi queue cannot be mutated via RPC) */
-.steer-row-sending {
-  opacity: 0.7;
-}
-.steer-row-sending:hover {
-  background: transparent;
-}
-.steer-sending-icon {
-  flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
-  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: steer-spin 0.7s linear infinite;
-  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--accent) 60%, transparent));
-}
-@keyframes steer-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 .steer-row .steer-text {
   flex: 1;
   min-width: 0;

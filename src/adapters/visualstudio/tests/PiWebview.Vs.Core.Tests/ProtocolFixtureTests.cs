@@ -53,18 +53,6 @@ public sealed class ProtocolFixtureTests
     }
 
     [Fact]
-    public void Store_steer_queue_con_items()
-    {
-        var req = ReadRequest("frame-ide-request-storesteerqueue.json");
-        Assert.Equal("storeSteerQueue", req.Type);
-        Assert.NotNull(req.Items);
-        Assert.Equal(2, req.Items!.Count);
-        var first = req.Items[0];
-        Assert.True(first.TryGetProperty("text", out var text));
-        Assert.Equal("primo", text.GetString());
-    }
-
-    [Fact]
     public void Comando_rpc_passthrough()
     {
         var frame = Frame.Parse(File.ReadAllText(Path.Combine(FixtureDir(), "frame-rpc-command.json")))!;

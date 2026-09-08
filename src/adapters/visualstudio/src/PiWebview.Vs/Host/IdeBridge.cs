@@ -164,50 +164,6 @@ public static class IdeBridge
                     host.Sessions.DeleteSessionFile(req.Path);
                     host.PostIdeResponse(Ok(req, null));
                     return;
-                case "storeSteerQueue":
-                {
-                    var items = req.Items?.Select(el =>
-                        el.ValueKind == JsonValueKind.Object && el.TryGetProperty("text", out var t)
-                            ? new SteerQueueItem { Text = t.GetString() ?? "" }
-                            : new SteerQueueItem { Text = el.GetString() ?? "" }).ToList() ?? new List<SteerQueueItem>();
-                    var ws = host.Workspace() ?? "";
-                    var path = PiWebviewHost.SteerQueuePath(ws);
-                    if (items.Count > 0)
-                    {
-                        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                        File.WriteAllText(path,
-                            JsonSerializer.Serialize(new Dictionary<string, object?> { ["items"] = items }, ProtocolJson.Options));
-                    }
-                    else if (File.Exists(path))
-                    {
-                        File.Delete(path);
-                    }
-                    host.PostIdeResponse(Ok(req, null));
-                    return;
-                }
-                case "getSteerQueue":
-                {
-                    var ws = host.Workspace() ?? "";
-                    var path = PiWebviewHost.SteerQueuePath(ws);
-                    var items = new List<SteerQueueItem>();
-                    try
-                    {
-                        if (File.Exists(path))
-                        {
-                            using var doc = JsonDocument.Parse(File.ReadAllText(path));
-                            if (doc.RootElement.TryGetProperty("items", out var arr))
-                            {
-                                items = JsonSerializer.Deserialize<List<SteerQueueItem>>(arr.GetRawText(), ProtocolJson.Options) ?? items;
-                            }
-                        }
-                    }
-                    catch (Exception ex) when (ex is IOException or JsonException)
-                    {
-                        // unreadable queue: empty
-                    }
-                    host.PostIdeResponse(Ok(req, new Dictionary<string, object?> { ["items"] = items }));
-                    return;
-                }
                 case "getTrust":
                     host.PostIdeResponse(Ok(req, TrustStore.GetTrust(host.Workspace() ?? "")));
                     return;

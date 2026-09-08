@@ -165,7 +165,6 @@ import type {
   IdeResponse,
   RpcEvent,
   SessionListResult,
-  SteerQueueItem,
   CliFlags,
   CliFlagInfo,
   SelectionRange,
@@ -702,21 +701,6 @@ export abstract class PiWebviewHost {
             err instanceof Error ? err.message : String(err),
           );
         }
-        return;
-      case "storeSteerQueue":
-        // steering queue persisted per workspace: survives reload
-        void this.context.workspaceState.update(
-          "pi-webview.steerQueue",
-          req.items.length ? req.items : null,
-        );
-        this.respond(req.id, true);
-        return;
-      case "getSteerQueue":
-        this.respond(req.id, true, {
-          items:
-            this.context.workspaceState.get<SteerQueueItem[]>("pi-webview.steerQueue") ??
-            [],
-        });
         return;
       case "notifyDesktop":
         // turn-complete notification requested by the webview (VS Code path):

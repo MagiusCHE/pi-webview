@@ -36,11 +36,14 @@ export const rpc = {
       ...(opts?.id ? { id: opts.id } : {}),
     };
   },
-  steer(message: string): RpcCommand {
-    return { type: "steer", message };
+  steer(message: string, images?: ImageContent[]): RpcCommand {
+    return { type: "steer", message, ...(images ? { images } : {}) };
   },
-  followUp(message: string): RpcCommand {
-    return { type: "follow_up", message };
+  followUp(message: string, images?: ImageContent[]): RpcCommand {
+    return { type: "follow_up", message, ...(images ? { images } : {}) };
+  },
+  clearQueue(): RpcCommand {
+    return { type: "clear_queue" };
   },
   abort(): RpcCommand {
     return { type: "abort" };
@@ -179,8 +182,6 @@ export type IdeRequest =
   | { type: "setSettings"; settings: PiSettingChange[]; id?: string }
   | { type: "renameSession"; path: string; name: string; id?: string }
   | { type: "deleteSession"; path: string; id?: string }
-  | { type: "storeSteerQueue"; items: SteerQueueItem[]; id?: string }
-  | { type: "getSteerQueue"; id?: string }
   | { type: "notifyDesktop"; title: string; body: string; id?: string }
   | { type: "debugNotify"; count: number; id?: string }
   /** restart the pi process (same path as applying CLI flags): the webview
@@ -190,11 +191,6 @@ export type IdeRequest =
   /** host-driven webview reload (re-serve the document): the pi process
    *  survives, the page re-initializes from pi's live state */
   | { type: "reloadWebview"; id?: string };
-
-/** queued message (steering): only persisted text (no images) */
-export interface SteerQueueItem {
-  text: string;
-}
 
 export interface CompactionSettings {
   enabled: boolean;

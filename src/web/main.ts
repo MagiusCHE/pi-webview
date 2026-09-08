@@ -51,6 +51,7 @@ import {
   type ToolSummary,
 } from "./tool-summary.ts";
 import {
+  agenticHeaderLabelKey,
   agenticToolMetric,
   emptyAgenticCounts,
   type AgenticCounts,
@@ -285,6 +286,7 @@ const LOADING_LOG_CAP = 200; // lines kept in the box
 
 function beginSessionLoading(): void {
   sessionLoading = true;
+  updateSendButton();
   loadingAgentActive = false;
   loadingHistoryLoaded = false;
   loadingLogs.length = 0;
@@ -329,6 +331,7 @@ function endSessionLoading(): void {
   els.bootLoaderLogs.hidden = true;
   els.bootLoaderLogs.textContent = "";
   els.bootLoader.hidden = true;
+  updateSendButton();
 }
 
 /** routes an extension/pi log line DURING the loading: into the box under
@@ -1277,7 +1280,7 @@ async function applyPendingSettings(): Promise<void> {
   if (needsRestart) {
     const ok = await showConfirm(t("piSettingRestartWarn"));
     if (!ok) return; // keep the staged values: the user can still apply or close (discard)
-    if (working) stopWorking(); // dequeue + abort, then the host restarts pi
+    if (working) await stopWorking(); // clear pi queue + abort before restart
   }
   applyingPiSettings = true;
   els.pidevApply.disabled = true;
@@ -1337,7 +1340,7 @@ els.cliApply.addEventListener("click", () => {
     if (working) {
       const ok = await showConfirm(t("applyCliWarn"));
       if (!ok) return;
-      stopWorking(); // dequeue + abort come al solito
+      await stopWorking(); // clear pi queue + abort before restart
     }
     await doApply();
   })();
@@ -1539,60 +1542,66 @@ async function deleteSessionFlow(path: string): Promise<void> {
   const ok = await showConfirm(
     tpl(isCurrent ? t("deleteAskCurrent") : t("deleteAsk"), { name: label }),
   );
-  if (!ok) return;
-  // Deleting the CURRENT session: switch to a fresh one FIRST, so pi stops
-  // writing to the old file before it is unlinked (no entries lost to the
-  // deleted inode, no zombie file recreated under the running session).
-  if (isCurrent) {
-    els.thread.textContent = "";
-    try {
-      await rpcRequest({ type: "new_session" });
-    } catch {
-      // new_session failed: delete anyway, refreshSessions realigns
+  if (!ok || !beginSessionTransition()) return;
+  let historyLoaded = false;
+  try {
+    // Deleting the CURRENT session: switch to a fresh one FIRST, so pi stops
+    // writing to the old file before it is unlinked.
+    if (isCurrent) {
+      els.thread.textContent = "";
+      try {
+        const response = await rpcRequest({ type: "new_session" });
+        if (response.success) renderNativeQueues([], []);
+      } catch {
+        // new_session failed: delete anyway, refreshSessions realigns
+      }
     }
+    const res = await ideRequest({ type: "deleteSession", path });
+    if (!res?.ok) {
+      addStatusLine(t("deleteFailed"));
+      return;
+    }
+    await refreshSessions();
+    historyLoaded = true;
+    els.sessionMenu.hidden = false; // show the updated list after the loader
+  } finally {
+    finishSessionTransition(historyLoaded);
   }
-  const res = await ideRequest({ type: "deleteSession", path });
-  if (!res?.ok) {
-    addStatusLine(t("deleteFailed"));
-    return;
-  }
-  els.sessionMenu.hidden = false; // stays open: shows the updated list
-  await refreshSessions();
 }
 
 // new session: closes the dropdown and reloads with the fresh session
 async function startNewSession(): Promise<void> {
-  if (switchingSession) return;
-  switchingSession = true;
-  els.sessionBtn.disabled = true;
+  if (!beginSessionTransition()) return;
+  let historyLoaded = false;
   try {
     const res = await rpcRequest({ type: "new_session" });
-    if (res.success) {
-      els.thread.textContent = "";
-      sessionHasMessages = false;
-      els.sessionMenu.hidden = true;
-      // refreshSessions → loadHistory renders the welcome banner (Context/
-      // Skills/Extensions) while the new session chat is still empty — an
-      // explicit maybeShowStartupBanner here would render it a SECOND time
-      await refreshSessions();
-      // pi may assign the name late: update box and title when it arrives
-      pollSessionTitle();
-    }
+    if (!res.success) return;
+    renderNativeQueues([], []);
+    els.thread.textContent = "";
+    sessionHasMessages = false;
+    // refreshSessions → loadHistory renders the welcome banner (Context/
+    // Skills/Extensions) while the new session chat is still empty.
+    await refreshSessions();
+    historyLoaded = true;
+    // pi may assign the name late: update box and title when it arrives
+    pollSessionTitle();
   } catch {
     // new_session failed: the current session stays
+  } finally {
+    finishSessionTransition(historyLoaded);
   }
-  switchingSession = false;
-  els.sessionBtn.disabled = false;
-  populateSessionMenu();
 }
 
 async function forkSessionIntoCurrentWorkspace(path: string): Promise<void> {
-  const res = await ideRequest({ type: "forkSession", sourcePath: path });
-  if (!res?.ok) return;
-  const forkPath = (res.data as { path?: string } | undefined)?.path;
-  if (forkPath) {
-    switchSession(forkPath);
-    void refreshSessions();
+  if (!beginSessionTransition()) return;
+  let historyLoaded = false;
+  try {
+    const res = await ideRequest({ type: "forkSession", sourcePath: path });
+    if (!res?.ok) return;
+    const forkPath = (res.data as { path?: string } | undefined)?.path;
+    if (forkPath) historyLoaded = await performSwitchSession(forkPath);
+  } finally {
+    finishSessionTransition(historyLoaded);
   }
 }
 
@@ -1757,6 +1766,24 @@ watchThemeChanges(() => applyTheme(themePref));
 let sessions: SessionInfo[] = [];
 let currentSessionPath: string | null = null;
 let switchingSession = false;
+
+/** Lock the complete UI before starting any session-changing operation. */
+function beginSessionTransition(): boolean {
+  if (switchingSession) return false;
+  switchingSession = true;
+  els.sessionMenu.hidden = true;
+  beginSessionLoading();
+  return true;
+}
+
+/** Keep the loader until refreshed history settles; unlock immediately on failure. */
+function finishSessionTransition(historyLoaded: boolean): void {
+  switchingSession = false;
+  if (!historyLoaded) endSessionLoading();
+  updateSendButton();
+  populateSessionMenu();
+}
+
 let workspaceLabel = "";
 let workspacePath: string | null = null;
 let filterMode: "folder" | "all" = "folder";
@@ -2167,10 +2194,7 @@ async function refreshSessions(showResumeNotice = false): Promise<void> {
   if (blockedResumeModel) {
     addStatusLine(tpl(t("resumeModelUnavailable"), { model: blockedResumeModel }));
   }
-  // steering: persisted queue restored; if pi is idle, deliver right away
-  await loadSteerQueue();
   updateSteerPlaceholder();
-  deliverSteering();
   if (showResumeNotice && !blockedResumeModel && sessionHasMessages) {
     let info = currentSession();
     if (!info && currentSessionPath) {
@@ -2466,12 +2490,8 @@ function askCrossWorkspaceSessionAction(
 }
 
 async function resumeSessionInWorkspace(path: string, folder: string): Promise<void> {
-  if (switchingSession) return;
-  switchingSession = true;
-  els.sessionBtn.disabled = true;
-  els.sessionMenu.hidden = true;
-  beginSessionLoading();
-  let loaded = false;
+  if (!beginSessionTransition()) return;
+  let historyLoaded = false;
   try {
     const res = await ideRequest({
       type: "setWorkspace",
@@ -2488,15 +2508,11 @@ async function resumeSessionInWorkspace(path: string, folder: string): Promise<v
     els.thread.textContent = "";
     sessionHasMessages = false;
     await refreshSessions(true);
-    loaded = true;
+    historyLoaded = true;
   } catch {
-    // The bridge could not switch/restart: close the loading overlay without
-    // leaving a rejected click handler.
+    // The bridge could not switch/restart: the finally block unlocks the UI.
   } finally {
-    if (!loaded) endSessionLoading();
-    switchingSession = false;
-    els.sessionBtn.disabled = false;
-    populateSessionMenu();
+    finishSessionTransition(historyLoaded);
   }
 }
 
@@ -2553,23 +2569,34 @@ async function changeWorkspace(): Promise<void> {
   // selected workspace and let pi start its empty session there.
   const currentIsEmpty = !sessionHasMessages && isNewSession(currentSession());
   const choice = currentIsEmpty ? "new" : await askWorkspaceAction(target);
-  if (!choice) return;
-  const res = await ideRequest({
-    type: "setWorkspace",
-    path: target,
-    action: choice,
-    ...(choice === "fork" && currentSessionPath
-      ? { sessionPath: currentSessionPath }
-      : {}),
-  });
-  if (!res?.ok) return;
-  workspacePath = target;
-  workspaceLabel = target.split(/[\\/]/).pop() ?? "";
-  if (choice === "fork") {
-    const forkPath = (res.data as { sessionPath?: string } | undefined)?.sessionPath;
-    if (forkPath) switchSession(forkPath);
+  if (!choice || !beginSessionTransition()) return;
+  let historyLoaded = false;
+  try {
+    const res = await ideRequest({
+      type: "setWorkspace",
+      path: target,
+      action: choice,
+      ...(choice === "fork" && currentSessionPath
+        ? { sessionPath: currentSessionPath }
+        : {}),
+    });
+    if (!res?.ok) return;
+    workspacePath = target;
+    workspaceLabel = target.split(/[\\/]/).pop() ?? "";
+    if (choice === "fork") {
+      const forkPath = (res.data as { sessionPath?: string } | undefined)?.sessionPath;
+      if (!forkPath) return;
+      historyLoaded = await performSwitchSession(forkPath);
+    } else {
+      currentSessionPath = null;
+      els.thread.textContent = "";
+      sessionHasMessages = false;
+      await refreshSessions();
+      historyLoaded = true;
+    }
+  } finally {
+    finishSessionTransition(historyLoaded);
   }
-  void refreshSessions();
 }
 
 // Replaces ?new=1 with the current session id. The running WebSocket is
@@ -2596,62 +2623,58 @@ function persistSessionPath(): void {
   void ideRequest({ type: "storeSession", path: currentSessionPath });
 }
 
-function switchSession(path: string): void {
-  if (!path || path === currentSessionPath || switchingSession) return;
-  switchingSession = true;
-  els.sessionBtn.disabled = true;
-  void (async () => {
-    try {
-      let info = sessions.find((session) => session.path === path);
-      if (!info) {
-        const infoRes = await ideRequest({ type: "getSessionInfo", path });
-        if (infoRes?.ok) info = infoRes.data as SessionInfo;
-      }
-      const savedModel = info?.model;
-      if (savedModel) {
-        const available = await rpcRequest(rpc.getAvailableModels()).catch(() => null);
-        const models =
-          (available?.success
-            ? (
-                available.data as
-                  { models?: Array<{ provider?: string; id?: string }> } | undefined
-              )?.models
-            : undefined) ?? [];
-        if (
-          !models.some(
-            (model) =>
-              model.provider === savedModel.provider && model.id === savedModel.id,
-          )
-        ) {
-          addStatusLine(
-            tpl(t("resumeModelUnavailable"), {
-              model: `${savedModel.provider}/${savedModel.id}`,
-            }),
-          );
-          return;
-        }
-      }
+async function performSwitchSession(path: string): Promise<boolean> {
+  let info = sessions.find((session) => session.path === path);
+  if (!info) {
+    const infoRes = await ideRequest({ type: "getSessionInfo", path });
+    if (infoRes?.ok) info = infoRes.data as SessionInfo;
+  }
+  const savedModel = info?.model;
+  if (savedModel) {
+    const available = await rpcRequest(rpc.getAvailableModels()).catch(() => null);
+    const models =
+      (available?.success
+        ? (
+            available.data as
+              { models?: Array<{ provider?: string; id?: string }> } | undefined
+          )?.models
+        : undefined) ?? [];
+    if (
+      !models.some(
+        (model) => model.provider === savedModel.provider && model.id === savedModel.id,
+      )
+    ) {
+      addStatusLine(
+        tpl(t("resumeModelUnavailable"), {
+          model: `${savedModel.provider}/${savedModel.id}`,
+        }),
+      );
+      return false;
+    }
+  }
 
-      const res = await rpcRequest({ type: "switch_session", sessionPath: path });
-      if (res.success) {
-        currentSessionPath = path;
-        persistSessionPath(); // resume this session on VS Code reloads
-        // Loading overlay: slow extensions keep logging after the session
-        // file is ready — the chat must stay clean until they settle.
-        beginSessionLoading();
-        els.thread.textContent = "";
-        // Refresh get_state after the switch. pi already restored the saved
-        // model; retaining the previous state made it look like a fallback.
-        await refreshSessions(true);
-        updateDocumentTitle();
-      }
+  const res = await rpcRequest({ type: "switch_session", sessionPath: path });
+  if (!res.success) return false;
+  renderNativeQueues([], []);
+  currentSessionPath = path;
+  persistSessionPath();
+  els.thread.textContent = "";
+  // Refresh get_state after the switch. pi already restored the saved model.
+  await refreshSessions(true);
+  updateDocumentTitle();
+  return true;
+}
+
+function switchSession(path: string): void {
+  if (!path || path === currentSessionPath || !beginSessionTransition()) return;
+  void (async () => {
+    let historyLoaded = false;
+    try {
+      historyLoaded = await performSwitchSession(path);
     } catch {
       // switch failed: the current session stays
     } finally {
-      switchingSession = false;
-      els.sessionBtn.disabled = false;
-      populateSessionMenu();
-      els.sessionMenu.hidden = true;
+      finishSessionTransition(historyLoaded);
     }
   })();
 }
@@ -2662,6 +2685,7 @@ const stream = emptyStream();
 let currentMsg: HTMLElement | null = null;
 let thinkingSlot: HTMLElement | null = null;
 let currentText: HTMLElement | null = null;
+let assistantStreamPrepared = false;
 let markdownAccum = "";
 let renderPending = false;
 let thinkingEl: HTMLElement | null = null;
@@ -2679,25 +2703,26 @@ function updateThinkingStopBtn(visible: boolean): void {
   els.statsStop.hidden = !visible;
 }
 
-// STOP: like pi.dev's Escape — first brings the messages back into steering
-// in the editor (dequeue), THEN stops the current turn
+// STOP: like pi.dev's Escape — asks pi to clear its own queues, restores
+// their text in the editor, and sends abort immediately afterwards.
 els.statsStop.innerHTML = stopIcon();
 els.statsStop.title = t("stopWorking");
 
-// STOP (▢ button or Esc key): like pi.dev's Escape — first brings the
-// steering messages back into the editor (dequeue), THEN stops the current turn
-function stopWorking(): void {
-  if (!transport || !working) return;
-  dequeueSteering(); // the queued messages return to the textarea (if any)
+function stopWorking(): Promise<void> {
+  if (!transport || !working) return Promise.resolve();
+  // dequeueSteering sends clear_queue synchronously before returning its
+  // promise. Abort is sent right afterwards: no client-side delivery delay.
+  const restored = dequeueSteering();
   transport.send({ channel: "rpc", payload: rpc.abort() });
   working = false;
   disarmWaitingResponse();
   updateSendButton();
   updateSteerPlaceholder();
   updateThinkingStopBtn(false);
+  return restored;
 }
 
-els.statsStop.addEventListener("click", stopWorking);
+els.statsStop.addEventListener("click", () => void stopWorking());
 
 // Esc during processing = STOP (like pi.dev). The modals (confirm/
 // prompt) already close on Esc in the capture phase with stopPropagation:
@@ -2707,7 +2732,7 @@ document.addEventListener("keydown", (e) => {
   if (els.settingsModal && !els.settingsModal.hidden) return; // settings open
   if (working) {
     e.preventDefault();
-    stopWorking();
+    void stopWorking();
   }
 });
 let thinkingAccum = "";
@@ -2716,10 +2741,14 @@ let toolsEl: HTMLElement | null = null;
 let toolsPre: HTMLPreElement | null = null;
 let toolsText = "";
 
-function addMsg(kind: "user" | "assistant" | "status"): HTMLElement {
+function addMsg(
+  kind: "user" | "assistant" | "status",
+  before?: HTMLElement | null,
+): HTMLElement {
   const wrapper = document.createElement("div");
   wrapper.className = `msg ${kind}`;
-  els.thread.appendChild(wrapper);
+  if (before?.parentElement === els.thread) els.thread.insertBefore(wrapper, before);
+  else els.thread.appendChild(wrapper);
   // runtime: the history never exceeds historyLimit — truncate from the top
   while (els.thread.children.length > historyLimit) {
     els.thread.firstElementChild?.remove();
@@ -2832,7 +2861,9 @@ function storeAgenticCounts(root: HTMLElement, counts: AgenticCounts): void {
 
 function renderAgenticThinkingSummary(root: HTMLElement): void {
   const label = root.querySelector<HTMLElement>(".agentic-thinking-label");
-  if (label) label.textContent = t("agenticThinking");
+  if (label) {
+    label.textContent = t(agenticHeaderLabelKey(root.dataset.waitingOnly === "true"));
+  }
   const summary = root.querySelector<HTMLElement>(".agentic-thinking-counts");
   if (!summary) return;
   summary.replaceChildren();
@@ -2869,9 +2900,10 @@ function updateAgenticMetric(
 }
 
 function createAgenticBlock(before?: HTMLElement | null, live = false): AgenticBlock {
-  const wrapper = addMsg("assistant");
+  // Insert in the final position immediately. Appending and then moving the
+  // wrapper produced two mutations and visible scroll oscillation.
+  const wrapper = addMsg("assistant", before);
   wrapper.classList.add("agentic-thinking-wrapper");
-  if (before?.parentElement === els.thread) els.thread.insertBefore(wrapper, before);
 
   const root = document.createElement("div");
   root.className = "agentic-thinking-card";
@@ -2960,11 +2992,11 @@ function breakAgenticChain(): void {
 
 function ensureLiveAgenticBlock(): AgenticBlock | null {
   if (!agenticThinking) return null;
+  prepareAssistantStream();
   if (activeAgenticBlock?.root.isConnected) return activeAgenticBlock;
-  if (!currentMsg) openAssistantBubble();
-  // Once visible model text has started, subsequent thinking/tools form a new
-  // chain after that message instead of being inserted before it.
-  const before = markdownAccum.length > 0 ? undefined : currentMsg;
+  // Agentic internal activity does not need an assistant text wrapper. When a
+  // real text shell already exists but is still empty, insert before it.
+  const before = currentMsg && markdownAccum.length === 0 ? currentMsg : undefined;
   if (!agenticRunStartedAt) agenticRunStartedAt = performance.now();
   activeAgenticBlock = createAgenticBlock(before, true);
   return activeAgenticBlock;
@@ -2973,6 +3005,7 @@ function ensureLiveAgenticBlock(): AgenticBlock | null {
 function registerAgenticThought(card: HTMLElement): void {
   const root = card.closest<HTMLElement>(".agentic-thinking-card");
   if (!root || card.dataset.agenticThought === "true") return;
+  delete root.dataset.waitingOnly;
   card.dataset.agenticThought = "true";
   updateAgenticMetric(root, "thought", 1);
 }
@@ -2980,6 +3013,7 @@ function registerAgenticThought(card: HTMLElement): void {
 function registerAgenticTool(card: HTMLElement, name: string): void {
   const root = card.closest<HTMLElement>(".agentic-thinking-card");
   if (!root || !name) return;
+  delete root.dataset.waitingOnly;
   const metric = agenticToolMetric(name);
   const previous = card.dataset.agenticMetric as AgenticMetric | undefined;
   if (previous === metric) return;
@@ -2999,20 +3033,11 @@ function removeEmptyActiveAgenticBlock(): void {
   updateThinkingBlocksButton();
 }
 
-function openAssistantBubble(): void {
-  // a SECOND stream_start for the same message (e.g. provider retry that
-  // re-issues message_start without a message_end in between): REUSE the
-  // live bubble — never create a second one and never reset the thinking
-  // state (the promoted waiting card must stay the only thinking block)
-  if (currentMsg) return;
-  currentMsg = addMsg("assistant");
-  // the thinking goes ALWAYS before the streaming text (and in the final result)
-  thinkingSlot = document.createElement("div");
-  thinkingSlot.className = "thinking-slot";
-  currentMsg.appendChild(thinkingSlot);
-  currentText = document.createElement("div");
-  currentText.className = "md";
-  currentMsg.appendChild(currentText);
+function prepareAssistantStream(): void {
+  // A repeated message_start for a provider retry belongs to the same visual
+  // stream and must not reset cards already rendered from its first attempt.
+  if (currentMsg || assistantStreamPrepared) return;
+  assistantStreamPrepared = true;
   markdownAccum = "";
   renderPending = false;
   thinkingEl = null;
@@ -3035,6 +3060,19 @@ function openAssistantBubble(): void {
   toolsEl = null;
   toolsPre = null;
   toolsText = "";
+}
+
+function openAssistantBubble(): void {
+  if (currentMsg) return;
+  prepareAssistantStream();
+  currentMsg = addMsg("assistant");
+  // The thinking slot precedes visible streamed text in non-agentic mode.
+  thinkingSlot = document.createElement("div");
+  thinkingSlot.className = "thinking-slot";
+  currentMsg.appendChild(thinkingSlot);
+  currentText = document.createElement("div");
+  currentText.className = "md";
+  currentMsg.appendChild(currentText);
 }
 
 // --- markdown streaming -----------------------------------------------------
@@ -3215,6 +3253,7 @@ function ensureThinkingLoader(): HTMLElement {
   const agenticBlock = ensureLiveAgenticBlock();
   const destination = agenticBlock?.body ?? thinkingSlot;
   if (!thinkingEl && destination) {
+    thinkingContentRendered = false;
     thinkingEl = document.createElement("div");
     thinkingEl.className = "thinking-card";
     const { head, spinner, timer } = makeThinkingHead();
@@ -3295,12 +3334,18 @@ function armWaitingResponse(): void {
 function showWaitingBlock(): void {
   if (waitingCardEl) return;
   // In agentic mode waiting is part of the current consecutive chain from the
-  // beginning. The first content decides whether the block continues
-  // (thinking/tool) or closes before visible text / ask_user.
-  if (!currentMsg || !thinkingSlot) openAssistantBubble();
+  // beginning. Do not create an empty assistant text wrapper just to host it.
+  if (!agenticThinking && (!currentMsg || !thinkingSlot)) openAssistantBubble();
   const agenticBlock = agenticThinking ? ensureLiveAgenticBlock() : null;
   const destination = agenticBlock?.body ?? thinkingSlot;
   if (!destination) return;
+  if (agenticBlock) {
+    const counts = agenticCounts(agenticBlock.root);
+    if (AGENTIC_METRICS.every((metric) => counts[metric] === 0)) {
+      agenticBlock.root.dataset.waitingOnly = "true";
+      renderAgenticThinkingSummary(agenticBlock.root);
+    }
+  }
   const card = document.createElement("div");
   card.className = "thinking-card waiting-card";
   waitingCardEl = card;
@@ -3405,6 +3450,24 @@ function disarmWaitingResponse(preserveEmptyAgentic = false): void {
   waitingLabelEl = null;
   waitingContentEl = null;
   if (!preserveEmptyAgentic) removeEmptyActiveAgenticBlock();
+}
+
+/** Close current thought/tool grouping at an externally visible boundary. */
+function breakInternalActivityChain(): void {
+  if (thinkingEl && !thinkingContentRendered) finishThinking();
+  disarmWaitingResponse();
+  breakAgenticChain();
+  // A following thought must create a fresh card instead of reusing the one
+  // completed before compaction or an injected user steering message.
+  thinkingEl = null;
+  thinkingContentEl = null;
+  thinkingSpinnerEl = null;
+  thinkingTimerEl = null;
+  thinkingStartedAt = 0;
+  thinkingAccum = "";
+  thinkingRenderedLength = 0;
+  thinkingTextNode = null;
+  thinkingContentRendered = true;
 }
 
 // --- footer slots filled by the pi EXTENSIONS (ctx.ui.setStatus) -----------
@@ -3874,7 +3937,7 @@ async function fetchSessionStats(): Promise<void> {
 // --- tool cards with copy ----------------------------------------------------
 
 function ensureToolCard(name?: string, outsideAgentic = false): HTMLElement {
-  if (!toolsEl && currentMsg) {
+  if (!toolsEl && (currentMsg || agenticThinking)) {
     // real name if already known (toolcall_start), otherwise a neutral placeholder
     toolsEl = buildToolCard({ id: "", name: name || t("tool"), args: "" });
     toolsPre = toolsEl.querySelector<HTMLPreElement>("pre");
@@ -3884,7 +3947,8 @@ function ensureToolCard(name?: string, outsideAgentic = false): HTMLElement {
       toolsEl.dataset.outsideAgentic = "true";
     } else {
       const agenticBlock = ensureLiveAgenticBlock();
-      (agenticBlock?.body ?? currentMsg).appendChild(toolsEl);
+      const destination = agenticBlock?.body ?? currentMsg;
+      destination?.appendChild(toolsEl);
       if (name) registerAgenticTool(toolsEl, name);
       if (!agenticBlock) {
         applyToolChainIfToolFirst(); // first tool block: evaluate the 3px gap
@@ -4012,7 +4076,17 @@ function renderToolHeader(el: HTMLElement, summary: ToolSummary): void {
 let lastAssistantText = "";
 
 function finalizeMessage(msg: FinalizedMessage): void {
-  if (currentText) {
+  const hasVisibleText = msg.text.trim().length > 0;
+  const hasFinalContent =
+    hasVisibleText || msg.thinking.trim().length > 0 || msg.toolCalls.length > 0;
+  if (!assistantStreamPrepared) prepareAssistantStream();
+  if (
+    !currentMsg &&
+    ((agenticThinking && hasVisibleText) || (!agenticThinking && hasFinalContent))
+  ) {
+    openAssistantBubble();
+  }
+  if (currentText || agenticThinking) {
     // thinking before the text: the slot is already before .md in the DOM
     const hadStreamedText = markdownAccum.length > 0;
     if (thinkingEl && !thinkingContentRendered) finishThinking();
@@ -4037,8 +4111,10 @@ function finalizeMessage(msg: FinalizedMessage): void {
     // still a visible-content boundary before any following tool calls.
     if (msg.text.trim() && !hadStreamedText) breakAgenticChain();
     markdownAccum = msg.text;
-    currentText.innerHTML = renderMarkdown(msg.text);
-    enhanceCodeBlocks(currentText);
+    if (currentText) {
+      currentText.innerHTML = renderMarkdown(msg.text);
+      enhanceCodeBlocks(currentText);
+    }
     // tool call: reuse the streaming card for the first one (avoids duplicates)
     const toolCalls = msg.toolCalls;
     if (toolCalls.length > 0) {
@@ -4082,6 +4158,7 @@ function finalizeMessage(msg: FinalizedMessage): void {
   currentMsg = null;
   currentText = null;
   thinkingSlot = null;
+  assistantStreamPrepared = false;
 }
 
 function createToolCard(tc: ToolCallInfo): void {
@@ -4655,12 +4732,18 @@ function renderRpcEvent(evt: RpcEvent): void {
     activeAgenticBlock = null;
     agenticRunStartedAt = 0;
   }
-  // steering: deliver at pi.dev's point (after the turn's tool calls) and
-  // reconciliation with the native pi queue
-  if (evt.type === "turn_end") {
-    if (working) deliverSteering(); // streaming: prompt(streamingBehavior:"steer")
+  if (evt.type === "queue_update") {
+    const steering = Array.isArray(evt.steering)
+      ? evt.steering.filter((message): message is string => typeof message === "string")
+      : [];
+    const followUp = Array.isArray(evt.followUp)
+      ? evt.followUp.filter((message): message is string => typeof message === "string")
+      : [];
+    // Preserve the exact arrays from pi, including repeated identical messages.
+    renderNativeQueues(steering, followUp);
     return;
   }
+  if (evt.type === "turn_end") return;
   if (evt.type === "message_start") {
     const msg = (
       evt as {
@@ -4674,8 +4757,10 @@ function renderRpcEvent(evt: RpcEvent): void {
     ).message;
     const role = msg?.role;
     if (role === "user") {
-      // steering injected (or normally sent message: already rendered)
-      handleUserMessageStart(evt);
+      // An injected steering message is a visible boundary: close the current
+      // internal chain so subsequent thought/tool activity starts a new one.
+      breakInternalActivityChain();
+      renderUserMessageStart(evt);
       return;
     }
     if (msg && role === "custom" && msg.display !== false) {
@@ -4698,8 +4783,6 @@ function renderRpcEvent(evt: RpcEvent): void {
   }
   // compaction: show the block even if started by pi (auto-compaction)
   if (evt.type === "compaction_start") {
-    // the compaction block is the feedback: nothing is being awaited
-    disarmWaitingResponse();
     showCompactionBlock();
   } else if (evt.type === "compaction_end") {
     // REAL outcome from pi: errorMessage present → failed (the client cannot
@@ -4708,12 +4791,11 @@ function renderRpcEvent(evt: RpcEvent): void {
     finishCompaction(!!errMsg, errMsg);
     // A successful continuation emits turn_start immediately before its next
     // provider request; do not guess that boundary from compaction completion.
-    // steering: after the compaction the queue delivery restarts
-    deliverSteering();
   } else if (evt.type === "connection_closed") {
     if (evt.reason === "restart") {
       // INTENTIONAL restart (Apply CLI flags): pi is restarting with the new
       // command line → no error; the re-init arrives with pi_restarted
+      renderNativeQueues([], []);
       piRestarting = true;
       updateSendButton();
       return;
@@ -4728,6 +4810,7 @@ function renderRpcEvent(evt: RpcEvent): void {
     failRunningTools();
     if (compacting) finishCompaction(true, (evt.errorMessage as string) ?? undefined);
     disarmWaitingResponse();
+    renderNativeQueues([], []);
     working = false;
     updateSendButton();
     if (evt.reason === "invalid_session") {
@@ -4746,6 +4829,7 @@ function renderRpcEvent(evt: RpcEvent): void {
     // restart completed: re-initialize WITHOUT reload (transparent): session
     // state + config; the current session is resumed by the companion with
     // --session, currentSessionPath is still in memory
+    renderNativeQueues([], []);
     piRestarting = false;
     updateSendButton();
     // reset UI Applica: i valori applicati sono ora quelli salvati
@@ -4824,11 +4908,11 @@ function renderRpcEvent(evt: RpcEvent): void {
   const action: UiAction = handleRpcEvent(stream, evt);
   switch (action.kind) {
     case "stream_start":
-      // NOTE: message_start arrives as soon as the provider stream opens, NOT
-      // at the first token. The waiting card STAYS: the first real content
-      // decides — a thinking promotes it (timer continues), anything else
-      // (text/tool) removes it.
-      openAssistantBubble();
+      // message_start arrives before real content. Agentic mode deliberately
+      // defers the assistant text wrapper so internal-only messages never add
+      // and later remove an empty chat block.
+      prepareAssistantStream();
+      if (!agenticThinking) openAssistantBubble();
       break;
     case "text_delta":
       // Visible model text is a hard boundary: close the current consecutive
@@ -4836,6 +4920,7 @@ function renderRpcEvent(evt: RpcEvent): void {
       if (thinkingEl && !thinkingContentRendered) finishThinking();
       disarmWaitingResponse();
       breakAgenticChain();
+      if (!currentMsg) openAssistantBubble();
       markdownAccum += action.delta;
       scheduleMarkdownRender();
       scrollToBottom();
@@ -5762,7 +5847,7 @@ els.statsCtx.addEventListener("click", () => {
   }
   const msg = working ? t("compactAskWorking") : t("compactAsk");
   void showConfirm(msg).then((ok) => {
-    if (ok) startCompactionFromUi();
+    if (ok) void startCompactionFromUi();
   });
 });
 
@@ -5780,6 +5865,9 @@ let compactClock: ReturnType<typeof setInterval> | null = null;
 
 function showCompactionBlock(): void {
   if (compacting) return;
+  // Compaction is a hard boundary for both normal thoughts and Agentic
+  // thinking. Any later internal activity starts in a fresh block.
+  breakInternalActivityChain();
   compacting = true;
   working = true; // composer guard: no sends during the compaction
   updateSendButton();
@@ -5845,11 +5933,11 @@ function finishCompaction(error: boolean, errMsg?: string): void {
 // from the gauge/label click: shows the block and sends the compact RPC
 // NOTE: no timeout (the compact can take tens of seconds); the outcome
 // arrives from the compaction_end event (real outcome) or from the response
-function startCompactionFromUi(): void {
+async function startCompactionFromUi(): Promise<void> {
   if (compacting) return;
-  // if there is an in-flight turn, pi will interrupt it (compact aborts): first
-  // bring the steering back into the editor (dequeue), then compact
-  if (working) dequeueSteering();
+  // clear_queue is authoritative: restore pi's pending messages before compact,
+  // without maintaining a second queue in the webview.
+  if (working) await dequeueSteering();
   showCompactionBlock();
   rpcRequest(rpc.compact(), undefined, 0).then(
     (res) => {
@@ -5877,18 +5965,7 @@ let creditCurrency = "$"; // provider currency symbol (for the session cost)
 let sessionCost = 0; // total session cost from get_session_stats (pi core)
 
 // --- steering (plan 0004) ---------------------------------------------------
-// SHADOW queue in the webview (editable via dequeue, only the text is
-// persisted) + delivery via the native pi queue (pi.dev semantics): during
-// streaming a prompt(streamingBehavior:"steer") is sent at the delivery
-// point (turn_end), from idle a normal prompt (agent_settled).
-interface QueuedMessage {
-  id: string;
-  text: string;
-  images?: Array<{ type: "image"; data: string; mimeType: string }>;
-}
-let steerShadow: QueuedMessage[] = []; // to deliver (dequeue brings it back to the editor)
-let steerPending: QueuedMessage[] = []; // sent to pi, waiting for injection
-let steerSeq = 0;
+// pi is the sole owner of delivery, ordering and queue modes.
 let steeringMode: "one-at-a-time" | "all" = "one-at-a-time";
 let followUpMode: "one-at-a-time" | "all" = "one-at-a-time";
 let autoCompactionEnabled = true;
@@ -5897,14 +5974,16 @@ let currentModel: { provider?: string; name?: string; id?: string } | null = nul
 let blockedResumeModel: string | null = null;
 
 function updateSendButton(): void {
-  // the button is ALWAYS Send (never STOP anymore): while processing it takes
-  // a different highlight (.working class) and Enter queues (steering); the
-  // STOP lives in the thinking block (plan 0004). During the pi restart
-  // (Apply CLI flags) it is disabled.
+  // Session loading is a full interaction lock, including keyboard input
+  // beneath the fixed overlay. Model streaming alone still permits steering.
+  const interactionLocked =
+    statusState !== "open" || piRestarting || switchingSession || sessionLoading;
   els.send.innerHTML = sendIcon();
   els.send.title = working ? t("steerSendHint") : t("send");
   els.send.classList.toggle("working", working);
-  els.send.disabled = piRestarting;
+  els.send.disabled = interactionLocked;
+  els.input.disabled = interactionLocked;
+  els.sessionBtn.disabled = interactionLocked;
 }
 
 function renderModelInfo(): void {
@@ -6400,6 +6479,74 @@ els.trust.addEventListener("click", (e) => {
   openTrustPopover();
 });
 
+/** Render a user message exclusively from pi's authoritative content. */
+function renderUserContent(content: unknown): void {
+  const rawText = stripEditorSelectionContext(extractTextContent(content));
+  const filePaths: string[] = [];
+  const textBlocks = rawText.split("\n\n").filter((block) => {
+    const match = /^\[attachment: (.+)\]$/.exec(block);
+    if (!match?.[1]) return true;
+    filePaths.push(match[1]);
+    return false;
+  });
+  const text = textBlocks.join("\n\n").trim();
+  const images = Array.isArray(content)
+    ? content.filter(
+        (part): part is { type: "image"; data: string; mimeType: string } =>
+          typeof part === "object" &&
+          part !== null &&
+          (part as { type?: unknown }).type === "image" &&
+          typeof (part as { data?: unknown }).data === "string" &&
+          typeof (part as { mimeType?: unknown }).mimeType === "string",
+      )
+    : [];
+  if (!text && filePaths.length === 0 && images.length === 0) return;
+
+  const wrapper = addMsg("user");
+  if (images.length > 0) {
+    const grid = document.createElement("div");
+    grid.className = "chat-image-grid";
+    if (images.length === 1) grid.classList.add("single");
+    for (const image of images) {
+      const label = t("attachBtn");
+      const img = document.createElement("img");
+      img.className = "chat-image";
+      img.src = `data:${image.mimeType};base64,${image.data}`;
+      img.alt = label;
+      img.title = label;
+      img.addEventListener("click", () => openImageLightbox(img.src, label));
+      grid.appendChild(img);
+    }
+    wrapper.appendChild(grid);
+  }
+  for (const path of filePaths) {
+    const chip = document.createElement("div");
+    chip.className = "chat-file";
+    const icon = document.createElement("span");
+    icon.className = "chat-file-icon";
+    icon.innerHTML = attachFileIcon();
+    const name = document.createElement("span");
+    name.className = "chat-file-name";
+    name.textContent = path.split(/[\\/]/).pop() ?? path;
+    name.title = path;
+    chip.append(icon, name);
+    wrapper.appendChild(chip);
+  }
+  if (text) {
+    const bubble = document.createElement("div");
+    bubble.className = "bubble user";
+    bubble.textContent = text;
+    wrapper.appendChild(bubble);
+  }
+  scrollToBottom(true);
+}
+
+function renderUserMessageStart(evt: RpcEvent): void {
+  const content = (evt as { message?: { content?: unknown } }).message?.content;
+  sessionHasMessages = true;
+  renderUserContent(content);
+}
+
 // Built-in pi TUI commands with NO piw counterpart: pi in RPC mode does not
 // execute them (the text would leak to the model), so the webview must not
 // send them as prompts or queue them in steering: only an informative line
@@ -6419,7 +6566,7 @@ const TERMINAL_ONLY_COMMANDS = new Set([
 ]);
 
 function sendOrStop(): void {
-  if (!transport) return;
+  if (!transport || switchingSession || sessionLoading || piRestarting) return;
   // /settings is the same special case as pi.dev TUI: opens the panel
   // instead of sending the text to the model
   if (els.input.value.trim().toLowerCase() === "/settings") {
@@ -6440,7 +6587,7 @@ function sendOrStop(): void {
       // same action as the compact UI button (context gauge)
       els.input.value = "";
       resetInputHeight();
-      startCompactionFromUi();
+      void startCompactionFromUi();
       return;
     }
     if (commandName === "new") {
@@ -6467,12 +6614,11 @@ function sendOrStop(): void {
     addStatusLine(tpl(t("resumeModelUnavailable"), { model: blockedResumeModel }));
     return;
   }
-  // During a model run, extension commands exposed by the command palette
-  // must reach pi immediately: pi executes them before its streaming guard.
-  // Regular messages still enter the steering queue. During compaction every
-  // message remains queued because pi cannot execute commands at that point.
+  // Extension commands always go through prompt so pi can execute them
+  // immediately. Every other message submitted while busy is handed to pi's
+  // native steering queue right now; the webview never delays delivery.
   const extensionCommand = isExtensionSlashCommand(els.input.value);
-  if (compacting || (working && !extensionCommand)) {
+  if ((working || compacting) && !extensionCommand) {
     submitSteering();
     return;
   }
@@ -6484,57 +6630,24 @@ function sendOrStop(): void {
   // do not become conversation messages by themselves.
   if (!extensionCommand) sessionHasMessages = true;
   if (text) pushMessageHistory(text);
-  const wrapper = addMsg("user");
-  // attachments BEFORE the text: images in grid (click → lightbox), then files
   const imageAtts = modelSupportsVision
     ? attachments.filter((a) => a.mimeType.startsWith("image/") && a.dataBase64)
     : [];
   const fileAtts = attachments.filter((a) => !imageAtts.includes(a));
-  if (imageAtts.length > 0) {
-    const grid = document.createElement("div");
-    grid.className = "chat-image-grid";
-    // single image: bigger cell, no aggressive crop
-    if (imageAtts.length === 1) grid.classList.add("single");
-    for (const a of imageAtts) {
-      const img = document.createElement("img");
-      img.className = "chat-image";
-      img.src = `data:${a.mimeType};base64,${a.dataBase64}`;
-      img.alt = a.name;
-      img.title = a.name;
-      img.addEventListener("click", () => openImageLightbox(img.src, a.name));
-      grid.appendChild(img);
-    }
-    wrapper.appendChild(grid);
-  }
-  for (const a of fileAtts) {
-    const chip = document.createElement("div");
-    chip.className = "chat-file";
-    const icon = document.createElement("span");
-    icon.className = "chat-file-icon";
-    icon.innerHTML = attachFileIcon();
-    const name = document.createElement("span");
-    name.className = "chat-file-name";
-    name.textContent = a.name;
-    name.title = a.path;
-    chip.append(icon, name);
-    wrapper.appendChild(chip);
-  }
-  // inline images only if the model is vision; otherwise (and for files) the path
   const inlineImages = imageAtts.map((a) => ({
     type: "image" as const,
     data: a.dataBase64!,
     mimeType: a.mimeType,
   }));
   const fileMentions = fileAtts.map((a) => `[attachment: ${a.path}]`);
-  // the text goes AFTER the attachments
-  if (text) {
-    const bubble = document.createElement("div");
-    bubble.className = "bubble user";
-    bubble.textContent = text;
-    wrapper.appendChild(bubble);
-  }
   const visibleMessage = [text, ...fileMentions].filter(Boolean).join("\n\n");
   const message = attachEditorSelectionContext(visibleMessage, visibleEditorSelection());
+  // Direct prompts are rendered from pi's message_start event, not
+  // optimistically. Extension commands do not emit a user message, so keep
+  // their invocation visible without creating a queue or delivery tracker.
+  if (extensionCommand) {
+    renderUserContent([{ type: "text", text: message }, ...inlineImages]);
+  }
   transport.send({
     channel: "rpc",
     payload: rpc.prompt(
@@ -6549,10 +6662,7 @@ function sendOrStop(): void {
   if (message.trim().startsWith("/") && !isExtensionSlashCommand(message)) {
     notifyCmdNotImplemented();
   }
-  // at send completion (bubble + attachments + badge) ALWAYS go to the bottom:
-  // the old forced scroll before the bubble was not enough — the content
-  // added after left it above, and the "smart" follow then believed the
-  // user had scrolled (dist > margin) and did not move anymore
+  // message_start renders accepted user prompts at the authoritative boundary.
   scrollToBottom(true);
   els.input.value = "";
   resetInputHeight();
@@ -6560,60 +6670,51 @@ function sendOrStop(): void {
   els.input.focus();
 }
 
-// --- steering: local queue + panel (plan 0004) ------------------------------
+// --- steering: pi-owned queue + read-only panel (plan 0004) -----------------
 
-// Enter during processing/compaction: enqueue into the shadow queue.
-// The images travel in memory (only text persisted); the files stay as
-// [attachment: path] mentions in the text.
+// Enter while busy sends to pi immediately. prompt(streamingBehavior: "steer")
+// matches the TUI path while streaming; during compaction the dedicated steer
+// RPC hands the message straight to the same native queue without a webview wait.
 function submitSteering(): void {
   const text = els.input.value.trim();
-  const imageAtts = attachments.filter(
-    (a) => a.mimeType.startsWith("image/") && a.dataBase64,
-  );
+  const imageAtts = modelSupportsVision
+    ? attachments.filter((a) => a.mimeType.startsWith("image/") && a.dataBase64)
+    : [];
   const fileAtts = attachments.filter((a) => !imageAtts.includes(a));
   const visibleMessage = [text, ...fileAtts.map((a) => `[attachment: ${a.path}]`)]
     .filter(Boolean)
     .join("\n\n");
   if (!visibleMessage && imageAtts.length === 0) return;
   const message = attachEditorSelectionContext(visibleMessage, visibleEditorSelection());
-  steerShadow.push({
-    id: `st-${++steerSeq}`,
-    text: message,
-    images: imageAtts.map((a) => ({
-      type: "image" as const,
-      data: a.dataBase64!,
-      mimeType: a.mimeType,
-    })),
-  });
-  persistSteerQueue();
-  renderSteerPanel();
-  updateSteerPlaceholder();
+  const images = imageAtts.map((a) => ({
+    type: "image" as const,
+    data: a.dataBase64!,
+    mimeType: a.mimeType,
+  }));
+  sessionHasMessages = true;
+  if (text) pushMessageHistory(text);
+  const command = compacting
+    ? rpc.steer(message, images.length > 0 ? images : undefined)
+    : rpc.prompt(message, {
+        ...(images.length > 0 ? { images } : {}),
+        streamingBehavior: "steer",
+      });
+  void rpcRequest(command).then(
+    (response) => {
+      if (!response.success) addStatusLine(t("steerSendFailed"));
+    },
+    () => addStatusLine(t("steerSendFailed")),
+  );
   els.input.value = "";
   resetInputHeight();
   clearAttachments();
   els.input.focus();
 }
 
-function persistSteerQueue(): void {
-  // only the text survives the reload (the images no: too heavy)
-  void ideRequest({
-    type: "storeSteerQueue",
-    items: steerShadow.map((m) => ({ text: m.text })),
-  });
+function renderNativeQueues(steering: string[], followUp: string[]): void {
+  renderSteerPanel([...steering, ...followUp]);
 }
 
-async function loadSteerQueue(): Promise<void> {
-  const res = await ideRequest({ type: "getSteerQueue" });
-  const items = res?.ok
-    ? (res.data as { items?: Array<{ text: string }> } | undefined)?.items
-    : undefined;
-  if (items && items.length > 0) {
-    steerShadow = items.map((i) => ({ id: `st-${++steerSeq}`, text: i.text }));
-    renderSteerPanel();
-  }
-}
-
-// textarea placeholder: signals that Enter queues during processing
 function updateSteerPlaceholder(): void {
   if (working || compacting) {
     els.input.placeholder = t("steerPlaceholder");
@@ -6625,179 +6726,74 @@ function updateSteerPlaceholder(): void {
       : t("messagePlaceholder");
 }
 
-// panel between thread and composer: shows the messages STILL to send (shadow
-// queue, normal style) and those ALREADY delivered to pi but not yet injected
-// (steerPending: muted style + spinner, NOT dequeuable anymore — the pi queue
-// cannot be mutated via RPC). As soon as pi processes them (message_start)
-// they disappear.
-function renderSteerPanel(): void {
+// queue_update is the sole source for this panel. Repeated equal messages are
+// intentionally rendered as separate rows in the exact order provided by pi.
+function renderSteerPanel(queued: string[]): void {
   const panel = els.steerPanel;
   const wasHidden = panel.hidden;
   panel.textContent = "";
-  const total = steerShadow.length + steerPending.length;
-  if (total === 0) {
+  if (queued.length === 0) {
     panel.hidden = true;
     return;
   }
   panel.hidden = false;
-  // the panel takes space between chat and composer: brings the chat to the
-  // bottom so the last message does NOT stay hidden under the panel
   if (wasHidden) scrollToBottom(true);
-  // header: title with count + dequeue
   const head = document.createElement("div");
   head.className = "steer-head";
   const title = document.createElement("span");
   title.className = "steer-title";
-  title.textContent = tpl(t("steerQueueCount"), {
-    n: String(total),
-  });
+  title.textContent = tpl(t("steerQueueCount"), { n: String(queued.length) });
   head.appendChild(title);
   const dequeue = document.createElement("button");
   dequeue.type = "button";
   dequeue.className = "steer-dequeue";
   dequeue.textContent = t("steerDequeue");
-  // only the NOT-yet-sent messages return to the editor: the in-flight ones
-  // are already in pi's hands and cannot be recovered
   dequeue.title = t("steerDequeueHint");
-  dequeue.disabled = steerShadow.length === 0;
-  dequeue.addEventListener("click", () => dequeueSteering());
+  dequeue.addEventListener("click", () => void dequeueSteering());
   head.appendChild(dequeue);
   panel.appendChild(head);
-  // INSERTION ORDER PRESERVED: shadow and in-flight queues merged by sequence
-  // (id st-N) — msg1 (in flight) stays in its place, msg2, msg3 below
-  const seqOf = (m: QueuedMessage): number => {
-    const n = /^st-(\d+)$/.exec(m.id);
-    return n ? Number(n[1]) : 0;
-  };
-  const merged = [...steerShadow, ...steerPending].sort((a, b) => seqOf(a) - seqOf(b));
-  for (const m of merged) {
-    appendSteerRow(panel, stripEditorSelectionContext(m.text), steerPending.includes(m));
-  }
+  for (const message of queued)
+    appendSteerRow(panel, stripEditorSelectionContext(message));
 }
 
-function appendSteerRow(panel: HTMLElement, text: string, sending: boolean): void {
+function appendSteerRow(panel: HTMLElement, text: string): void {
   const row = document.createElement("div");
-  row.className = sending ? "steer-row steer-row-sending" : "steer-row";
-  if (sending) {
-    const icon = document.createElement("span");
-    icon.className = "steer-sending-icon";
-    row.appendChild(icon);
-  }
-  const tspan = document.createElement("span");
-  tspan.className = "steer-text";
-  tspan.textContent = text;
-  tspan.title = text;
-  row.appendChild(tspan);
+  row.className = "steer-row";
+  const label = document.createElement("span");
+  label.className = "steer-text";
+  label.textContent = text;
+  label.title = text;
+  row.appendChild(label);
   panel.appendChild(row);
 }
 
-// dequeue (parity with pi.dev Alt+↑): brings ALL the to-send messages back
-// into the editor (joined), empties the shadow queue. The items already sent
-// to pi do not.
-function dequeueSteering(): void {
-  if (steerShadow.length === 0) return;
-  const texts = steerShadow.map((m) => stripEditorSelectionContext(m.text)).join("\n\n");
-  steerShadow = [];
-  persistSteerQueue();
-  const current = els.input.value;
-  els.input.value = current.trim() ? `${texts}\n\n${current}` : texts;
-  autogrowInput();
-  renderSteerPanel();
-  els.input.focus();
-}
-
-// delivery at pi.dev's point: streaming → prompt with streamingBehavior "steer"
-// (pi injects after the turn's tool calls, before the next LLM call);
-// idle (agent_settled) → normal prompt. Mode: one-at-a-time / all.
-function deliverSteering(): void {
-  if (blockedResumeModel || steerShadow.length === 0) return;
-  if (compacting) return; // during the compaction no delivery: compaction_end handles it
-  const n = steeringMode === "all" ? steerShadow.length : 1;
-  const toSend = steerShadow.splice(0, n);
-  persistSteerQueue();
-  const behavior = working ? ("steer" as const) : undefined;
-  for (const m of toSend) {
-    steerPending.push(m);
-    renderSteerPanel();
-    const opts: {
-      images?: Array<{ type: "image"; data: string; mimeType: string }>;
-      streamingBehavior?: "steer";
-    } = {};
-    if (m.images && m.images.length > 0) opts.images = m.images;
-    if (behavior) opts.streamingBehavior = behavior;
-    void rpcRequest(rpc.prompt(m.text, opts), `st-${++steerSeq}`, 0)
-      .then(() => {
-        // ok: stays in steerPending until message_start/queue_update removes it
-      })
-      .catch(() => {
-        // preflight error: back to the queue (if not already injected)
-        const i = steerPending.indexOf(m);
-        if (i >= 0) steerPending.splice(i, 1);
-        if (!steerPending.includes(m)) {
-          steerShadow.unshift(m);
-          persistSteerQueue();
-        }
-        renderSteerPanel();
-        addStatusLine(t("steerSendFailed"));
-      });
-  }
-}
-
-// reconciliation with the native pi queue: NOT shown anymore — when a
-// message is delivered it immediately disappears from the box. Only the
-// internal cleanup stays (message_start removes the delivered item and
-// shows the bubble in chat).
-
-// the "in-flight" items stuck when pi is idle: pi queued them (steer arrived
-// after the turn's continuation check) but NEVER starts a turn to inject them
-// (the pi steer queue is drained only at the start of the next turn). If pi
-// now no longer has them in the queue (pendingMessageCount 0) they are
-// lost/discarded → they return to the shadow queue and are relaunched as
-// NORMAL prompts (idle → pi processes them right away, no duplicates because
-// pi does not have them).
-async function reconcileStuckPending(): Promise<void> {
-  if (steerPending.length === 0) return;
+// pi returns and clears both native queues. No local queue is mutated or
+// retried: queue_update remains authoritative for the visible state.
+async function dequeueSteering(): Promise<void> {
   try {
-    const res = await rpcRequest(rpc.getState(), "st-reconcile", 4000);
-    if (!res.success) return;
-    const data = res.data as
-      { pendingMessageCount?: number; isStreaming?: boolean } | undefined;
-    if (!data) return;
-    if (data.isStreaming === false && (data.pendingMessageCount ?? 0) === 0) {
-      const lost = steerPending;
-      steerPending = [];
-      steerShadow.unshift(...lost);
-      persistSteerQueue();
-      renderSteerPanel();
-      deliverSteering(); // idle → normal prompts → processed right away
+    const response = await rpcRequest(rpc.clearQueue());
+    if (!response.success) {
+      addStatusLine(t("steerDequeueFailed"));
+      return;
     }
+    const data = response.data as { steering?: unknown; followUp?: unknown } | undefined;
+    const steering = Array.isArray(data?.steering)
+      ? data.steering.filter((message): message is string => typeof message === "string")
+      : [];
+    const followUp = Array.isArray(data?.followUp)
+      ? data.followUp.filter((message): message is string => typeof message === "string")
+      : [];
+    const text = [...steering, ...followUp]
+      .map((message) => stripEditorSelectionContext(message))
+      .join("\n\n");
+    if (!text) return;
+    const current = els.input.value;
+    els.input.value = current.trim() ? `${text}\n\n${current}` : text;
+    autogrowInput();
+    els.input.focus();
   } catch {
-    // timeout / error: leave it, the next occasion retries
+    addStatusLine(t("steerDequeueFailed"));
   }
-}
-
-// user message injected by pi (message_start user role): if it was an item in
-// steerPending it is removed and shown in chat (it was not optimistic); if it
-// is the normally sent message it is already rendered → no extra bubble.
-function handleUserMessageStart(evt: RpcEvent): void {
-  const content = (evt as { message?: { content?: unknown } }).message?.content;
-  const text = extractTextContent(content);
-  // cleans from BOTH queues: the delivered item can be in
-  // steerPending (waiting for injection) or have returned to steerShadow
-  const pIdx = steerPending.findIndex((m) => m.text === text);
-  const sIdx = steerShadow.findIndex((m) => m.text === text);
-  if (pIdx >= 0) steerPending.splice(pIdx, 1);
-  if (sIdx >= 0) steerShadow.splice(sIdx, 1);
-  if (pIdx < 0 && sIdx < 0) return;
-  persistSteerQueue();
-  renderSteerPanel();
-  // real user bubble (the steering had not been shown optimistically)
-  const wrapper = addMsg("user");
-  const bubble = document.createElement("div");
-  bubble.className = "bubble user";
-  bubble.textContent = stripEditorSelectionContext(text);
-  wrapper.appendChild(bubble);
-  scrollToBottom();
 }
 
 // --- thinking/tool block aggregation (3px) ---------------------------------
@@ -7884,7 +7880,7 @@ function resetInputHeight(): void {
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
     e.preventDefault();
-    openCmdPalette();
+    if (!switchingSession && !sessionLoading && !piRestarting) openCmdPalette();
   }
 });
 
@@ -7919,12 +7915,7 @@ function trackWorking(evt: RpcEvent): void {
     updateThinkingStopBtn(false);
     // at turn end pi may have assigned a name to the session (auto-title)
     void refreshSessionTitle();
-    // steering: from idle the next queued message is delivered
-    deliverSteering();
-    // steering: reconcile the stuck "in-flight" items (pi idle no longer
-    // has them in the queue → lost/discarded → back to the shadow queue
-    // and relaunch)
-    void reconcileStuckPending();
+    // Queue delivery and any continuation are entirely owned by pi.
   }
 }
 

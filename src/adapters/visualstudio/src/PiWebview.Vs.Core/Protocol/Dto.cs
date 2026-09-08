@@ -46,8 +46,7 @@ public sealed class IdeRequest
     [System.Text.Json.Serialization.JsonPropertyName("path")]
     public string? Path { get; set; }
 
-    // showQuickPick: string[] — storeSteerQueue: SteerQueueItem[] → JsonElement
-    // and per-request-type deserialization (same JSON name "items")
+    // showQuickPick: string[] → JsonElement
     [System.Text.Json.Serialization.JsonPropertyName("items")]
     public List<JsonElement>? Items { get; set; }
 
@@ -337,12 +336,6 @@ public sealed class ThinkingSettings
 {
     [System.Text.Json.Serialization.JsonPropertyName("hideThinkingBlock")]
     public bool HideThinkingBlock { get; set; }
-}
-
-public sealed class SteerQueueItem
-{
-    [System.Text.Json.Serialization.JsonPropertyName("text")]
-    public string Text { get; set; } = "";
 }
 
 public sealed class TrustResult

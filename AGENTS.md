@@ -172,11 +172,19 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   trasformati nel pattern `.code-block` con `Copia`. Il blocco pensiero è
   SEMPRE prima del testo (slot dedicato nel DOM), loader + timer secondi
   durante lo streaming, collassato per default (click per aprire)
+- **Agentic thinking**: raggruppa attività interne consecutive senza creare
+  wrapper assistant vuoti. Testo visibile, `ask_user`, compaction e messaggi
+  utente iniettati via steering chiudono sia il blocco Agentic sia l'eventuale
+  thought normale; l'attività interna successiva apre sempre un nuovo blocco.
+  Prima di attività reale, allo scadere del timeout, il live shell mostra
+  `Waiting for response`; diventa `Agentic thinking` solo al primo thought/tool
 - **Header**: niente brand/stato testuale — dropdown sessioni (lista da
   `src/bridge/sessions.ts`, `~/.pi/agent/sessions/`; switch via
   `switch_session` RPC + ricarica cronologia) + dot connessione + pulsante
   reload + gear (settings: lingua e tema in pannello). `color-scheme` per
-  tema sui form nativi (dropdown che rispettano il tema)
+  tema sui form nativi (dropdown che rispettano il tema). Ogni cambio,
+  creazione, fork o cancellazione sessione attiva subito il loading overlay e
+  blocca mouse, composer e shortcut fino al caricamento della nuova cronologia
 - **Pulsante reload**: riavvia il processo pi (IdeRequest `restartPi`,
   gestito dai 3 host con la stessa meccanica dell'apply dei CLI flags:
   `connection_closed(reason restart)` + `pi_restarted` → re-init trasparente,
@@ -201,6 +209,12 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   `/changelog`, `/hotkeys`, `/quit`, `/model`, `/thinking`) non vengono mai
   inviati a pi (né prompt né steering): mostrano solo un messaggio in chat
   («validi solo da terminale»)
+- **Steering — pi è l'unica fonte autoritativa**: la webview invia subito a pi
+  (`prompt` con `streamingBehavior: "steer"`, oppure `steer` durante la
+  compaction), rende la coda esclusivamente da `queue_update` e usa
+  `clear_queue` per dequeue/STOP. Vietati code semantiche locali, persistenza,
+  retry, attese di consegna, riconciliazione o riapplicazione locale delle
+  modalità; restano ammessi solo buffer tecnici di trasporto/backpressure
 - **Barra stato**: posizione (`above`/`below`/`topbar`) e compattezza sono
   preferenze globali indipendenti. Gli slot `setStatus` sono identificati dal
   `statusKey` RPC: click con conferma per nasconderli, ripristino dai settings;

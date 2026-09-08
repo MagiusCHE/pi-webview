@@ -1,40 +1,34 @@
-# Nessuna RPC per mutare la coda stearing (clearQueue/remove)
+# RPC per svuotare la coda steering
 
 - **Componente**: pi-core (`modes/rpc/rpc-mode.js` + `core/agent-session.js`)
 - **Scoperto**: 2026-08-22/24 (piano 0004 — message steering)
-- **Stato**: aperto — da proporre upstream a @earendil-works
+- **Stato**: risolto upstream; verificato in pi `0.85.1`
 
-## Problema
+## Soluzione upstream
 
-Pi mantiene due code di messaggi in attesa: `steeringQueue` e
-`followUpQueue` (pi-agent-core, `PendingMessageQueue`). La sessione espone:
+La modalità RPC espone `clear_queue`. Il comando svuota in modo atomico le
+code native e restituisce separatamente, nell'ordine mantenuto da pi:
 
-- `steer()` / `followUp()` / `prompt(streamingBehavior)` per ACCODARE;
-- `clearQueue()` per SVUOTARE tutto (usato dal TUI per il dequeue Alt+↑/Esc);
-- `pendingMessageCount`, evento `queue_update`.
+```json
+{
+  "steering": ["Change direction"],
+  "followUp": ["Summarize when finished"]
+}
+```
 
-Ma in **RPC mode non esiste alcun comando** per mutare la coda: né
-`clear_queue`, né `remove_queue_item`. `clearQueue()` è chiamato solo dal TUI
-(`interactive-mode.js` `clearAllQueues`). Non è esposto nemmeno nell'API
-estensioni (verificato in `extensions/types.d.ts`).
+Pi emette inoltre `queue_update` con lo snapshot completo ogni volta che una
+delle due code cambia.
 
-## Impatto
+## Integrazione pi-webview
 
-- Impossibile eliminare/modificare un **singolo** messaggio accodato;
-- Impossibile svuotare la coda nativa da un client RPC (webview) senza
-  riavviare pi.
+Pi-webview non mantiene più code ombra, persistenza, attese di consegna o
+riconciliazione proprie:
 
-## Come lo abbiamo aggirato (piano 0004)
+- invia subito il messaggio a pi tramite `prompt` con
+  `streamingBehavior: "steer"` oppure `steer` durante la compaction;
+- mostra il pannello usando esclusivamente `queue_update`;
+- usa `clear_queue` per riportare nell'editor i messaggi accodati;
+- invia `clear_queue` prima di `abort`, come indicato dal contratto RPC.
 
-La webview tiene una **coda "ombra"** locale (testo persistito) e consegna i
-messaggi a pi nei punti giusti (`turn_end` → `prompt(streamingBehavior:
-"steer")`, `agent_settled` → `prompt` normale). Il dequeue (riporta nell'
-editor) opera sulla coda ombra. Gli item già consegnati a pi (coda nativa)
-non sono recuperabili — limite documentato nel piano.
-
-## Fix suggerito (upstream)
-
-RPC `clear_queue` e/o `remove_queue_item { index | text }` (oppure esporre
-`clearQueue`/`getSteeringMessages` nell'API estensioni e in un comando RPC).
-Con questo la webview potrebbe usare la coda nativa direttamente e fare
-edit/elimina anche sugli item in coda a pi.
+La selezione o rimozione di un singolo elemento non è esposta, ma non è
+necessaria per il comportamento corrente.

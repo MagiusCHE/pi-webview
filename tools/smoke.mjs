@@ -58,7 +58,7 @@ function rpc(ws, command, id) {
 
 try {
   const wsUrl = await waitForReady();
-  console.log(`smoke: bridge pronto → ${wsUrl}`);
+  console.log(`smoke: bridge pronto → ${new URL(wsUrl).origin}`);
 
   const ws = new WebSocket(wsUrl);
   await new Promise((res, rej) => {

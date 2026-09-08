@@ -34,7 +34,7 @@
   - `Host/PiWebviewHost.cs` (spawn/restart di pi, cli flags da `pi --help`,
     fork cross-workspace, env `PI_WEBVIEW_COMPANION=1`, PATH+bash)
   - `Host/IdeBridge.cs` (tutte le IdeRequest del companion VS Code + openFile +
-    clipboardWrite; steer queue persistita per workspace)
+    clipboardWrite; lo steering resta interamente nella coda nativa di pi)
   - `Editor/SelectionTracker.cs` (MEF `ITextCaret`/`ITextSelection` +
     `WindowActivated` → `selection_changed`/`selection_cleared`/`at_mentioned`,
     debounce 150ms, semantica "non azzerare sul focus non-editor")

@@ -1,8 +1,0 @@
-{
-  "channel": "ide",
-  "payload": {
-    "type": "storeSteerQueue",
-    "items": [{ "text": "primo" }, { "text": "secondo" }],
-    "id": "ide-3"
-  }
-}

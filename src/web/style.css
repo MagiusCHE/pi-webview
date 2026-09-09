@@ -1387,6 +1387,114 @@ header {
   word-break: break-word;
   text-align: left;
 }
+.tool-read-input,
+.tool-read-input .code-label,
+.tool-read-arguments {
+  font-family: var(--font-sans);
+}
+.tool-read-arguments {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, max-content) minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 5px;
+  margin: 0;
+  padding: 4px 12px 10px;
+  font-size: 12.5px;
+}
+.tool-read-arguments dt {
+  padding-left: 2ch;
+  color: var(--fg-tertiary);
+  font-weight: normal;
+}
+.tool-read-arguments dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--fg-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tool-edit-path {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4em;
+  padding: 6px 12px;
+  color: var(--fg-secondary);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: normal;
+  overflow-wrap: anywhere;
+}
+.tool-edit-path-label {
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+}
+.tool-edit-operation,
+.tool-edit-fragment {
+  display: flex;
+  flex-direction: column;
+}
+.tool-edit-path + .tool-edit-operation,
+.tool-edit-operation + .tool-edit-operation,
+.tool-edit-fragment + .tool-edit-fragment {
+  border-top: 1px solid var(--border);
+}
+.tool-edit-operation + .tool-edit-operation {
+  border-top-width: 3px;
+}
+.tool-edit-search {
+  background: color-mix(in srgb, var(--diff-rem) 10%, var(--code-bg));
+}
+.tool-edit-replace {
+  background: color-mix(in srgb, var(--diff-add) 10%, var(--code-bg));
+}
+.tool-edit-fragment pre {
+  font-family: var(--font-mono);
+}
+.tool-shell-timeout {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4em;
+  padding: 6px 12px;
+  color: var(--fg-secondary);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: normal;
+}
+.tool-shell-timeout-label {
+  color: var(--fg-tertiary);
+}
+.tool-shell-command {
+  position: relative;
+  border-top: 1px solid var(--border);
+}
+.tool-shell-command > .copy-btn {
+  position: absolute;
+  top: 5px;
+  right: 10px;
+  z-index: 1;
+}
+.tool-shell-command > pre {
+  padding-top: 8px;
+  padding-right: 44px;
+  font-family: var(--font-mono);
+}
+.tool-output-header {
+  justify-content: flex-start;
+}
+.tool-output-header > .copy-btn {
+  margin-left: auto;
+}
+.tool-exit-code {
+  margin-left: 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.tool-exit-code-success {
+  color: var(--diff-add);
+}
+.tool-exit-code-error {
+  color: var(--diff-rem);
+}
 
 /* copy button: single component, same style everywhere */
 .copy-btn {

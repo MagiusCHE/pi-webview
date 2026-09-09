@@ -74,6 +74,14 @@ import {
 import { bridgeUrlWithPageIntent, pageUrlForSession } from "./session-url.ts";
 import { joinCollapseHeaderParts, shouldShowCollapseFooter } from "./collapse-footer.ts";
 import {
+  editArgumentPairs,
+  editArgumentPath,
+  readArgumentEntries,
+  shellArgumentView,
+  shellResultExitCode,
+  writeArgumentContent,
+} from "./tool-arguments.ts";
+import {
   trustIcon,
   sendIcon,
   stopIcon,
@@ -4314,7 +4322,9 @@ function moveAskUserOutsideAgentic(card: HTMLElement): void {
 
 // --- copy (single component, same style everywhere) ---------------------------
 
-function makeCopyButton(text: string): HTMLButtonElement {
+type CopyTextSource = string | (() => string);
+
+function makeCopyButton(text: CopyTextSource): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "copy-btn";
@@ -4324,7 +4334,7 @@ function makeCopyButton(text: string): HTMLButtonElement {
     e.preventDefault();
     e.stopPropagation();
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(typeof text === "function" ? text() : text);
       btn.innerHTML = checkIcon();
       btn.title = t("copied");
       setTimeout(() => {
@@ -4338,7 +4348,7 @@ function makeCopyButton(text: string): HTMLButtonElement {
   return btn;
 }
 
-function addCopyButton(container: HTMLElement, text: string): HTMLButtonElement {
+function addCopyButton(container: HTMLElement, text: CopyTextSource): HTMLButtonElement {
   const btn = makeCopyButton(text);
   container.appendChild(btn);
   return btn;
@@ -4454,6 +4464,7 @@ function finalizeMessage(msg: FinalizedMessage): void {
       const first = toolCalls[0];
       if (first) {
         if (toolsEl) {
+          toolsEl.dataset.toolName = first.name;
           if (first.name === "ask_user") moveAskUserOutsideAgentic(toolsEl);
           renderToolHeader(
             toolsEl.querySelector(".tool-name")!,
@@ -4461,7 +4472,20 @@ function finalizeMessage(msg: FinalizedMessage): void {
           );
           const lbl = toolsEl.querySelector(".code-label");
           if (lbl) lbl.textContent = first.name;
-          if (toolsPre) toolsPre.textContent = first.args;
+          if (first.name === "read") {
+            renderReadToolArguments(toolsEl, first.args, true);
+            toolsPre = null;
+          } else if (first.name === "write") {
+            renderWriteToolArguments(toolsEl, first.args, true);
+          } else if (first.name === "edit") {
+            renderEditToolArguments(toolsEl, first.args);
+            toolsPre = null;
+          } else if (isShellTool(first.name)) {
+            renderShellToolArguments(toolsEl, first.args);
+            toolsPre = null;
+          } else if (toolsPre) {
+            toolsPre.textContent = first.args;
+          }
           const header = toolsEl.querySelector<HTMLElement>(".code-header");
           if (header && !header.querySelector(".copy-btn"))
             addCopyButton(header, first.args);
@@ -4552,9 +4576,137 @@ function setToolExecutionStatus(card: HTMLElement, status: ToolExecutionStatus):
   }
 }
 
+function renderReadToolArguments(
+  card: HTMLElement,
+  rawArgs: string,
+  refreshCopy = false,
+): void {
+  const body = card.querySelector<HTMLElement>(":scope > .code-block:not(.tool-output)");
+  if (!body) return;
+  body.classList.add("tool-read-input");
+  body.querySelector(":scope > pre")?.remove();
+  let list = body.querySelector<HTMLDListElement>(":scope > .tool-read-arguments");
+  if (!list) {
+    list = document.createElement("dl");
+    list.className = "tool-read-arguments";
+    body.appendChild(list);
+  }
+  list.replaceChildren();
+  for (const entry of readArgumentEntries(rawArgs)) {
+    const key = document.createElement("dt");
+    key.textContent = entry.key;
+    const value = document.createElement("dd");
+    value.textContent = entry.value;
+    list.append(key, value);
+  }
+  if (refreshCopy) {
+    const header = body.querySelector<HTMLElement>(":scope > .code-header");
+    const oldCopy = header?.querySelector(".copy-btn");
+    const copy = makeCopyButton(rawArgs);
+    if (oldCopy) oldCopy.replaceWith(copy);
+    else header?.appendChild(copy);
+  }
+}
+
+function renderWriteToolArguments(
+  card: HTMLElement,
+  rawArgs: string,
+  refreshCopy = false,
+): void {
+  const body = card.querySelector<HTMLElement>(":scope > .code-block:not(.tool-output)");
+  const pre = body?.querySelector<HTMLPreElement>(":scope > pre");
+  if (!body || !pre) return;
+  const content = writeArgumentContent(rawArgs) ?? "";
+  // JSON.parse already yields the authoritative content string. Assign it
+  // directly: no trimming, escaping or unescaping beyond parsing the envelope.
+  pre.textContent = content;
+  if (refreshCopy) {
+    const header = body.querySelector<HTMLElement>(":scope > .code-header");
+    const oldCopy = header?.querySelector(".copy-btn");
+    const copy = makeCopyButton(content);
+    if (oldCopy) oldCopy.replaceWith(copy);
+    else header?.appendChild(copy);
+  }
+}
+
+function renderEditToolArguments(card: HTMLElement, rawArgs: string): void {
+  const body = card.querySelector<HTMLElement>(":scope > .code-block:not(.tool-output)");
+  if (!body) return;
+  body.classList.add("tool-edit-input");
+  body.replaceChildren();
+  const path = editArgumentPath(rawArgs);
+  if (path !== null) {
+    const pathRow = document.createElement("div");
+    pathRow.className = "tool-edit-path";
+    const pathLabel = document.createElement("span");
+    pathLabel.className = "tool-edit-path-label";
+    pathLabel.textContent = `${t("editPath")}:`;
+    const pathValue = document.createElement("span");
+    pathValue.className = "tool-edit-path-value";
+    pathValue.textContent = path;
+    pathRow.append(pathLabel, pathValue);
+    body.appendChild(pathRow);
+  }
+  const pairs = editArgumentPairs(rawArgs);
+  for (const pair of pairs) {
+    const operation = document.createElement("div");
+    operation.className = "tool-edit-operation";
+    for (const [kind, title, content] of [
+      ["search", t("editSearch"), pair.search],
+      ["replace", t("editReplace"), pair.replace],
+    ] as const) {
+      const fragment = document.createElement("section");
+      fragment.className = `tool-edit-fragment tool-edit-${kind}`;
+      const header = document.createElement("div");
+      header.className = "code-header";
+      const label = document.createElement("span");
+      label.className = "code-label";
+      label.textContent = title;
+      header.appendChild(label);
+      addCopyButton(header, content);
+      const pre = document.createElement("pre");
+      pre.textContent = content;
+      fragment.append(header, pre);
+      operation.appendChild(fragment);
+    }
+    body.appendChild(operation);
+  }
+}
+
+function isShellTool(name: string): boolean {
+  return name === "bash" || name === "powershell";
+}
+
+function renderShellToolArguments(card: HTMLElement, rawArgs: string): void {
+  const body = card.querySelector<HTMLElement>(":scope > .code-block:not(.tool-output)");
+  if (!body) return;
+  body.classList.add("tool-shell-input");
+  body.replaceChildren();
+  const view = shellArgumentView(rawArgs);
+  const timeoutRow = document.createElement("div");
+  timeoutRow.className = "tool-shell-timeout";
+  const timeoutLabel = document.createElement("span");
+  timeoutLabel.className = "tool-shell-timeout-label";
+  timeoutLabel.textContent = `${t("shellTimeout")}:`;
+  const timeoutValue = document.createElement("span");
+  timeoutValue.textContent = view?.timeout ?? "—";
+  timeoutRow.append(timeoutLabel, timeoutValue);
+
+  const command = view?.command ?? "";
+  const commandBlock = document.createElement("div");
+  commandBlock.className = "tool-shell-command";
+  commandBlock.appendChild(makeCopyButton(command));
+  const pre = document.createElement("pre");
+  // Use the parsed command exactly once and assign it directly as text.
+  pre.textContent = command;
+  commandBlock.appendChild(pre);
+  body.append(timeoutRow, commandBlock);
+}
+
 function buildToolCard(tc: ToolCallInfo): HTMLElement {
   const d = document.createElement("details");
   d.className = "tool-card";
+  d.dataset.toolName = tc.name;
   const s = document.createElement("summary");
   const name = document.createElement("span");
   name.className = "tool-name";
@@ -4576,9 +4728,16 @@ function buildToolCard(tc: ToolCallInfo): HTMLElement {
   const pre = document.createElement("pre");
   pre.textContent = tc.args;
   header.append(label);
-  addCopyButton(header, tc.args);
+  addCopyButton(
+    header,
+    tc.name === "write" ? (writeArgumentContent(tc.args) ?? "") : tc.args,
+  );
   body.append(header, pre);
   d.append(s, body);
+  if (tc.name === "read") renderReadToolArguments(d, tc.args);
+  else if (tc.name === "write") renderWriteToolArguments(d, tc.args);
+  else if (tc.name === "edit") renderEditToolArguments(d, tc.args);
+  else if (isShellTool(tc.name)) renderShellToolArguments(d, tc.args);
   return d;
 }
 
@@ -4617,6 +4776,7 @@ function buildThinkingCard(
 function buildResultCard(toolName: string, output: string, isError = false): HTMLElement {
   const d = document.createElement("details");
   d.className = "tool-card";
+  d.dataset.toolName = toolName;
   const s = document.createElement("summary");
   const name = document.createElement("span");
   name.className = "tool-name";
@@ -4626,12 +4786,12 @@ function buildResultCard(toolName: string, output: string, isError = false): HTM
   tag.textContent = `· ${t("result")}`;
   s.append(name, tag);
   const body = document.createElement("div");
-  body.className = "code-block";
+  body.className = "code-block tool-output";
   const header = document.createElement("div");
-  header.className = "code-header";
+  header.className = "code-header tool-output-header";
   const label = document.createElement("span");
   label.className = "code-label";
-  label.textContent = "output";
+  label.textContent = isShellTool(toolName) ? t("result") : "output";
   const MAX = 10_000;
   const truncated = output.length > MAX;
   const pre = document.createElement("pre");
@@ -4641,6 +4801,7 @@ function buildResultCard(toolName: string, output: string, isError = false): HTM
   body.append(header, pre);
   d.append(s, body);
   setToolExecutionStatus(d, isError ? "error" : "success");
+  renderShellResultExitCode(d, output, isError);
   return d;
 }
 
@@ -4906,17 +5067,39 @@ function ensureToolOutput(card: HTMLElement, id: string): HTMLPreElement {
     const body = document.createElement("div");
     body.className = "code-block tool-output";
     const header = document.createElement("div");
-    header.className = "code-header";
+    header.className = "code-header tool-output-header";
     const label = document.createElement("span");
     label.className = "code-label";
     label.textContent = t("result");
     pre = document.createElement("pre");
     header.append(label);
+    addCopyButton(header, () => pre?.textContent ?? "");
     body.append(header, pre);
     card.appendChild(body);
     toolOutputPre.set(id, pre);
   }
   return pre;
+}
+
+function renderShellResultExitCode(
+  card: HTMLElement,
+  output: string,
+  isError: boolean,
+  explicitCode?: unknown,
+): void {
+  if (!isShellTool(card.dataset.toolName ?? "")) return;
+  const header = card.querySelector<HTMLElement>(
+    ":scope > .tool-output > .tool-output-header",
+  );
+  if (!header) return;
+  header.querySelector(":scope > .tool-exit-code")?.remove();
+  const code = shellResultExitCode(output, isError, explicitCode);
+  const exit = document.createElement("span");
+  exit.className = `tool-exit-code tool-exit-code-${isError ? "error" : "success"}`;
+  exit.textContent = `${t("toolExitCode")}: ${code ?? "—"}`;
+  const resultLabel = header.querySelector(":scope > .code-label");
+  if (resultLabel) resultLabel.after(exit);
+  else header.appendChild(exit);
 }
 
 // --- diff stats (added/removed/modified lines) -------------------------------
@@ -5026,13 +5209,19 @@ function handleToolExecution(evt: RpcEvent): void {
       scrollToBottom();
     }
   } else if (evt.type === "tool_execution_end") {
-    const status: ToolExecutionStatus = evt.isError === true ? "error" : "success";
+    const isError = evt.isError === true;
+    const status: ToolExecutionStatus = isError ? "error" : "success";
     forEachToolCard(id, (c) => {
       stopToolTimer(c);
       setToolExecutionStatus(c, status);
     });
     const res = evt.result as
-      { content?: unknown; details?: { diff?: string } } | undefined;
+      | {
+          content?: unknown;
+          exitCode?: unknown;
+          details?: { diff?: string; exitCode?: unknown };
+        }
+      | undefined;
     // added/removed/modified lines from the diff (edit/write/edit-diff)
     const diff = res?.details?.diff;
     if (diff) renderToolDiff(card, diff);
@@ -5047,6 +5236,12 @@ function handleToolExecution(evt: RpcEvent): void {
       pre.textContent = text;
       scrollToBottom();
     }
+    renderShellResultExitCode(
+      card,
+      text,
+      isError,
+      res?.exitCode ?? res?.details?.exitCode,
+    );
   }
 }
 
@@ -5306,6 +5501,7 @@ function renderRpcEvent(evt: RpcEvent): void {
             breakAgenticChain();
           }
           const card = ensureToolCard(tc.name, tc.name === "ask_user");
+          card.dataset.toolName = tc.name;
           // the timer starts AS SOON AS the card is born (args generation
           // included), not at tool_execution_start: while the diff counters
           // scroll the timer already runs. startToolTimer is idempotent (the
@@ -5315,7 +5511,18 @@ function renderRpcEvent(evt: RpcEvent): void {
           setToolExecutionStatus(card, "running");
           // new tool: reset the args of the previous tool (multi-tool)
           toolsText = "";
-          if (toolsPre) toolsPre.textContent = "";
+          if (tc.name === "read") {
+            renderReadToolArguments(card, "");
+            toolsPre = null;
+          } else if (tc.name === "edit") {
+            renderEditToolArguments(card, "");
+            toolsPre = null;
+          } else if (isShellTool(tc.name)) {
+            renderShellToolArguments(card, "");
+            toolsPre = null;
+          } else if (toolsPre) {
+            toolsPre.textContent = "";
+          }
           renderToolHeader(
             card.querySelector(".tool-name")!,
             toolSummary(tc.name, "", workspacePath ?? undefined),
@@ -5349,12 +5556,17 @@ function renderRpcEvent(evt: RpcEvent): void {
       startToolTimer(fallbackCard);
       setToolExecutionStatus(fallbackCard, "running");
       toolsText += action.delta;
-      if (toolsPre) toolsPre.textContent = toolsText;
       // write: LIVE line counter — here the deltas REALLY scroll (the
       // content is long) and the number rises in real time. The edits NO
       // (args in bursts): for them only the exact diff at execution end stays.
       if (toolsEl) {
         const tName = toolsEl.querySelector(".tool-name")?.textContent ?? "";
+        if (tName === "read") renderReadToolArguments(toolsEl, toolsText);
+        else if (tName === "write") renderWriteToolArguments(toolsEl, toolsText);
+        else if (tName === "edit") renderEditToolArguments(toolsEl, toolsText);
+        else if (isShellTool(toolsEl.dataset.toolName ?? tName))
+          renderShellToolArguments(toolsEl, toolsText);
+        else if (toolsPre) toolsPre.textContent = toolsText;
         const streamedPath = streamedToolPath(
           tName,
           toolsText,
@@ -5401,6 +5613,7 @@ function renderRpcEvent(evt: RpcEvent): void {
       disarmWaitingResponse(agenticThinking);
       if (toolsEl) {
         const tcName = action.toolCall.name;
+        toolsEl.dataset.toolName = tcName;
         if (tcName === "ask_user") moveAskUserOutsideAgentic(toolsEl);
         else registerAgenticTool(toolsEl, tcName);
         // ask_user: the row shows the question/answer (split cards or answer
@@ -5413,6 +5626,18 @@ function renderRpcEvent(evt: RpcEvent): void {
         }
         const label = toolsEl.querySelector(".code-label");
         if (label) label.textContent = tcName;
+        if (tcName === "read") {
+          renderReadToolArguments(toolsEl, action.toolCall.args, true);
+          toolsPre = null;
+        } else if (tcName === "write") {
+          renderWriteToolArguments(toolsEl, action.toolCall.args, true);
+        } else if (tcName === "edit") {
+          renderEditToolArguments(toolsEl, action.toolCall.args);
+          toolsPre = null;
+        } else if (isShellTool(tcName)) {
+          renderShellToolArguments(toolsEl, action.toolCall.args);
+          toolsPre = null;
+        }
         if (action.toolCall.id)
           toolCardsById.set(action.toolCall.id, toolsEl as HTMLElement);
         // write: pi does NOT return the diff (only "wrote X bytes") — the +N
@@ -6064,7 +6289,8 @@ function renderHistory(messages: unknown[]): void {
           const pre = ensureToolOutput(card, tcId);
           pre.textContent = output;
           // diff badge (edit): il diff è nei details a livello message
-          const det = (msg as { details?: { diff?: string } }).details;
+          const det = (msg as { details?: { diff?: string; exitCode?: unknown } })
+            .details;
           const diff = det?.diff;
           if (diff) renderToolDiff(card, diff);
           // durata reale del tool: timestamp toolResult − timestamp assistant
@@ -6072,6 +6298,12 @@ function renderHistory(messages: unknown[]): void {
             const timerEl = card.querySelector<HTMLElement>(".tool-timer");
             if (timerEl) timerEl.textContent = fmtToolTime(ts - start);
           }
+          renderShellResultExitCode(
+            card,
+            output,
+            msg.isError === true,
+            (msg as { exitCode?: unknown }).exitCode ?? det?.exitCode,
+          );
           scrollToBottom();
         }
       } else {

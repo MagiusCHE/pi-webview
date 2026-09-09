@@ -39,8 +39,7 @@ public static class IdeBridge
                     return;
                 case "storeSession":
                     if (req.Path is null) { host.PostIdeResponse(Fail(req, "storeSession: missing path")); return; }
-                    host.CurrentSessionPath = req.Path;
-                    host.Callbacks.OnSessionChange(req.Path);
+                    host.StoreSession(req.Path);
                     host.PostIdeResponse(Ok(req, null));
                     return;
                 case "openNewChat":
@@ -125,7 +124,7 @@ public static class IdeBridge
                 case "getCliFlags":
                 {
                     var available = await host.AvailableFlagsAsync().ConfigureAwait(false);
-                    var values = host.Sessions.ReadSessionCliFlags(req.SessionPath ?? host.CurrentSessionPath ?? "");
+                    var values = host.CliFlagValues(req.SessionPath);
                     host.PostIdeResponse(Ok(req, new Dictionary<string, object?>
                     {
                         ["available"] = available,
@@ -136,9 +135,8 @@ public static class IdeBridge
                 case "setCliFlags":
                 {
                     if (req.Flags is null) { host.PostIdeResponse(Fail(req, "setCliFlags: missing flags")); return; }
-                    host.Sessions.WriteSessionCliFlags(req.SessionPath ?? host.CurrentSessionPath ?? "", req.Flags);
                     host.PostIdeResponse(Ok(req, new Dictionary<string, object?> { ["flags"] = req.Flags }));
-                    await host.RestartPiAsync().ConfigureAwait(false);
+                    await host.ApplyCliFlagsAsync(req.SessionPath, req.Flags).ConfigureAwait(false);
                     return;
                 }
                 case "forkSession":

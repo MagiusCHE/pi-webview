@@ -390,6 +390,8 @@ function main(): void {
       send({ channel: "ide", payload: { ...payload, id } });
 
     let currentSessionPath = intent.kind === "session" ? intent.sessionPath : undefined;
+    let activeCliFlags = readSessionCliFlags(currentSessionPath ?? "");
+    let cliFlagsNeedSessionPersistence = false;
     // Browser refresh can resume a session from another workspace. The session
     // header is authoritative, so launch pi in its saved cwd rather than in
     // the directory where the long-lived bridge happened to start.
@@ -440,18 +442,25 @@ function main(): void {
         },
       );
 
-    let pi = makePi(workspaceDir, currentSessionPath);
+    let pi = makePi(workspaceDir, currentSessionPath, activeCliFlags);
     pi.start();
     log(`channel open (intent=${intent.kind})`);
 
     const restartPi = (sessionPath: string | undefined, flags: CliFlags): void => {
-      currentSessionPath = sessionPath;
+      activeCliFlags = { ...flags };
       pi.dispose();
+      // pi removes an empty session file while shutting down. Re-check after
+      // dispose: never resume a vanished path, but keep the applied flags for
+      // the replacement process and persist them when its JSONL appears.
+      currentSessionPath =
+        sessionPath && existsSync(sessionPath) ? sessionPath : undefined;
+      cliFlagsNeedSessionPersistence =
+        !currentSessionPath && Object.keys(activeCliFlags).length > 0;
       send({
         channel: "rpc",
         payload: { type: "connection_closed", reason: "restart" },
       });
-      pi = makePi(workspaceDir, sessionPath, flags);
+      pi = makePi(workspaceDir, currentSessionPath, activeCliFlags);
       pi.start();
       send({ channel: "rpc", payload: { type: "pi_restarted" } });
     };
@@ -464,7 +473,9 @@ function main(): void {
         workspaceDir = newCwd;
         currentSessionPath = sessionPath;
         pi.dispose();
-        pi = makePi(newCwd, sessionPath);
+        activeCliFlags = readSessionCliFlags(sessionPath ?? "");
+        cliFlagsNeedSessionPersistence = false;
+        pi = makePi(newCwd, sessionPath, activeCliFlags);
         pi.start();
         resolve();
       });
@@ -478,6 +489,15 @@ function main(): void {
         configStore.patch(req.patch);
         log(`config updated: ${JSON.stringify(req.patch)}`);
         respond(req.id ?? "", { ok: true, data: configStore.get() });
+        return;
+      }
+      if (req.type === "storeSession") {
+        if (cliFlagsNeedSessionPersistence) {
+          writeSessionCliFlags(req.path, activeCliFlags);
+          cliFlagsNeedSessionPersistence = false;
+        }
+        currentSessionPath = req.path;
+        respond(req.id ?? "", { ok: true });
         return;
       }
       if (req.type === "getSessionSettings") {
@@ -512,14 +532,17 @@ function main(): void {
         return;
       }
       if (req.type === "getCliFlags") {
-        const sessionPath = req.sessionPath ?? currentSessionPath ?? "";
+        const sessionPath = req.sessionPath ?? currentSessionPath;
         if (sessionPath) currentSessionPath = sessionPath;
         void availableCliFlags().then((available) =>
           respond(req.id ?? "", {
             ok: true,
             data: {
               available,
-              values: readSessionCliFlags(sessionPath),
+              values:
+                sessionPath && existsSync(sessionPath)
+                  ? readSessionCliFlags(sessionPath)
+                  : { ...activeCliFlags },
             },
           }),
         );
@@ -529,6 +552,9 @@ function main(): void {
         const sessionPath = req.sessionPath ?? currentSessionPath;
         const next = req.flags ?? {};
         if (sessionPath) writeSessionCliFlags(sessionPath, next);
+        activeCliFlags = { ...next };
+        cliFlagsNeedSessionPersistence =
+          !sessionPath && Object.keys(activeCliFlags).length > 0;
         respond(req.id ?? "", { ok: true, data: { flags: next } });
         restartPi(sessionPath, next);
         return;
@@ -652,7 +678,10 @@ function main(): void {
           return;
         }
         respond(req.id ?? "", { ok: true, data: { needsRestart: true } });
-        restartPi(currentSessionPath, readSessionCliFlags(currentSessionPath ?? ""));
+        restartPi(
+          currentSessionPath,
+          currentSessionPath ? readSessionCliFlags(currentSessionPath) : activeCliFlags,
+        );
         return;
       }
       if (req.type === "getTrust") {
@@ -753,7 +782,10 @@ function main(): void {
       // + pi_restarted and re-initializes transparently
       if (req.type === "restartPi") {
         respond(req.id ?? "", { ok: true });
-        restartPi(currentSessionPath, readSessionCliFlags(currentSessionPath ?? ""));
+        restartPi(
+          currentSessionPath,
+          currentSessionPath ? readSessionCliFlags(currentSessionPath) : activeCliFlags,
+        );
         return;
       }
       // standalone: the webview shows browser notifications itself — nothing to do
@@ -805,8 +837,10 @@ function main(): void {
         const payload = frame.payload as { type?: string; sessionPath?: string };
         if (payload.type === "switch_session" && payload.sessionPath) {
           currentSessionPath = payload.sessionPath;
+          cliFlagsNeedSessionPersistence = false;
         } else if (payload.type === "new_session") {
           currentSessionPath = undefined;
+          cliFlagsNeedSessionPersistence = Object.keys(activeCliFlags).length > 0;
         }
         pi.send(frame.payload);
         return;

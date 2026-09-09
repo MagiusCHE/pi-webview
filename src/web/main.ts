@@ -54,6 +54,10 @@ import {
   agenticHeaderLabelKey,
   agenticToolMetric,
   emptyAgenticCounts,
+  WAITING_RESPONSE_DELAY_MS,
+  waitingResponseDelayRemaining,
+  waitingResponseRestartAt,
+  visibleThinkingContent,
   type AgenticCounts,
   type AgenticMetric,
 } from "./agentic-thinking.ts";
@@ -68,6 +72,7 @@ import {
   setStatusKeyHidden,
 } from "./status-preferences.ts";
 import { bridgeUrlWithPageIntent, pageUrlForSession } from "./session-url.ts";
+import { joinCollapseHeaderParts, shouldShowCollapseFooter } from "./collapse-footer.ts";
 import {
   trustIcon,
   sendIcon,
@@ -75,6 +80,7 @@ import {
   attachFileIcon,
   newChatIcon,
   thinkingBlocksIcon,
+  arrowUpIcon,
   settingsIcon,
   reloadIcon,
   updateIcon,
@@ -669,6 +675,7 @@ function applyUiStrings(): void {
   updateStatus();
   updateThemeButtons();
   populateSessionMenu();
+  refreshCollapseFooters();
   // theme: inside the VS Code webview the IDE manages it — no choice
   if (runtime.isVsCode) {
     const row = els.themeRow.closest(".settings-row") as HTMLElement | null;
@@ -801,16 +808,8 @@ function handleIdeResponse(res: IdeResponse): void {
     if (typeof cfg.statsBarCompact === "boolean") {
       applyStatsBarCompact(cfg.statsBarCompact);
     }
-    if (
-      typeof cfg.agenticThinking === "boolean" &&
-      cfg.agenticThinking !== agenticThinking
-    ) {
-      agenticThinking = cfg.agenticThinking;
-      els.agenticThinking.checked = agenticThinking;
-      // Enabling starts a fresh future chain. When disabling, keep the old
-      // pointer only long enough to clean up a pending waiting-only block.
-      if (agenticThinking) activeAgenticBlock = null;
-      agenticRunStartedAt = agenticThinking && working ? performance.now() : 0;
+    if (typeof cfg.agenticThinking === "boolean") {
+      applyAgenticThinkingPreference(cfg.agenticThinking);
     }
     if (Object.prototype.hasOwnProperty.call(cfg, "hiddenStatusKeys")) {
       hiddenStatusKeys = normalizeHiddenStatusKeys(cfg.hiddenStatusKeys);
@@ -1551,7 +1550,10 @@ async function deleteSessionFlow(path: string): Promise<void> {
       els.thread.textContent = "";
       try {
         const response = await rpcRequest({ type: "new_session" });
-        if (response.success) renderNativeQueues([], []);
+        if (response.success) {
+          currentSessionPath = null;
+          renderNativeQueues([], []);
+        }
       } catch {
         // new_session failed: delete anyway, refreshSessions realigns
       }
@@ -1576,6 +1578,7 @@ async function startNewSession(): Promise<void> {
   try {
     const res = await rpcRequest({ type: "new_session" });
     if (!res.success) return;
+    currentSessionPath = null;
     renderNativeQueues([], []);
     els.thread.textContent = "";
     sessionHasMessages = false;
@@ -1690,14 +1693,18 @@ els.statsBarCompact.addEventListener("change", () => {
   persistWebviewConfig({ statsBarCompact });
 });
 
-// This preference changes only how future events are presented. Existing DOM
-// stays untouched; reloading the session reconstructs all history in the new mode.
+// A presentation-mode change is a hard boundary for live internal activity.
+// Existing completed DOM stays untouched; only the active chain is finalized.
+function applyAgenticThinkingPreference(enabled: boolean): void {
+  if (enabled === agenticThinking) return;
+  breakInternalActivityChain();
+  agenticThinking = enabled;
+  els.agenticThinking.checked = enabled;
+  agenticRunStartedAt = enabled && working ? performance.now() : 0;
+}
+
 els.agenticThinking.addEventListener("change", () => {
-  agenticThinking = els.agenticThinking.checked;
-  // Enabling starts a fresh future chain. When disabling, keep the old
-  // pointer only long enough to clean up a pending waiting-only block.
-  if (agenticThinking) activeAgenticBlock = null;
-  agenticRunStartedAt = agenticThinking && working ? performance.now() : 0;
+  applyAgenticThinkingPreference(els.agenticThinking.checked);
   persistWebviewConfig({ agenticThinking });
 });
 
@@ -2615,11 +2622,11 @@ async function persistBrowserSessionUrl(): Promise<void> {
   if (next !== location.href) history.replaceState(null, "", next);
 }
 
-// saves the current session in the companion (VS Code globalState): on
-// window reloads pi is restarted with --session <path> and resumes the open
-// conversation (in the IDE webview modes)
+// Reports the materialized session path to every host. IDE companions persist
+// it for reload; standalone uses it to persist CLI flags applied while the new
+// session had no JSONL file yet.
 function persistSessionPath(): void {
-  if (!runtime.isIDE || !currentSessionPath) return;
+  if (!currentSessionPath) return;
   void ideRequest({ type: "storeSession", path: currentSessionPath });
 }
 
@@ -2804,18 +2811,328 @@ function scrollToBottom(force = false): void {
   });
 }
 
+interface CollapseFooterBinding {
+  root: HTMLElement;
+  header: HTMLElement;
+  body: HTMLElement;
+  footerHost: HTMLElement;
+  footer: HTMLElement;
+  expanded: () => boolean;
+  collapse: () => void;
+  resizeObserver: ResizeObserver;
+  mutationObserver: MutationObserver;
+  frame: number | null;
+}
+
+const collapseFooterBindings = new Map<HTMLElement, CollapseFooterBinding>();
+const COLLAPSIBLE_SELECTOR =
+  "details.tool-card, details.session-card, .thinking-card, .agentic-thinking-card";
+
+function repeatedCollapseHeaderParts(header: HTMLElement): string[] {
+  const parts: string[] = [];
+  for (const child of header.children) {
+    if (child.matches(".collapse-footer")) continue;
+    if (child.classList.contains("agentic-thinking-counts")) {
+      for (const count of child.querySelectorAll<HTMLElement>(
+        ":scope > .agentic-thinking-count",
+      )) {
+        parts.push(
+          joinCollapseHeaderParts(
+            Array.from(count.children, (item) => item.textContent ?? ""),
+          ),
+        );
+      }
+      continue;
+    }
+    const text = (child.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (text) parts.push(text);
+  }
+  return parts;
+}
+
+function cloneCollapseHeaderChild(child: Element): Element | null {
+  if (child.matches(".collapse-footer")) return null;
+  const copy = child.cloneNode(true) as Element;
+  for (const identified of copy.querySelectorAll<HTMLElement>("[id]")) {
+    identified.removeAttribute("id");
+  }
+  copy.removeAttribute("id");
+  return copy;
+}
+
+function sameCloneShape(target: Node, source: Node): boolean {
+  if (target.nodeType !== source.nodeType) return false;
+  if (target instanceof Element && source instanceof Element) {
+    return (
+      target.tagName === source.tagName && target.namespaceURI === source.namespaceURI
+    );
+  }
+  return true;
+}
+
+function syncClonedNode(target: Node, source: Node): void {
+  if (target.nodeType === Node.TEXT_NODE && source.nodeType === Node.TEXT_NODE) {
+    if (target.textContent !== source.textContent)
+      target.textContent = source.textContent;
+    return;
+  }
+  if (!(target instanceof Element) || !(source instanceof Element)) return;
+  for (const attribute of Array.from(target.attributes)) {
+    if (!source.hasAttribute(attribute.name)) target.removeAttribute(attribute.name);
+  }
+  for (const attribute of Array.from(source.attributes)) {
+    if (target.getAttribute(attribute.name) !== attribute.value) {
+      target.setAttribute(attribute.name, attribute.value);
+    }
+  }
+  const targets = Array.from(target.childNodes);
+  const sources = Array.from(source.childNodes);
+  if (
+    targets.length !== sources.length ||
+    targets.some((node, index) => !sameCloneShape(node, sources[index]!))
+  ) {
+    target.replaceChildren(...sources.map((node) => node.cloneNode(true)));
+    return;
+  }
+  for (let index = 0; index < targets.length; index += 1) {
+    syncClonedNode(targets[index]!, sources[index]!);
+  }
+}
+
+function wireCollapseFooterActions(binding: CollapseFooterBinding): void {
+  const sourceButtons = Array.from(binding.header.querySelectorAll("button"));
+  const clonedButtons = Array.from(binding.footer.querySelectorAll("button"));
+  for (let index = 0; index < clonedButtons.length; index += 1) {
+    const clone = clonedButtons[index]!;
+    const source = sourceButtons[index];
+    clone.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      source?.click();
+    };
+  }
+}
+
+function syncCollapseFooterHeader(binding: CollapseFooterBinding): string {
+  binding.footer.className = `collapse-footer ${Array.from(binding.header.classList).join(" ")}`;
+  let icon = binding.footer.querySelector<HTMLElement>(":scope > .collapse-footer-icon");
+  if (!icon) {
+    icon = document.createElement("span");
+    icon.className = "collapse-footer-icon";
+    icon.innerHTML = arrowUpIcon();
+    binding.footer.prepend(icon);
+  }
+  const sources = Array.from(binding.header.children)
+    .map(cloneCollapseHeaderChild)
+    .filter((child): child is Element => child !== null);
+  const targets = Array.from(binding.footer.children).filter((child) => child !== icon);
+  for (let index = 0; index < sources.length; index += 1) {
+    const source = sources[index]!;
+    const target = targets[index];
+    if (!target) {
+      binding.footer.appendChild(source);
+    } else if (!sameCloneShape(target, source)) {
+      target.replaceWith(source);
+    } else {
+      syncClonedNode(target, source);
+    }
+  }
+  for (const extra of targets.slice(sources.length)) extra.remove();
+  wireCollapseFooterActions(binding);
+  return joinCollapseHeaderParts(repeatedCollapseHeaderParts(binding.header));
+}
+
+function updateCollapseFooter(binding: CollapseFooterBinding): void {
+  binding.frame = null;
+  if (!binding.root.isConnected) {
+    binding.resizeObserver.disconnect();
+    binding.mutationObserver.disconnect();
+    collapseFooterBindings.delete(binding.root);
+    return;
+  }
+  // Streaming content can be appended after the footer. Keep the collapse
+  // control at the actual bottom of the expanded section.
+  if (binding.footerHost.lastElementChild !== binding.footer) {
+    binding.footerHost.appendChild(binding.footer);
+  }
+  const headerText = syncCollapseFooterHeader(binding) || t("collapseSection");
+  const title = t("collapseSection");
+  binding.footer.title = title;
+  binding.footer.setAttribute("aria-label", `${title}: ${headerText}`);
+  const rootFontSize = Number.parseFloat(
+    getComputedStyle(document.documentElement).fontSize,
+  );
+  const visibleFooterHeight = binding.footer.hidden ? 0 : binding.footer.offsetHeight;
+  binding.footer.hidden = !shouldShowCollapseFooter(
+    binding.expanded(),
+    binding.root.scrollHeight,
+    visibleFooterHeight,
+    Number.isFinite(rootFontSize) ? rootFontSize : 16,
+  );
+}
+
+function scheduleCollapseFooterUpdate(binding: CollapseFooterBinding): void {
+  if (binding.frame !== null) return;
+  binding.frame = requestAnimationFrame(() => updateCollapseFooter(binding));
+}
+
+function enhanceCollapsible(root: HTMLElement): void {
+  if (collapseFooterBindings.has(root)) return;
+  let header: HTMLElement | null = null;
+  let body: HTMLElement | null = null;
+  let footerHost: HTMLElement | null = null;
+  let expanded: (() => boolean) | null = null;
+  let collapse: (() => void) | null = null;
+
+  if (root instanceof HTMLDetailsElement) {
+    header = root.querySelector<HTMLElement>(":scope > summary");
+    // A tool can append args, output and diff as separate body sections over
+    // time. Observe the complete <details> and keep the footer after all of
+    // them, rather than binding it to only the first .code-block.
+    body = root;
+    footerHost = root;
+    expanded = () => root.open;
+    collapse = () => {
+      root.open = false;
+    };
+  } else if (root.classList.contains("agentic-thinking-card")) {
+    header = root.querySelector<HTMLElement>(":scope > .agentic-thinking-head");
+    body = root.querySelector<HTMLElement>(":scope > .agentic-thinking-body");
+    footerHost = root;
+    expanded = () => !body?.hidden;
+    collapse = () => {
+      if (body) setThinkingBodyExpanded(body, false);
+      updateThinkingBlocksButton();
+    };
+  } else {
+    header = root.querySelector<HTMLElement>(":scope > .thinking-head");
+    body = root.querySelector<HTMLElement>(":scope > .thinking-content");
+    footerHost = body;
+    // Thoughts inside Agentic thinking are intentionally always expanded and
+    // are controlled by the parent Agentic block, not by a nested footer.
+    if (header?.getAttribute("role") !== "button") return;
+    expanded = () => !body?.hidden;
+    collapse = () => {
+      if (body) setThinkingBodyExpanded(body, false);
+      updateThinkingBlocksButton();
+    };
+  }
+  if (!header || !body || !footerHost || !expanded || !collapse) return;
+
+  const footer = document.createElement("div");
+  footer.className = "collapse-footer";
+  footer.classList.add(...header.classList);
+  footer.hidden = true;
+  footer.tabIndex = 0;
+  footer.setAttribute("role", "button");
+
+  const mutationObserver = new MutationObserver((records) => {
+    if (
+      records.every((record) =>
+        record.target instanceof Node ? footer.contains(record.target) : false,
+      )
+    ) {
+      return;
+    }
+    scheduleCollapseFooterUpdate(binding);
+  });
+  const resizeObserver = new ResizeObserver(() => scheduleCollapseFooterUpdate(binding));
+  const binding: CollapseFooterBinding = {
+    root,
+    header,
+    body,
+    footerHost,
+    footer,
+    expanded,
+    collapse,
+    resizeObserver,
+    mutationObserver,
+    frame: null,
+  };
+  collapseFooterBindings.set(root, binding);
+  const collapseFromFooter = (): void => {
+    binding.footer.hidden = true;
+    binding.collapse();
+    binding.header.focus({ preventScroll: true });
+    scheduleCollapseFooterUpdate(binding);
+  };
+  footer.addEventListener("click", (event) => {
+    if ((event.target as Element | null)?.closest("button, a")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    collapseFromFooter();
+  });
+  footer.addEventListener("keydown", (event) => {
+    if (event.target !== footer || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    collapseFromFooter();
+  });
+  footerHost.appendChild(footer);
+  mutationObserver.observe(header, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+  mutationObserver.observe(body, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: root instanceof HTMLDetailsElement ? ["hidden", "open"] : ["hidden"],
+  });
+  if (root instanceof HTMLDetailsElement) {
+    root.addEventListener("toggle", () => scheduleCollapseFooterUpdate(binding));
+  }
+  resizeObserver.observe(root);
+  scheduleCollapseFooterUpdate(binding);
+}
+
+function enhanceCollapseFooters(node: Node): void {
+  if (!(node instanceof HTMLElement)) return;
+  if (node.matches(COLLAPSIBLE_SELECTOR)) enhanceCollapsible(node);
+  for (const root of node.querySelectorAll<HTMLElement>(COLLAPSIBLE_SELECTOR)) {
+    enhanceCollapsible(root);
+  }
+}
+
+function refreshCollapseFooters(): void {
+  for (const binding of collapseFooterBindings.values()) {
+    scheduleCollapseFooterUpdate(binding);
+  }
+}
+
+function discardCollapseFooters(node: Node): void {
+  if (!(node instanceof HTMLElement)) return;
+  for (const [root, binding] of collapseFooterBindings) {
+    if (root !== node && !node.contains(root)) continue;
+    if (binding.frame !== null) cancelAnimationFrame(binding.frame);
+    binding.resizeObserver.disconnect();
+    binding.mutationObserver.disconnect();
+    collapseFooterBindings.delete(root);
+  }
+}
+
 // Adding a chat block and filling it are separate operations throughout the
 // renderer. Observe all structural additions so a block completed after
-// addMsg() still keeps the viewport at the bottom. ResizeObserver also covers
-// late layout growth such as images, fonts and expanded Markdown content.
+// addMsg() still keeps the viewport at the bottom. The same pass discovers
+// every collapsible chat section and installs its long-content footer.
 const chatBlockObserver = new MutationObserver((records) => {
-  const elementAdded = records.some((record) =>
-    Array.from(record.addedNodes).some((node) => node.nodeType === Node.ELEMENT_NODE),
-  );
+  let elementAdded = false;
+  for (const record of records) {
+    for (const node of record.addedNodes) {
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+      elementAdded = true;
+      enhanceCollapseFooters(node);
+    }
+    for (const node of record.removedNodes) discardCollapseFooters(node);
+  }
   if (elementAdded) scrollToBottom();
 });
 chatBlockObserver.observe(els.thread, { childList: true, subtree: true });
 
+// ResizeObserver also covers late layout growth such as images, fonts and
+// expanded Markdown content.
 const chatSizeObserver = new ResizeObserver(() => scrollToBottom());
 chatSizeObserver.observe(els.thread);
 
@@ -3024,7 +3341,10 @@ function registerAgenticTool(card: HTMLElement, name: string): void {
 
 function removeEmptyActiveAgenticBlock(): void {
   const block = activeAgenticBlock;
-  if (!block || block.body.hasChildNodes()) return;
+  const hasContent = Array.from(block?.body.children ?? []).some(
+    (child) => !child.classList.contains("collapse-footer"),
+  );
+  if (!block || hasContent) return;
   const counts = agenticCounts(block.root);
   if (AGENTIC_METRICS.some((metric) => counts[metric] > 0)) return;
   finishAgenticBlock(block);
@@ -3135,6 +3455,12 @@ function thinkingBodies(): HTMLElement[] {
 
 function setThinkingBodyExpanded(body: HTMLElement, expanded: boolean): void {
   body.hidden = !expanded;
+  const collapsible = body.parentElement;
+  const footerBinding = collapsible ? collapseFooterBindings.get(collapsible) : undefined;
+  if (footerBinding) {
+    if (!expanded) footerBinding.footer.hidden = true;
+    scheduleCollapseFooterUpdate(footerBinding);
+  }
   const head = body.previousElementSibling;
   if (
     head?.classList.contains("thinking-head") ||
@@ -3299,7 +3625,7 @@ function finishThinking(): void {
 
 // --- "Waiting for response" indicator (provider inactivity watchdog) -------
 // `turn_start` arms the initial wait before every provider request. Every text
-// delta resets the same 3s timeout: this also exposes a long silent interval
+// delta resets the same 1s timeout: this also exposes a long silent interval
 // inside one response, for example while the provider prepares a tool call
 // after already streaming prose. Thinking and tool cards have their own live
 // spinner/timer, so they need no additional waiting indicator.
@@ -3307,7 +3633,6 @@ function finishThinking(): void {
 // in place. After visible text, it lives at the message tail and disappears as
 // soon as another text/tool/end event arrives.
 
-const WAITING_DELAY_MS = 3000;
 let waitingCardEl: HTMLElement | null = null;
 let waitingTimerEl: HTMLElement | null = null;
 let waitingLabelEl: HTMLElement | null = null;
@@ -3316,19 +3641,27 @@ let waitingContentEl: HTMLElement | null = null;
 let waitingStartedAt = 0;
 let waitingClock: number | null = null;
 let waitingTimeout: ReturnType<typeof setTimeout> | null = null;
+let initialAgentWaitStartedAt = 0;
 
-function armWaitingResponse(): void {
+function armWaitingResponse(reset = true, startedAt = performance.now()): void {
+  // agent_start begins the user-visible wait. The first turn_start must not
+  // restart that clock: otherwise provider setup latency is added to the
+  // configured delay and Waiting can be replaced before the browser paints it.
+  if (!reset && (waitingTimeout || waitingCardEl)) return;
   if (waitingTimeout) {
     clearTimeout(waitingTimeout);
     waitingTimeout = null;
   }
-  waitingStartedAt = performance.now();
-  waitingTimeout = setTimeout(() => {
-    waitingTimeout = null;
-    // an agent run must be active: without it (rejected prompt, extension
-    // command without a turn) there is no model request — nothing to wait for
-    if (working) showWaitingBlock();
-  }, WAITING_DELAY_MS);
+  waitingStartedAt = startedAt;
+  waitingTimeout = setTimeout(
+    () => {
+      waitingTimeout = null;
+      // an agent run must be active: without it (rejected prompt, extension
+      // command without a turn) there is no model request — nothing to wait for
+      if (working) showWaitingBlock();
+    },
+    waitingResponseDelayRemaining(startedAt, performance.now()),
+  );
 }
 
 function showWaitingBlock(): void {
@@ -3360,8 +3693,8 @@ function showWaitingBlock(): void {
   waitingSpinnerEl = spinner;
   waitingTimerEl = document.createElement("span");
   waitingTimerEl.className = "thinking-timer";
-  // the wait is already 3s when it appears: the seconds start from there
-  waitingTimerEl.textContent = `${Math.floor(WAITING_DELAY_MS / 1000)}s`;
+  // the wait is already 1s when it appears: the seconds start from there
+  waitingTimerEl.textContent = `${Math.floor(WAITING_RESPONSE_DELAY_MS / 1000)}s`;
   head.append(spinner, label, waitingTimerEl);
   card.appendChild(head);
   const content = document.createElement("div");
@@ -4757,10 +5090,14 @@ function renderRpcEvent(evt: RpcEvent): void {
     ).message;
     const role = msg?.role;
     if (role === "user") {
-      // An injected steering message is a visible boundary: close the current
-      // internal chain so subsequent thought/tool activity starts a new one.
+      // Every accepted user message is a visible boundary: close the current
+      // thought/tool chain, render the message, then start a fresh provider
+      // wait. pi emits the initial prompt after agent_start + turn_start and
+      // emits injected steering messages before their next assistant response.
       breakInternalActivityChain();
       renderUserMessageStart(evt);
+      const restartedAt = waitingResponseRestartAt(working, performance.now());
+      if (restartedAt !== null) armWaitingResponse(true, restartedAt);
       return;
     }
     if (msg && role === "custom" && msg.display !== false) {
@@ -4812,6 +5149,7 @@ function renderRpcEvent(evt: RpcEvent): void {
     disarmWaitingResponse();
     renderNativeQueues([], []);
     working = false;
+    initialAgentWaitStartedAt = 0;
     updateSendButton();
     if (evt.reason === "invalid_session") {
       addStatusLine(tpl(t("sessionNotFound"), { id: String(evt.sessionId ?? "") }));
@@ -4925,7 +5263,7 @@ function renderRpcEvent(evt: RpcEvent): void {
       scheduleMarkdownRender();
       scrollToBottom();
       // The response is still open. Reset the inactivity watchdog so a pause
-      // before the next text block or tool call becomes visible after 3s.
+      // before the next text block or tool call becomes visible after 1s.
       armWaitingResponse();
       break;
     case "thinking_delta":
@@ -4936,7 +5274,7 @@ function renderRpcEvent(evt: RpcEvent): void {
         promoteWaitingToThinking();
       } else {
         // a thought is already streaming: there is no model wait anymore —
-        // cancel the pending waiting timer, otherwise it fires at 3s and a
+        // cancel the pending waiting timer, otherwise it fires at 1s and a
         // GHOST "waiting" card appears next to the real thinking block
         disarmWaitingResponse();
         ensureThinkingLoader();
@@ -5466,7 +5804,10 @@ function renderIdeEvent(evt: IdeEvent): void {
       panel.title = `${t("selection")}: ${evt.filePath ?? "?"} — ${ranges.length} ${t("ranges")}`;
       const wasHidden = panel.hidden;
       panel.hidden = false;
-      if (wasHidden) scrollToBottom(true);
+      // Revealing editor context follows the same smart-scroll policy as a
+      // newly added chat element: remain at the bottom only when the user was
+      // already following it, never pull a detached viewport back down.
+      if (wasHidden) scrollToBottom();
     } else {
       clearEditorSelectionPanel();
     }
@@ -5593,9 +5934,12 @@ function renderHistory(messages: unknown[]): void {
       const toolGroups: Array<{ name: string; cards: HTMLElement[] }> = [];
       for (const b of blocks) {
         if (b.type === "text" && typeof b.text === "string") textParts.push(b.text);
-        else if (b.type === "thinking" && typeof b.thinking === "string")
-          thinkingCards.push(buildThinkingCard(b.thinking, thinkDur, agenticThinking));
-        else if (b.type === "toolCall" && typeof b.name === "string") {
+        else if (b.type === "thinking") {
+          const thinking = visibleThinkingContent(b.thinking);
+          if (thinking) {
+            thinkingCards.push(buildThinkingCard(thinking, thinkDur, agenticThinking));
+          }
+        } else if (b.type === "toolCall" && typeof b.name === "string") {
           // same construction as the runtime; args can be a JSON string or an object
           const raw = b.arguments;
           const argsJson = typeof raw === "string" ? raw : JSON.stringify(raw ?? {});
@@ -7888,6 +8232,8 @@ document.addEventListener("keydown", (e) => {
 function trackWorking(evt: RpcEvent): void {
   if (evt.type === "agent_start") {
     working = true;
+    initialAgentWaitStartedAt = performance.now();
+    armWaitingResponse(false, initialAgentWaitStartedAt);
     // an agent run is part of the extension work at resume: the loading
     // overlay must not end while it is active
     loadingAgentActive = true;
@@ -7895,12 +8241,14 @@ function trackWorking(evt: RpcEvent): void {
     updateSteerPlaceholder();
     updateThinkingStopBtn(true);
   } else if (evt.type === "turn_start") {
-    // Authoritative provider-request boundary from pi-agent-core. It is also
-    // emitted for retries and follow-up turns, so no inferred re-arming is
-    // needed at message_end, tool_execution_end or auto_retry_end.
-    armWaitingResponse();
+    // The first request inherits the agent_start clock instead of resetting
+    // it. Later retries/follow-up turns start a fresh one-second wait.
+    const startedAt = initialAgentWaitStartedAt || performance.now();
+    armWaitingResponse(false, startedAt);
+    initialAgentWaitStartedAt = 0;
   } else if (evt.type === "agent_settled") {
     working = false;
+    initialAgentWaitStartedAt = 0;
     loadingAgentActive = false;
     // extension run finished: re-evaluate the loading end (quiet + idle)
     if (sessionLoading) armLoadingQuiet();

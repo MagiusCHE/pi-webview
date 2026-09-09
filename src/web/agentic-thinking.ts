@@ -1,5 +1,21 @@
 export type AgenticMetric = "thought" | "read" | "write" | "bash" | "tools";
 
+export const WAITING_RESPONSE_DELAY_MS = 1000;
+
+export function waitingResponseDelayRemaining(startedAt: number, now: number): number {
+  return Math.max(0, WAITING_RESPONSE_DELAY_MS - (now - startedAt));
+}
+
+export function waitingResponseRestartAt(working: boolean, now: number): number | null {
+  return working ? now : null;
+}
+
+export function visibleThinkingContent(content: unknown): string | null {
+  if (typeof content !== "string") return null;
+  const trimmed = content.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export interface AgenticCounts {
   thought: number;
   read: number;

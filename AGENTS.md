@@ -176,8 +176,9 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   wrapper assistant vuoti. Testo visibile, `ask_user`, compaction e messaggi
   utente iniettati via steering chiudono sia il blocco Agentic sia l'eventuale
   thought normale; l'attività interna successiva apre sempre un nuovo blocco.
-  Prima di attività reale, allo scadere del timeout, il live shell mostra
-  `Waiting for response`; diventa `Agentic thinking` solo al primo thought/tool
+  Prima di attività reale, dopo 1 secondo dall'avvio dell'elaborazione, il live
+  shell mostra `Waiting for response`; diventa `Agentic thinking` solo al primo
+  thought/tool
 - **Header**: niente brand/stato testuale — dropdown sessioni (lista da
   `src/bridge/sessions.ts`, `~/.pi/agent/sessions/`; switch via
   `switch_session` RPC + ricarica cronologia) + dot connessione + pulsante
@@ -191,6 +192,12 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   sessione corrente ripresa) e poi ricarica la pagina (standalone:
   `location.reload`; IDE: `reloadWebview`, re-servita dall'host). Il prompt
   `/reload` non viene mai inviato a pi
+- **CLI flags su sessioni vuote**: i flag restano per-sessione nel JSONL, ma
+  durante `Applica` una sessione nuova e ancora vuota può perdere il proprio
+  file mentre il vecchio processo pi termina. I 3 host devono quindi riavviare
+  usando direttamente i valori appena applicati, mantenerli in memoria finché
+  la sessione non espone il nuovo path e persisterli al successivo
+  `storeSession`; non rileggerli soltanto dal file appena eliminato
 - **Controllo aggiornamenti (scudo header)**: il check pi core + estensioni
   npm è **live, senza cache** (modulo `packages/pi-webview/lib/update-check.ts`):
   ogni avvio di pi lo esegue non bloccante a load dell'estensione e il

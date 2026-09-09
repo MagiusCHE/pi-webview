@@ -30,6 +30,7 @@
     "cmdPaletteTitle": "Extension commands",
     "cmdSearchPlaceholder": "Search command…",
     "collapseAllThinking": "Collapse all thinking blocks",
+    "collapseSection": "Collapse section",
     "compactAsk": "Start session compaction? The context will be summarized to free up space.",
     "compactAskWorking": "Compact? A task is in progress and will be interrupted. Queued (steering) messages will return to the editor.",
     "compactStopAsk": "Compaction in progress. Do you want to stop it?",

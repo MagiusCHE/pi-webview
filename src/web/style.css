@@ -834,7 +834,8 @@ header {
   overflow: hidden;
   text-align: left;
 }
-.session-card summary {
+.session-card summary,
+.session-card > .collapse-footer {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1043,7 +1044,7 @@ header {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 2px 9px 9px;
+  padding: 9px;
   border-top: 1px solid var(--border);
 }
 .agentic-thinking-body[hidden] {
@@ -1058,6 +1059,51 @@ header {
 }
 .agentic-thinking-member .thinking-head:hover .thinking-label {
   color: var(--fg-secondary);
+}
+
+/* Bottom duplicate of the header for expanded sections taller than 5rem. */
+.collapse-footer {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  margin-top: 8px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-style: normal;
+  text-align: left;
+}
+.collapse-footer:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+.collapse-footer:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -2px;
+}
+.collapse-footer-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.collapse-footer-icon svg {
+  display: block;
+}
+/* Agentic spacing comes from its body; tool output must meet its footer
+   without exposing a strip of the card background below the code surface. */
+.agentic-thinking-card > .collapse-footer,
+.tool-card > .collapse-footer {
+  margin-top: 0;
+}
+/* The cloned header keeps its native flex classes. Tool timers without an
+   argument spacer still belong at the far right, like every other timer. */
+.tool-card > .collapse-footer .tool-timer {
+  margin-left: auto;
 }
 
 /* --- thinking: loader while processing, content at the end --- */
@@ -1177,7 +1223,8 @@ header {
 .msg.tool-chain {
   margin-top: -11px;
 }
-.tool-card summary {
+.tool-card summary,
+.tool-card > .collapse-footer {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1192,7 +1239,8 @@ header {
 .tool-card summary::-webkit-details-marker {
   display: none;
 }
-.tool-card summary:hover {
+.tool-card summary:hover,
+.tool-card > .collapse-footer:hover {
   background: var(--hover);
 }
 .tool-status {
@@ -1308,7 +1356,8 @@ header {
   padding-left: 8px;
   margin-left: 8px;
 }
-.tool-card summary {
+.tool-card summary,
+.tool-card > .collapse-footer {
   min-width: 0;
 }
 

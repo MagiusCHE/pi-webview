@@ -44,6 +44,8 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
     private PiProcess? _pi;
     private System.Diagnostics.Stopwatch? _probeWatch;
     private string? _currentSessionPath;
+    private CliFlags _activeCliFlags = new();
+    private bool _cliFlagsNeedSessionPersistence;
     private bool _restarting;
     private CliFlagInfo[]? _cachedFlags;
 
@@ -99,7 +101,7 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
 
     // --- processo pi -----------------------------------------------------------
 
-    public void StartPi(string? sessionPath = null)
+    public void StartPi(string? sessionPath = null, CliFlags? flagsOverride = null)
     {
         var resolution = PiResolver.ResolvePi();
         Diag.Log($"[pi] resolve: found={resolution.Found} path={resolution.Path}");
@@ -138,7 +140,9 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
         var sessionArgs = sessionPath is not null && File.Exists(sessionPath)
             ? new[] { "--session", sessionPath }
             : Array.Empty<string>();
-        if (sessionArgs.Length > 0) _currentSessionPath = sessionPath;
+        // A pathless new session must not accidentally resume the previous
+        // one. Its active CLI flags stay in memory until its JSONL exists.
+        _currentSessionPath = sessionArgs.Length > 0 ? sessionPath : null;
         var savedModel = sessionPath is not null && File.Exists(sessionPath)
             ? _sessions.GetSessionInfo(sessionPath).Model
             : null;
@@ -148,7 +152,13 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
 
         // Explicit model arguments prevent pi from silently falling back to
         // the default when a resumed session has a saved model.
-        var args = sessionArgs.Concat(modelArgs).Concat(CliFlagArgs()).ToList();
+        _activeCliFlags = CloneCliFlags(flagsOverride ??
+            (_currentSessionPath is not null
+                ? _sessions.ReadSessionCliFlags(_currentSessionPath)
+                : _activeCliFlags));
+        _cliFlagsNeedSessionPersistence =
+            _currentSessionPath is null && _activeCliFlags.Count > 0;
+        var args = sessionArgs.Concat(modelArgs).Concat(CliFlagArgs(_activeCliFlags)).ToList();
 
         var env = new Dictionary<string, string>();
         foreach (System.Collections.DictionaryEntry e in Environment.GetEnvironmentVariables())
@@ -248,7 +258,7 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
         _pi.Send(doc.RootElement.Clone());
     }
 
-    public async Task RestartPiAsync()
+    public async Task RestartPiAsync(CliFlags? flagsOverride = null)
     {
         var sessionPath = _currentSessionPath;
         _restarting = true;
@@ -258,18 +268,62 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
             _pi = null;
         }
         PostRpcEvent(new Dictionary<string, object?> { ["type"] = "connection_closed", ["reason"] = "restart" });
-        StartPi(sessionPath);
+        StartPi(sessionPath, flagsOverride);
         _restarting = false;
         PostRpcEvent(new Dictionary<string, object?> { ["type"] = "pi_restarted" });
     }
 
     // --- launch CLI flags (settings block 3) ----------------------------------
 
-    private CliFlags CliFlagValues() => _sessions.ReadSessionCliFlags(_currentSessionPath ?? "");
-
-    private IEnumerable<string> CliFlagArgs()
+    private static CliFlags CloneCliFlags(IEnumerable<KeyValuePair<string, JsonElement>> flags)
     {
-        foreach (var pair in CliFlagValues())
+        var clone = new CliFlags();
+        foreach (var pair in flags) clone[pair.Key] = pair.Value.Clone();
+        return clone;
+    }
+
+    public CliFlags CliFlagValues(string? requestedPath = null)
+    {
+        var path = requestedPath ?? _currentSessionPath;
+        return path is not null && File.Exists(path)
+            ? _sessions.ReadSessionCliFlags(path)
+            : CloneCliFlags(_activeCliFlags);
+    }
+
+    public void StoreSession(string path)
+    {
+        if (_cliFlagsNeedSessionPersistence)
+        {
+            _sessions.WriteSessionCliFlags(path, _activeCliFlags);
+            _cliFlagsNeedSessionPersistence = false;
+        }
+        _currentSessionPath = path;
+        _cb.OnSessionChange(path);
+    }
+
+    public async Task ApplyCliFlagsAsync(string? requestedPath, Dictionary<string, JsonElement> flags)
+    {
+        var path = requestedPath ?? _currentSessionPath;
+        var next = CloneCliFlags(flags);
+        _activeCliFlags = next;
+        if (path is not null)
+        {
+            _sessions.WriteSessionCliFlags(path, next);
+            _currentSessionPath = path;
+            _cliFlagsNeedSessionPersistence = false;
+        }
+        else
+        {
+            _currentSessionPath = null;
+            _cliFlagsNeedSessionPersistence = next.Count > 0;
+            _cb.OnSessionChange("");
+        }
+        await RestartPiAsync(next).ConfigureAwait(false);
+    }
+
+    private static IEnumerable<string> CliFlagArgs(CliFlags flags)
+    {
+        foreach (var pair in flags)
         {
             var name = pair.Key;
             var value = pair.Value;
@@ -397,6 +451,23 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
     {
         if (frame.Channel == "rpc")
         {
+            if (frame.Payload.TryGetProperty("type", out var type) &&
+                type.ValueKind == JsonValueKind.String)
+            {
+                if (type.GetString() == "new_session")
+                {
+                    _currentSessionPath = null;
+                    _cliFlagsNeedSessionPersistence = _activeCliFlags.Count > 0;
+                    _cb.OnSessionChange("");
+                }
+                else if (type.GetString() == "switch_session" &&
+                         frame.Payload.TryGetProperty("sessionPath", out var path) &&
+                         path.ValueKind == JsonValueKind.String)
+                {
+                    _currentSessionPath = path.GetString();
+                    _cliFlagsNeedSessionPersistence = false;
+                }
+            }
             Diag.Log("rpc→pi: " + frame.Payload.GetRawText());
             _pi?.Send(frame.Payload);
             return;

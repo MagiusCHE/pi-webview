@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { openFileIcon, trustIcon, sendIcon, stopIcon } from "../src/web/icons.ts";
+import {
+  arrowUpIcon,
+  openFileIcon,
+  trustIcon,
+  sendIcon,
+  stopIcon,
+} from "../src/web/icons.ts";
 
 test("trustIcon: shield colorabile via currentColor", () => {
   const s = trustIcon("shield");
@@ -40,4 +46,11 @@ test("openFileIcon: external-link SVG colorabile", () => {
   assert.match(icon, /^<svg/);
   assert.match(icon, /fill="currentColor"/);
   assert.match(icon, /M19 19H5V5h7V3/);
+});
+
+test("arrowUpIcon: repeated collapse footer uses an upward arrow", () => {
+  const icon = arrowUpIcon();
+  assert.match(icon, /^<svg/);
+  assert.match(icon, /stroke="currentColor"/);
+  assert.match(icon, /M12 9v12/);
 });

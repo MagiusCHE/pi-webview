@@ -24,6 +24,18 @@ export function parseAvailableCliFlags(help: string): CliFlagInfo[] {
   return flags;
 }
 
+export function resolveCliFlagsForLaunch(
+  hasSessionFile: boolean,
+  active: CliFlags,
+  persisted: CliFlags,
+  override?: CliFlags,
+): CliFlags {
+  // Empty sessions can remove their JSONL while the old process is shutting
+  // down. An Apply override must still launch the replacement process, and a
+  // later pathless restart must retain the flags that process is already using.
+  return { ...(override ?? (hasSessionFile ? persisted : active)) };
+}
+
 export function cliFlagArgs(flags: CliFlags): string[] {
   const args: string[] = [];
   for (const [name, value] of Object.entries(flags)) {

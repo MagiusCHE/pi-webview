@@ -2,7 +2,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cliFlagArgs, parseAvailableCliFlags } from "../src/bridge/cli-flags.ts";
+import {
+  cliFlagArgs,
+  parseAvailableCliFlags,
+  resolveCliFlagsForLaunch,
+} from "../src/bridge/cli-flags.ts";
 
 test("parseAvailableCliFlags: reads boolean and value flags from pi help", () => {
   const help = [
@@ -52,4 +56,18 @@ test("cliFlagArgs: includes only active booleans and non-empty values", () => {
     }),
     ["--session-control", "--preset", "fast"],
   );
+});
+
+test("resolveCliFlagsForLaunch: Apply survives an empty session file disappearing", () => {
+  const active = {};
+  const applied = { "session-control": true };
+  assert.deepEqual(resolveCliFlagsForLaunch(false, active, {}, applied), applied);
+});
+
+test("resolveCliFlagsForLaunch: a pathless restart retains active process flags", () => {
+  const active = { "session-control": true };
+  assert.deepEqual(resolveCliFlagsForLaunch(false, active, {}), active);
+  assert.deepEqual(resolveCliFlagsForLaunch(true, active, { preset: "saved" }), {
+    preset: "saved",
+  });
 });

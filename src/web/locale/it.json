@@ -30,6 +30,7 @@
     "cmdPaletteTitle": "Comandi estensione",
     "cmdSearchPlaceholder": "Cerca comando…",
     "collapseAllThinking": "Comprimi tutti i blocchi di pensiero",
+    "collapseSection": "Comprimi sezione",
     "compactAsk": "Avviare la compattazione della sessione? Il contesto verrà riassunto per liberare spazio.",
     "compactAskWorking": "Compattare? C'è un'elaborazione in corso: verrà interrotta. I messaggi in coda (stearing) torneranno nell'editor.",
     "compactStopAsk": "Compattazione in corso. Vuoi fermarla?",

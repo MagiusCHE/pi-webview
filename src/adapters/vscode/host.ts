@@ -136,7 +136,11 @@ import {
   readCompactionSettings,
   readThinkingSettings,
 } from "../../bridge/config.ts";
-import { cliFlagArgs, fetchAvailableCliFlags } from "../../bridge/cli-flags.ts";
+import {
+  cliFlagArgs,
+  fetchAvailableCliFlags,
+  resolveCliFlagsForLaunch,
+} from "../../bridge/cli-flags.ts";
 import {
   listSessions,
   forkSession,
@@ -186,6 +190,10 @@ export abstract class PiWebviewHost {
   private selectionTimer: ReturnType<typeof setTimeout> | null = null;
   /** current session (updated via storeSession): needed when restarting pi */
   protected currentSessionPath: string | undefined;
+  /** Flags used by the running process. A new empty session has no file yet,
+   *  so these remain authoritative until storeSession provides its path. */
+  private activeCliFlags: CliFlags = {};
+  private cliFlagsNeedSessionPersistence = false;
   /** true during an intentional restart (setCliFlags): pi's exit is not a crash */
   private restarting = false;
 
@@ -194,19 +202,10 @@ export abstract class PiWebviewHost {
     protected cb: PiHostCallbacks,
   ) {}
 
-  /** pi launch CLI flags, persisted per workspace (settings block 3) */
-  protected cliFlags(): CliFlags {
-    return (
-      this.context.workspaceState.get<CliFlags>("pi-webview.cliFlags") ?? {
-        sessionControl: false,
-      }
-    );
-  }
-
   /** restarts pi with the current launch options (setCliFlags): the webview
    *  gets connection_closed(reason restart) + pi_restarted to re-initialize
    *  without a reload (transparent); the current session is resumed with --session */
-  protected restartPi(): void {
+  protected restartPi(flagsOverride?: CliFlags): void {
     const sessionPath = this.currentSessionPath;
     this.restarting = true;
     this.pi?.dispose();
@@ -215,7 +214,7 @@ export abstract class PiWebviewHost {
       channel: "rpc",
       payload: { type: "connection_closed", reason: "restart" } satisfies RpcEvent,
     });
-    this.startPi(sessionPath);
+    this.startPi(sessionPath, undefined, flagsOverride);
     this.restarting = false;
     this.post({ channel: "rpc", payload: { type: "pi_restarted" } satisfies RpcEvent });
   }
@@ -234,10 +233,12 @@ export abstract class PiWebviewHost {
     return this.cachedFlags;
   }
 
-  /** active values (flag → value) of the CURRENT session: read from the
-   *  custom entry in the session jsonl file (per-session, not global) */
-  protected cliFlagValues(): CliFlags {
-    return readSessionCliFlags(this.currentSessionPath ?? "");
+  /** Active values of the current session. Before a new session gets its
+   *  JSONL path, use the flags that actually launched the running process. */
+  protected cliFlagValues(sessionPath = this.currentSessionPath): CliFlags {
+    return sessionPath && existsSync(sessionPath)
+      ? readSessionCliFlags(sessionPath)
+      : { ...this.activeCliFlags };
   }
 
   /** EFFECTIVE notifications mode for the CURRENT session: the per-session
@@ -262,7 +263,11 @@ export abstract class PiWebviewHost {
   /** spawns pi --mode rpc; with sessionPath resumes that session (--session).
    *  piOverride: an already-resolved absolute path (e.g. found by the login
    *  shell probe) — skips the PATH/fallback search. */
-  protected startPi(sessionPath?: string, piOverride?: string): void {
+  protected startPi(
+    sessionPath?: string,
+    piOverride?: string,
+    flagsOverride?: CliFlags,
+  ): void {
     logLine(`startPi session=${sessionPath ?? ""} pid=${process.pid}`);
     let piCmd = piOverride
       ? { command: piOverride, found: true, path: piOverride }
@@ -294,7 +299,7 @@ export abstract class PiWebviewHost {
       void findPiViaShell().then((res) => {
         if (res && this.pi === null && this.webview) {
           logLine(`shell probe found: ${res.path}`);
-          this.startPi(sessionPath, res.path ?? res.command);
+          this.startPi(sessionPath, res.path ?? res.command, flagsOverride);
         } else if (res) {
           logLine(`shell probe found but pi already running`);
         } else {
@@ -330,13 +335,23 @@ export abstract class PiWebviewHost {
 
     const sessionArgs =
       sessionPath && existsSync(sessionPath) ? ["--session", sessionPath] : [];
-    // when resuming a session, it (possibly forked) becomes the current one
-    if (sessionArgs.length > 0) this.currentSessionPath = sessionPath;
+    // An absent session path is meaningful: the new session has not created
+    // its JSONL file yet. Do not retain the previous session by accident.
+    this.currentSessionPath = sessionArgs.length > 0 ? sessionPath : undefined;
     // A resumed session must keep its saved model. Explicit arguments prevent
     // pi from silently falling back to the default when restoring it.
     const activeSessionModelArgs = sessionPath ? sessionModelArgs(sessionPath) : [];
-    // CLI flags from settings (block 3: e.g. --session-control)
-    const activeCliFlagArgs = cliFlagArgs(this.cliFlagValues());
+    // CLI flags from settings (block 3: e.g. --session-control). An explicit
+    // Apply override must survive even when the session file does not exist yet.
+    this.activeCliFlags = resolveCliFlagsForLaunch(
+      sessionArgs.length > 0,
+      this.activeCliFlags,
+      this.currentSessionPath ? readSessionCliFlags(this.currentSessionPath) : {},
+      flagsOverride,
+    );
+    this.cliFlagsNeedSessionPersistence =
+      !this.currentSessionPath && Object.keys(this.activeCliFlags).length > 0;
+    const activeCliFlagArgs = cliFlagArgs(this.activeCliFlags);
     // actual command line used to launch pi (for error messages: suggested
     // to the user to verify pi works from a terminal)
     this.piCommand = [
@@ -493,6 +508,15 @@ export abstract class PiWebviewHost {
 
   protected async handleFrame(frame: Frame): Promise<void> {
     if (frame.channel === "rpc") {
+      const command = frame.payload as { type?: string; sessionPath?: string };
+      if (command.type === "new_session") {
+        this.currentSessionPath = undefined;
+        this.cliFlagsNeedSessionPersistence = Object.keys(this.activeCliFlags).length > 0;
+        this.cb.onSessionChange("");
+      } else if (command.type === "switch_session" && command.sessionPath) {
+        this.currentSessionPath = command.sessionPath;
+        this.cliFlagsNeedSessionPersistence = false;
+      }
       this.pi?.send(frame.payload);
       return;
     }
@@ -506,6 +530,10 @@ export abstract class PiWebviewHost {
         this.respond(req.id, true, this.config.get());
         return;
       case "storeSession":
+        if (this.cliFlagsNeedSessionPersistence) {
+          writeSessionCliFlags(req.path, this.activeCliFlags);
+          this.cliFlagsNeedSessionPersistence = false;
+        }
         this.cb.onSessionChange(req.path);
         // track the current session: needed for restart (Apply CLI flags)
         this.currentSessionPath = req.path;
@@ -596,25 +624,35 @@ export abstract class PiWebviewHost {
               ?.version ?? null,
         });
         return;
-      case "getCliFlags":
+      case "getCliFlags": {
         // available flags (pi + extensions, from `pi --help`) + active values
+        const sessionPath = req.sessionPath ?? this.currentSessionPath;
         void this.fetchAvailableFlags().then((available) =>
           this.respond(req.id, true, {
             available,
-            values: readSessionCliFlags(req.sessionPath ?? this.currentSessionPath ?? ""),
+            values: this.cliFlagValues(sessionPath),
           }),
         );
         return;
+      }
       case "setCliFlags": {
-        // apply: write to the session (custom entry in the jsonl) + restart pi
-        // with the new command line (the webview already did dequeue+stop
-        // if there was an in-flight run)
+        // Apply must also work before a new session has a JSONL file. Keep the
+        // process flags in memory, restart with them immediately, and persist
+        // them later when storeSession reports the materialized path.
         const next: CliFlags = req.flags ?? {};
-        const sessionPath = req.sessionPath ?? this.currentSessionPath ?? "";
-        writeSessionCliFlags(sessionPath, next);
-        if (sessionPath) this.currentSessionPath = sessionPath;
+        const sessionPath = req.sessionPath ?? this.currentSessionPath;
+        this.activeCliFlags = { ...next };
+        if (sessionPath) {
+          writeSessionCliFlags(sessionPath, next);
+          this.currentSessionPath = sessionPath;
+          this.cliFlagsNeedSessionPersistence = false;
+        } else {
+          this.currentSessionPath = undefined;
+          this.cliFlagsNeedSessionPersistence = Object.keys(next).length > 0;
+          this.cb.onSessionChange("");
+        }
         this.respond(req.id, true, { flags: next });
-        this.restartPi();
+        this.restartPi(next);
         return;
       }
       case "getSessionSettings":

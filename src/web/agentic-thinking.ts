@@ -77,6 +77,76 @@ export function agenticMetricVisualState(
   return progress.running > 0 ? "running" : "complete";
 }
 
+export const AGENTIC_COUNT_PULSE_MS = 360;
+
+export interface AgenticCountPulseOptions {
+  setValue: (value: number) => void;
+  setPulsing: (active: boolean) => void;
+  schedule?: (fn: () => void, delayMs: number) => unknown;
+  cancel?: (handle: unknown) => void;
+}
+
+/** Keeps the old value until the pulse peak and restarts on newer updates. */
+export class AgenticCountPulse {
+  private displayed: number;
+  private target: number;
+  private swapTimer: unknown = null;
+  private finishTimer: unknown = null;
+  private readonly schedule: (fn: () => void, delayMs: number) => unknown;
+  private readonly cancel: (handle: unknown) => void;
+  private readonly options: AgenticCountPulseOptions;
+
+  constructor(initialValue: number, options: AgenticCountPulseOptions) {
+    this.displayed = initialValue;
+    this.target = initialValue;
+    this.options = options;
+    this.schedule = options.schedule ?? ((fn, delayMs) => setTimeout(fn, delayMs));
+    this.cancel =
+      options.cancel ??
+      ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+    options.setValue(initialValue);
+  }
+
+  set(nextValue: number, animated = true): void {
+    if (nextValue === this.target) return;
+    this.clearTimers();
+    this.target = nextValue;
+    this.options.setPulsing(false);
+    if (!animated) {
+      this.displayed = nextValue;
+      this.options.setValue(nextValue);
+      return;
+    }
+
+    this.options.setPulsing(true);
+    this.swapTimer = this.schedule(() => {
+      this.swapTimer = null;
+      this.displayed = this.target;
+      this.options.setValue(this.displayed);
+    }, AGENTIC_COUNT_PULSE_MS / 2);
+    this.finishTimer = this.schedule(() => {
+      this.finishTimer = null;
+      if (this.displayed !== this.target) {
+        this.displayed = this.target;
+        this.options.setValue(this.displayed);
+      }
+      this.options.setPulsing(false);
+    }, AGENTIC_COUNT_PULSE_MS);
+  }
+
+  dispose(): void {
+    this.clearTimers();
+    this.options.setPulsing(false);
+  }
+
+  private clearTimers(): void {
+    if (this.swapTimer !== null) this.cancel(this.swapTimer);
+    if (this.finishTimer !== null) this.cancel(this.finishTimer);
+    this.swapTimer = null;
+    this.finishTimer = null;
+  }
+}
+
 /** The live shell must identify an initial provider wait before real activity. */
 export function agenticHeaderLabelKey(
   waitingOnly: boolean,

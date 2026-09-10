@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  AGENTIC_COUNT_PULSE_MS,
+  AgenticCountPulse,
   agenticHeaderLabelKey,
   agenticMetricVisualState,
   agenticToolMetric,
@@ -61,6 +63,78 @@ test("agentic metric ignores repeated lifecycle states", () => {
     transitionAgenticMetricProgress(progress, "running", "running"),
     progress,
   );
+});
+
+interface ScheduledPulseStep {
+  fn: () => void;
+  delayMs: number;
+  cancelled: boolean;
+  fired: boolean;
+}
+
+function agenticPulseHarness(initialValue = 1) {
+  const values: number[] = [];
+  const pulsing: boolean[] = [];
+  const steps: ScheduledPulseStep[] = [];
+  const pending = () => steps.filter((step) => !step.cancelled && !step.fired);
+  const pulse = new AgenticCountPulse(initialValue, {
+    setValue: (value) => values.push(value),
+    setPulsing: (active) => pulsing.push(active),
+    schedule: (fn, delayMs) => {
+      const step = { fn, delayMs, cancelled: false, fired: false };
+      steps.push(step);
+      return step;
+    },
+    cancel: (handle) => {
+      (handle as ScheduledPulseStep).cancelled = true;
+    },
+  });
+  const fire = (delayMs: number) => {
+    const step = pending().find((candidate) => candidate.delayMs === delayMs);
+    assert.ok(step, `missing pending pulse step at ${delayMs}ms`);
+    step.fired = true;
+    step.fn();
+  };
+  return { pulse, values, pulsing, steps, pending, fire };
+}
+
+test("agentic count pulse swaps the number only at maximum scale", () => {
+  const h = agenticPulseHarness(4);
+  h.pulse.set(5);
+  assert.equal(h.values.at(-1), 4);
+  assert.deepEqual(
+    h.pending().map((step) => step.delayMs),
+    [AGENTIC_COUNT_PULSE_MS / 2, AGENTIC_COUNT_PULSE_MS],
+  );
+
+  h.fire(AGENTIC_COUNT_PULSE_MS / 2);
+  assert.equal(h.values.at(-1), 5);
+  h.fire(AGENTIC_COUNT_PULSE_MS);
+  assert.equal(h.pulsing.at(-1), false);
+});
+
+test("agentic count pulse cancels and restarts for the newest number", () => {
+  const h = agenticPulseHarness(4);
+  h.pulse.set(5);
+  const firstSteps = [...h.steps];
+  h.pulse.set(6);
+
+  assert.equal(
+    firstSteps.every((step) => step.cancelled),
+    true,
+  );
+  assert.equal(h.values.at(-1), 4);
+  assert.equal(h.pending().length, 2);
+  h.fire(AGENTIC_COUNT_PULSE_MS / 2);
+  assert.equal(h.values.at(-1), 6);
+});
+
+test("agentic count updates immediately when animation is disabled", () => {
+  const h = agenticPulseHarness(4);
+  h.pulse.set(5, false);
+  assert.equal(h.values.at(-1), 5);
+  assert.equal(h.pending().length, 0);
+  assert.equal(h.pulsing.at(-1), false);
 });
 
 test("agentic live shell exposes waiting before real internal activity", () => {

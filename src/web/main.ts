@@ -53,6 +53,7 @@ import {
   type ToolSummary,
 } from "./tool-summary.ts";
 import {
+  AgenticCountPulse,
   agenticHeaderLabelKey,
   agenticMetricVisualState,
   agenticToolMetric,
@@ -3264,6 +3265,43 @@ function storeAgenticCounts(root: HTMLElement, counts: AgenticCounts): void {
   }
 }
 
+const agenticCountPulses = new WeakMap<HTMLElement, AgenticCountPulse>();
+
+function updateAgenticCountNumber(
+  root: HTMLElement,
+  number: HTMLElement,
+  count: number,
+): void {
+  let pulse = agenticCountPulses.get(number);
+  if (!pulse) {
+    pulse = new AgenticCountPulse(count, {
+      setValue: (value) => {
+        number.textContent = String(value);
+      },
+      setPulsing: (active) => {
+        number.classList.remove("agentic-thinking-count-number-pulse");
+        if (active) {
+          // Force style calculation so removing and immediately re-adding the
+          // class restarts the animation when a newer count arrives.
+          void number.offsetWidth;
+          number.classList.add("agentic-thinking-count-number-pulse");
+        }
+      },
+    });
+    agenticCountPulses.set(number, pulse);
+    return;
+  }
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  pulse.set(count, root.dataset.animateCounts === "true" && !reducedMotion);
+}
+
+function disposeAgenticCountItem(item: HTMLElement): void {
+  const number = item.querySelector<HTMLElement>(".agentic-thinking-count-number");
+  if (!number) return;
+  agenticCountPulses.get(number)?.dispose();
+  agenticCountPulses.delete(number);
+}
+
 function renderAgenticThinkingSummary(root: HTMLElement): void {
   const label = root.querySelector<HTMLElement>(".agentic-thinking-label");
   if (label) {
@@ -3271,26 +3309,70 @@ function renderAgenticThinkingSummary(root: HTMLElement): void {
   }
   const summary = root.querySelector<HTMLElement>(".agentic-thinking-counts");
   if (!summary) return;
-  summary.replaceChildren();
+  const existing = new Map<AgenticMetric, HTMLElement>();
+  for (const item of summary.querySelectorAll<HTMLElement>(
+    ":scope > .agentic-thinking-count[data-agentic-metric]",
+  )) {
+    existing.set(item.dataset.agenticMetric as AgenticMetric, item);
+  }
+
+  const ordered: HTMLElement[] = [];
   for (const metric of AGENTIC_METRICS) {
     const progress = agenticMetricProgress(root, metric);
-    if (progress.count <= 0) continue;
-    const item = document.createElement("span");
+    let item = existing.get(metric);
+    if (progress.count <= 0) {
+      if (item) {
+        disposeAgenticCountItem(item);
+        item.remove();
+      }
+      continue;
+    }
+    if (!item) {
+      item = document.createElement("span");
+      item.dataset.agenticMetric = metric;
+      const name = document.createElement("span");
+      name.className = "agentic-thinking-count-name";
+      const value = document.createElement("strong");
+      value.className = "agentic-thinking-count-value";
+      const number = document.createElement("span");
+      number.className = "agentic-thinking-count-number";
+      value.appendChild(number);
+      item.append(name, value);
+      summary.appendChild(item);
+    }
     item.className = `agentic-thinking-count agentic-thinking-count-${agenticMetricVisualState(progress)}`;
-    const name = document.createElement("span");
-    name.textContent = t(AGENTIC_LABELS[metric]);
-    const value = document.createElement("strong");
-    value.textContent = String(progress.count);
-    if (progress.errors > 0) {
-      const error = document.createElement("span");
-      error.className = "agentic-thinking-count-error";
-      error.textContent = "!";
+    const name = item.querySelector<HTMLElement>(".agentic-thinking-count-name");
+    if (name) name.textContent = t(AGENTIC_LABELS[metric]);
+    const value = item.querySelector<HTMLElement>(".agentic-thinking-count-value");
+    const number = value?.querySelector<HTMLElement>(".agentic-thinking-count-number");
+    if (number) updateAgenticCountNumber(root, number, progress.count);
+    let error = value?.querySelector<HTMLElement>(".agentic-thinking-count-error");
+    if (progress.errors > 0 && value) {
+      if (!error) {
+        error = document.createElement("span");
+        error.className = "agentic-thinking-count-error";
+        error.textContent = "!";
+        value.appendChild(error);
+      }
       error.title = t("agenticCountHasErrors");
       error.setAttribute("aria-label", error.title);
-      value.appendChild(error);
+    } else {
+      error?.remove();
     }
-    item.append(name, value);
-    summary.appendChild(item);
+    ordered.push(item);
+  }
+
+  // Keep the canonical metric order without recreating stable animated nodes.
+  for (let index = 0; index < ordered.length; index += 1) {
+    const item = ordered[index]!;
+    const current = summary.children.item(index);
+    if (current !== item) summary.insertBefore(item, current);
+  }
+  const activeItems = new Set(ordered);
+  for (const item of Array.from(summary.children)) {
+    if (!(item instanceof HTMLElement) || activeItems.has(item)) continue;
+    disposeAgenticCountItem(item);
+    item.remove();
   }
 }
 
@@ -3322,6 +3404,7 @@ function createAgenticBlock(before?: HTMLElement | null, live = false): AgenticB
 
   const root = document.createElement("div");
   root.className = "agentic-thinking-card";
+  root.dataset.animateCounts = String(live);
   storeAgenticCounts(root, emptyAgenticCounts());
 
   const head = document.createElement("div");

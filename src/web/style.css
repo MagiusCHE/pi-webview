@@ -1031,17 +1031,54 @@ header {
   font-size: 11px;
   font-weight: 600;
 }
+.agentic-thinking-count-value,
+.agentic-thinking-count-number {
+  display: inline-block;
+}
+.agentic-thinking-count-value {
+  transform-origin: center bottom;
+}
 .agentic-thinking-count-running strong {
   color: var(--warn);
 }
+.agentic-thinking-count-running .agentic-thinking-count-value {
+  animation: agentic-count-wobble 1s infinite ease-in-out;
+}
 .agentic-thinking-count-complete strong {
   color: var(--ok);
+}
+.agentic-thinking-count-number-pulse {
+  animation: agentic-count-pulse 360ms ease-in-out;
 }
 .agentic-thinking-count-error {
   color: var(--err);
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 800;
+}
+@keyframes agentic-count-wobble {
+  0%,
+  100% {
+    transform: rotate(-5deg);
+  }
+  50% {
+    transform: rotate(5deg);
+  }
+}
+@keyframes agentic-count-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.4);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agentic-thinking-count-running .agentic-thinking-count-value,
+  .agentic-thinking-count-number-pulse {
+    animation: none;
+  }
 }
 .agentic-thinking-timer {
   flex: 0 0 auto;

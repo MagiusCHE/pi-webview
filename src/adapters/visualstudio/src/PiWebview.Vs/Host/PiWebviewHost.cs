@@ -101,6 +101,12 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
 
     // --- processo pi -----------------------------------------------------------
 
+    private TrustRuntime? _trust;
+
+    /// <summary>Project trust of the RUNNING pi process: a change (saved
+    /// decision or session-only override) is applied by the next restart.</summary>
+    public TrustRuntime Trust => _trust ??= new TrustRuntime(Workspace() ?? "");
+
     public void StartPi(string? sessionPath = null, CliFlags? flagsOverride = null)
     {
         var resolution = PiResolver.ResolvePi();
@@ -158,7 +164,14 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
                 : _activeCliFlags));
         _cliFlagsNeedSessionPersistence =
             _currentSessionPath is null && _activeCliFlags.Count > 0;
-        var args = sessionArgs.Concat(modelArgs).Concat(CliFlagArgs(_activeCliFlags)).ToList();
+        // Project trust: the session-only options launch pi with `--approve` /
+        // `--no-approve` for THIS run (pi never persists them).
+        var trustArgs = Trust.LaunchArgs().ToList();
+        var args = sessionArgs
+            .Concat(modelArgs)
+            .Concat(CliFlagArgs(_activeCliFlags))
+            .Concat(trustArgs)
+            .ToList();
 
         var env = new Dictionary<string, string>();
         foreach (System.Collections.DictionaryEntry e in Environment.GetEnvironmentVariables())
@@ -232,6 +245,9 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
         try
         {
             _pi.Start();
+            // the pending trust change is now the state of the running process
+            Trust.SetWorkspace(Workspace() ?? "");
+            Trust.OnLaunched();
             Diag.Log("[pi] started");
             // Diagnostic probe after boot: end-to-end check of the stdio
             // channel (no answer = pi frozen, not a UI problem)

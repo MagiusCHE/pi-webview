@@ -156,7 +156,7 @@ export type IdeRequest =
     }
   | { type: "forkSession"; sourcePath: string; id?: string }
   | { type: "getTrust"; id?: string }
-  | { type: "setTrust"; status: TrustStatus; id?: string }
+  | { type: "applyTrustOption"; option: TrustOptionId; id?: string }
   | {
       type: "saveAttachment";
       name: string;
@@ -364,11 +364,35 @@ export interface CliFlagInfo {
 
 export type LocaleId = "it" | "en";
 
-export type TrustStatus = "trusted" | "untrusted" | "ask";
+/** Project trust as pi applies it to protected project resources. pi never
+ *  prompts in RPC mode, so a missing decision with defaultProjectTrust "ask"
+ *  means those resources are ignored for that run: there is no third state. */
+export type TrustStatus = "trusted" | "untrusted";
+
+/** Options of the pi trust prompt (see pi core trust-manager, same order).
+ *  "*-session" are NOT persisted: they launch pi with the per-run override
+ *  flags `--approve` / `--no-approve`. */
+export type TrustOptionId =
+  "trust" | "trust-parent" | "trust-session" | "untrust" | "untrust-session";
+
+export interface TrustOption {
+  id: TrustOptionId;
+  /** run-only override: true → `--approve`, false → `--no-approve` */
+  sessionOverride?: boolean;
+}
 
 export interface TrustResult {
+  /** status the RUNNING pi process was launched with */
   status: TrustStatus;
   workspace: string;
+  /** parent folder offered by the "trust parent folder" option */
+  parentPath?: string;
+  /** a new decision waits for a pi restart to take effect */
+  pendingRestart?: boolean;
+  /** the running process uses a run-only override (not persisted) */
+  sessionOnly?: boolean;
+  /** options of the prompt (labels are localized by the webview) */
+  options?: TrustOption[];
 }
 
 export interface UserConfig {

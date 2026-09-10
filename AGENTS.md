@@ -216,6 +216,28 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   `/changelog`, `/hotkeys`, `/quit`, `/model`, `/thinking`) non vengono mai
   inviati a pi (né prompt né steering): mostrano solo un messaggio in chat
   («validi solo da terminale»)
+- **Project trust (chip + dialog)**: il chip mostra solo lo stato effettivo del
+  processo pi in esecuzione (`trusted`/`untrusted`). In RPC non esiste il
+  livello `ask`: senza decisione salvata e con `defaultProjectTrust: "ask"` le
+  risorse protette del progetto vengono ignorate, quindi lo stato è
+  `untrusted`. Il click apre un dialog con le stesse opzioni del prompt TUI di
+  pi (`trust`, `trust-parent`, `trust-session`, `untrust`, `untrust-session`,
+  lista fornita dall'host); le opzioni `*-session` non persistono nulla e
+  lanciano pi con `--approve`/`--no-approve` validi per il solo processo
+  successivo. Una decisione è applicata da un riavvio di pi: automatico se la
+  sessione non sta lavorando, altrimenti il dialog chiede "riavvia ora /
+  riavvia più tardi"; con "più tardi" l'icona resta quella del processo in
+  esecuzione con un `!` rosso accanto. Lo stato vive nell'host
+  (`TrustRuntime` in `src/bridge/trust.ts`, mirror C#
+  `PiWebview.Vs.Core/Platform/TrustRuntime.cs`), mai nel JSONL di sessione
+- **Riconnessione standalone**: la pagina browser ritenta la connessione al
+  bridge ogni 5 s solo con `document.visibilityState === "visible"` e tenta
+  subito quando torna visibile; quando il bridge è di nuovo su, la spia torna
+  verde e la stessa sessione viene ripresa senza reload
+  (la URL contiene l'id, e ogni tentativo ri-risolve `bridge-config.json`, quindi
+  funziona anche se il token è stato ruotato su loopback). Logica in
+  `src/web/reconnect.ts` (`ReconnectLoop`), non duplicata negli host IDE e nei
+  companion
 - **Steering — pi è l'unica fonte autoritativa**: la webview invia subito a pi
   (`prompt` con `streamingBehavior: "steer"`, oppure `steer` durante la
   compaction), rende la coda esclusivamente da `queue_update` e usa

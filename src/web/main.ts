@@ -18,6 +18,8 @@ import type {
   PiSetting,
   PiSettingsResult,
   PiModelSettingValue,
+  TrustOptionId,
+  TrustResult,
 } from "../ide/protocol.ts";
 import { rpc } from "../ide/protocol.ts";
 import { samePath } from "../ide/paths.ts";
@@ -72,7 +74,14 @@ import {
   setStatusKeyHidden,
 } from "./status-preferences.ts";
 import { bridgeUrlWithPageIntent, pageUrlForSession } from "./session-url.ts";
+import { ReconnectLoop, RECONNECT_INTERVAL_MS } from "./reconnect.ts";
 import { joinCollapseHeaderParts, shouldShowCollapseFooter } from "./collapse-footer.ts";
+import {
+  isKnownSlashCommand,
+  normalizeExtensionCommands,
+  slashCommandName,
+  type SlashCommand,
+} from "./slash-commands.ts";
 import {
   editArgumentPairs,
   editArgumentPath,
@@ -221,6 +230,7 @@ const els = {
   browserFilePicker: document.getElementById("browser-file-picker") as HTMLInputElement,
   trust: document.getElementById("trust") as HTMLButtonElement,
   trustIcon: document.getElementById("trust-icon") as HTMLSpanElement,
+  trustBadge: document.getElementById("trust-badge") as HTMLSpanElement,
   trustLabel: document.getElementById("trust-label") as HTMLSpanElement,
   btnModel: document.getElementById("btn-model") as HTMLButtonElement,
   modelInfo: document.getElementById("model-info") as HTMLSpanElement,
@@ -262,6 +272,9 @@ async function resolveBridgeUrl(): Promise<string | null> {
 
 let transport: Transport | null = null;
 let statusState: "open" | "connecting" | "closed" = "connecting";
+/** standalone only: a lost bridge connection is retried every 5s while the
+ *  window is ACTIVE (visible), without a page reload */
+let reconnecting = false;
 const demoMode = new URLSearchParams(location.search).has("demo");
 
 function updateStatus(): void {
@@ -271,7 +284,9 @@ function updateStatus(): void {
       ? t("connected")
       : statusState === "connecting"
         ? t("connecting")
-        : t("disconnected");
+        : reconnecting
+          ? `${t("disconnected")} — ${t("reconnecting")}`
+          : t("disconnected");
 }
 
 // boot loader: covers the UI until connection and initial data are ready
@@ -389,6 +404,30 @@ async function connect(url: string): Promise<void> {
   setupTransport(transport);
 }
 
+// --- standalone reconnect ----------------------------------------------------
+// A restarted bridge (piw -k + piw, artifact update, crash) must not require a
+// page reload: the page retries every RECONNECT_INTERVAL_MS while the window is
+// active, and the normal init flow — config + session history — resumes the
+// SAME session, because the page URL carries its id. The attempt re-resolves
+// the bridge URL every time, so even a restart that rotates the token recovers.
+const reconnect = new ReconnectLoop({
+  intervalMs: RECONNECT_INTERVAL_MS,
+  isActive: () => document.visibilityState === "visible",
+  onStateChange: (value) => {
+    reconnecting = value;
+    updateStatus();
+  },
+  attempt: async () => {
+    const url = await resolveBridgeUrl();
+    if (url) await connect(url);
+  },
+});
+
+// becoming visible again is the moment to try immediately (no 5s wait)
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") reconnect.retryNow();
+});
+
 function setupTransport(tr: Transport): void {
   let connectionOpened = false;
   let disconnectReported = false;
@@ -404,6 +443,7 @@ function setupTransport(tr: Transport): void {
     updateSendButton();
     if (s.state === "open") {
       connectionOpened = true;
+      reconnect.stop();
       els.connectPanel.hidden = true;
       void (async () => {
         // Config must be known before history rendering: presentation-only
@@ -425,6 +465,9 @@ function setupTransport(tr: Transport): void {
         disconnectReported = true;
         appendSystemBox("error", t("bridgeDisconnected"));
       }
+      // standalone: keep trying so a restarted bridge brings the dot back to
+      // green (and the session back) without a manual reload
+      if (runtime.mode === "standalone") reconnect.start();
     }
   });
   tr.onFrame(handleFrame);
@@ -2157,7 +2200,7 @@ async function refreshSessions(showResumeNotice = false): Promise<void> {
     await new Promise((r) => setTimeout(r, 1500));
   }
   const trust = await ideRequest({ type: "getTrust" });
-  if (trust?.ok) renderTrust(trust.data as { status?: string } | null);
+  if (trust?.ok) renderTrust(trust.data as TrustResult | null);
   // workspace first (instant, no reading of all session files)
   if (!workspacePath) {
     const wr = await ideRequest({ type: "getWorkspace" });
@@ -4280,7 +4323,7 @@ async function fetchSessionStats(): Promise<void> {
 function ensureToolCard(name?: string, outsideAgentic = false): HTMLElement {
   if (!toolsEl && (currentMsg || agenticThinking)) {
     // real name if already known (toolcall_start), otherwise a neutral placeholder
-    toolsEl = buildToolCard({ id: "", name: name || t("tool"), args: "" });
+    toolsEl = buildToolCard({ id: "", name: name || t("tool"), args: "" }, false);
     toolsPre = toolsEl.querySelector<HTMLPreElement>("pre");
     if (outsideAgentic) {
       const wrapper = addMsg("assistant");
@@ -4703,7 +4746,31 @@ function renderShellToolArguments(card: HTMLElement, rawArgs: string): void {
   body.append(timeoutRow, commandBlock);
 }
 
-function buildToolCard(tc: ToolCallInfo): HTMLElement {
+function renderStreamingToolArguments(
+  card: HTMLElement,
+  rawArgs: string,
+): HTMLPreElement | null {
+  const body = card.querySelector<HTMLElement>(":scope > .code-block:not(.tool-output)");
+  if (!body) return null;
+  let pre = body.querySelector<HTMLPreElement>(":scope > pre");
+  if (!pre) {
+    body.classList.remove("tool-read-input", "tool-edit-input", "tool-shell-input");
+    body.replaceChildren();
+    const header = document.createElement("div");
+    header.className = "code-header";
+    const label = document.createElement("span");
+    label.className = "code-label";
+    label.textContent = card.dataset.toolName || t("tool");
+    pre = document.createElement("pre");
+    header.appendChild(label);
+    addCopyButton(header, () => pre?.textContent ?? "");
+    body.append(header, pre);
+  }
+  pre.textContent = rawArgs;
+  return pre;
+}
+
+function buildToolCard(tc: ToolCallInfo, formatArguments = true): HTMLElement {
   const d = document.createElement("details");
   d.className = "tool-card";
   d.dataset.toolName = tc.name;
@@ -4730,14 +4797,20 @@ function buildToolCard(tc: ToolCallInfo): HTMLElement {
   header.append(label);
   addCopyButton(
     header,
-    tc.name === "write" ? (writeArgumentContent(tc.args) ?? "") : tc.args,
+    formatArguments
+      ? tc.name === "write"
+        ? (writeArgumentContent(tc.args) ?? "")
+        : tc.args
+      : () => pre.textContent ?? "",
   );
   body.append(header, pre);
   d.append(s, body);
-  if (tc.name === "read") renderReadToolArguments(d, tc.args);
-  else if (tc.name === "write") renderWriteToolArguments(d, tc.args);
-  else if (tc.name === "edit") renderEditToolArguments(d, tc.args);
-  else if (isShellTool(tc.name)) renderShellToolArguments(d, tc.args);
+  if (formatArguments) {
+    if (tc.name === "read") renderReadToolArguments(d, tc.args);
+    else if (tc.name === "write") renderWriteToolArguments(d, tc.args);
+    else if (tc.name === "edit") renderEditToolArguments(d, tc.args);
+    else if (isShellTool(tc.name)) renderShellToolArguments(d, tc.args);
+  }
   return d;
 }
 
@@ -5364,6 +5437,9 @@ function renderRpcEvent(evt: RpcEvent): void {
     // --session, currentSessionPath is still in memory
     renderNativeQueues([], []);
     piRestarting = false;
+    // the fresh process reloaded the project resources: the trust chip shows
+    // the status it was launched with and the pending "!" disappears
+    void refreshTrust();
     updateSendButton();
     // reset UI Applica: i valori applicati sono ora quelli salvati
     els.cliApply.disabled = false;
@@ -5502,6 +5578,10 @@ function renderRpcEvent(evt: RpcEvent): void {
           }
           const card = ensureToolCard(tc.name, tc.name === "ask_user");
           card.dataset.toolName = tc.name;
+          // Raw cumulative JSON remains available while arguments are generated.
+          // Preserve the user's collapsed/expanded state; the specialized
+          // renderer replaces it only at tool_call completion.
+          toolsPre = renderStreamingToolArguments(card, "");
           // the timer starts AS SOON AS the card is born (args generation
           // included), not at tool_execution_start: while the diff counters
           // scroll the timer already runs. startToolTimer is idempotent (the
@@ -5511,18 +5591,6 @@ function renderRpcEvent(evt: RpcEvent): void {
           setToolExecutionStatus(card, "running");
           // new tool: reset the args of the previous tool (multi-tool)
           toolsText = "";
-          if (tc.name === "read") {
-            renderReadToolArguments(card, "");
-            toolsPre = null;
-          } else if (tc.name === "edit") {
-            renderEditToolArguments(card, "");
-            toolsPre = null;
-          } else if (isShellTool(tc.name)) {
-            renderShellToolArguments(card, "");
-            toolsPre = null;
-          } else if (toolsPre) {
-            toolsPre.textContent = "";
-          }
           renderToolHeader(
             card.querySelector(".tool-name")!,
             toolSummary(tc.name, "", workspacePath ?? undefined),
@@ -5556,17 +5624,15 @@ function renderRpcEvent(evt: RpcEvent): void {
       startToolTimer(fallbackCard);
       setToolExecutionStatus(fallbackCard, "running");
       toolsText += action.delta;
-      // write: LIVE line counter — here the deltas REALLY scroll (the
-      // content is long) and the number rises in real time. The edits NO
-      // (args in bursts): for them only the exact diff at execution end stays.
+      // Keep the cumulative raw JSON visible for EVERY tool while the model
+      // generates arguments. Specialized visual formatting is intentionally
+      // deferred until the authoritative tool_call event.
       if (toolsEl) {
+        toolsPre = renderStreamingToolArguments(toolsEl, toolsText);
         const tName = toolsEl.querySelector(".tool-name")?.textContent ?? "";
-        if (tName === "read") renderReadToolArguments(toolsEl, toolsText);
-        else if (tName === "write") renderWriteToolArguments(toolsEl, toolsText);
-        else if (tName === "edit") renderEditToolArguments(toolsEl, toolsText);
-        else if (isShellTool(toolsEl.dataset.toolName ?? tName))
-          renderShellToolArguments(toolsEl, toolsText);
-        else if (toolsPre) toolsPre.textContent = toolsText;
+        // write: LIVE line counter — here the deltas REALLY scroll (the
+        // content is long) and the number rises in real time. The edits NO
+        // (args in bursts): for them only the exact diff at execution end stays.
         const streamedPath = streamedToolPath(
           tName,
           toolsText,
@@ -5637,6 +5703,8 @@ function renderRpcEvent(evt: RpcEvent): void {
         } else if (isShellTool(tcName)) {
           renderShellToolArguments(toolsEl, action.toolCall.args);
           toolsPre = null;
+        } else if (toolsPre) {
+          toolsPre.textContent = action.toolCall.args;
         }
         if (action.toolCall.id)
           toolCardsById.set(action.toolCall.id, toolsEl as HTMLElement);
@@ -6405,6 +6473,9 @@ els.thread.addEventListener(
 
 // narrower window → native CSS ellipsis on the badge (no JS)
 
+// Optional upstream issue reference for RPC features not exposed by pi core.
+const PI_CORE_ISSUE_URL = "";
+
 // click on gauge/context label: if a compaction IS running asks whether to
 // stop it, otherwise the normal confirmation. NOTE: stopping the compact is
 // not possible via RPC today (abortCompaction is only in-process in the TUI)
@@ -6682,21 +6753,35 @@ function translateThinkingLevel(level: string): string {
   return key ? t(key) : level;
 }
 
-function renderTrust(res: { status?: string } | null): void {
-  const status = res?.status ?? "ask";
-  const key =
-    status === "trusted" ? "trusted" : status === "untrusted" ? "untrusted" : "trustAsk";
-  // Material icons: shield (ask) · empty alert triangle (limited) · filled (full)
-  const kind: TrustIconKind =
-    status === "trusted"
-      ? "warn-filled"
-      : status === "untrusted"
-        ? "warn-outline"
-        : "shield";
+/** last getTrust / applyTrustOption response: the dialog reads the prompt
+ *  options and the parent folder a "trust parent" decision is saved to */
+let trustState: TrustResult | null = null;
+
+function renderTrust(res: TrustResult | null): void {
+  trustState = res;
+  // pi never prompts in RPC mode (--mode rpc): with no saved decision the
+  // protected project resources are ignored, so the effective status is
+  // always a boolean — there is no third "ask" level to show.
+  const status: "trusted" | "untrusted" =
+    res?.status === "trusted" ? "trusted" : "untrusted";
+  const label = status === "trusted" ? t("trusted") : t("untrusted");
+  // trusted → green shield, untrusted → yellow warning
+  const kind: TrustIconKind = status === "trusted" ? "shield" : "warn-outline";
   els.trustIcon.innerHTML = trustIcon(kind);
-  els.trustLabel.textContent = t(key);
-  els.trust.title = t(key);
+  els.trustLabel.textContent = label;
   els.trust.dataset.status = status;
+  // A pending change keeps the status of the RUNNING process; the red "!"
+  // after the icon means a restart is required to apply the new setting.
+  els.trustBadge.hidden = res?.pendingRestart !== true;
+  const notes: string[] = [];
+  if (res?.sessionOnly) notes.push(t("trustSessionOnly"));
+  if (res?.pendingRestart) notes.push(t("trustRestartHint"));
+  els.trust.title = notes.length ? `${label} — ${notes.join(" · ")}` : label;
+}
+
+async function refreshTrust(): Promise<void> {
+  const res = await ideRequest({ type: "getTrust" });
+  if (res?.ok) renderTrust(res.data as TrustResult | null);
 }
 
 // --- popover for the toolbar chips (model, thinking, trust) -----------------
@@ -6718,14 +6803,12 @@ function popItem(
   active: boolean,
   onClick: () => void,
   icon = "",
-  tone = "",
   color = "",
 ): void {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "pop-item";
   btn.classList.toggle("active", active);
-  if (tone) btn.dataset.tone = tone;
   // text color for the row (e.g. thinking levels)
   if (color) btn.style.color = color;
   if (icon) {
@@ -6739,8 +6822,7 @@ function popItem(
   lbl.textContent = label;
   const m = document.createElement("span");
   m.className = "pop-item-meta";
-  // with tone (trust): "✓" sign on the active item
-  m.textContent = tone ? (active ? "✓" : "") : meta;
+  m.textContent = meta;
   btn.append(lbl, m);
   btn.addEventListener("click", (e) => {
     // the menu lives inside the anchor button: without stop the click would
@@ -6925,51 +7007,163 @@ async function openThinkingPopover(): Promise<void> {
           });
         },
         chatIcon(),
-        "",
         thinkingColor(lvl), // level color in the dropdown
       );
     }
   });
 }
 
-function openTrustPopover(): void {
-  const current = (els.trust.dataset.status ?? "ask") as "trusted" | "untrusted" | "ask";
-  const opts: Array<{
-    status: "trusted" | "untrusted" | "ask";
-    key: string;
-    icon: string;
-  }> = [
-    { status: "trusted", key: "trusted", icon: trustIcon("warn-filled") },
-    { status: "untrusted", key: "untrusted", icon: trustIcon("warn-outline") },
-    { status: "ask", key: "trustAsk", icon: trustIcon("shield") },
-  ];
-  const applyTrust = (status: "trusted" | "untrusted" | "ask") => {
-    void ideRequest({ type: "setTrust", status }).then((r) => {
-      if (r?.ok) renderTrust(r.data as { status?: string } | null);
-    });
-  };
-  openPopover(els.trust, (menu) => {
-    for (const o of opts) {
-      popItem(
-        menu,
-        t(o.key),
-        "",
-        o.status === current,
-        () => {
-          // full access is dangerous: confirmation modal (not window.confirm)
-          if (o.status === "trusted") {
-            void showConfirm(t("trustFullConfirm")).then((ok) => {
-              if (ok) applyTrust(o.status);
-            });
-            return;
-          }
-          applyTrust(o.status);
-        },
-        o.icon,
-        o.status,
-      );
+// --- project trust dialog (pi TUI prompt, mouse-driven) ----------------------
+
+/** Labels of the pi trust prompt options (pi core trust-manager, same order). */
+function trustOptionLabel(id: TrustOptionId): string {
+  switch (id) {
+    case "trust":
+      return t("trustOptionTrust");
+    case "trust-parent":
+      return tpl(t("trustOptionTrustParent"), { path: trustState?.parentPath ?? "" });
+    case "trust-session":
+      return t("trustOptionTrustSession");
+    case "untrust":
+      return t("trustOptionUntrust");
+    default:
+      return t("trustOptionUntrustSession");
+  }
+}
+
+/** Modal with explicit choices: Esc / outside click → null. */
+function showModalChoice(
+  message: string,
+  buttons: Array<{ label: string; value: string; primary?: boolean }>,
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    const card = document.createElement("div");
+    card.className = "modal";
+    const { row: lead } = buildWarningModalLead(message);
+    const actions = document.createElement("div");
+    actions.className = "modal-actions";
+    const close = (value: string | null): void => {
+      backdrop.remove();
+      document.removeEventListener("keydown", esc);
+      resolve(value);
+    };
+    const esc = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") close(null);
+    };
+    for (const button of buttons) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = button.primary ? "btn primary" : "btn";
+      btn.textContent = button.label;
+      btn.addEventListener("click", () => close(button.value));
+      actions.appendChild(btn);
     }
+    card.append(lead, actions);
+    backdrop.appendChild(card);
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop) close(null);
+    });
+    document.addEventListener("keydown", esc);
+    document.body.appendChild(backdrop);
+    actions.querySelector<HTMLButtonElement>("button")?.focus();
   });
+}
+
+// Same options as the pi TUI prompt (Trust / Trust parent folder / Trust this
+// session only / Do not trust / Do not trust this session only): the choice is
+// saved to ~/.pi/agent/trust.json, the session-only ones only arm the per-run
+// `--approve` / `--no-approve` flags.
+function openTrustDialog(): void {
+  if (demoMode) return;
+  const options = trustState?.options ?? [];
+  // a host without the prompt options (older companion) must not open an
+  // empty dialog
+  if (options.length === 0) {
+    addStatusLine(t("trustApplyFailed"));
+    return;
+  }
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  const card = document.createElement("div");
+  card.className = "modal";
+  const { row: lead } = buildWarningModalLead(t("trustDialogDesc"));
+  const list = document.createElement("div");
+  list.className = "modal-select";
+  const actions = document.createElement("div");
+  actions.className = "modal-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "btn";
+  cancel.textContent = t("cancel");
+  actions.appendChild(cancel);
+  const close = (): void => {
+    backdrop.remove();
+    document.removeEventListener("keydown", esc);
+  };
+  const esc = (e: KeyboardEvent): void => {
+    if (e.key === "Escape") close();
+  };
+  for (const option of options) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "modal-option";
+    row.textContent = trustOptionLabel(option.id);
+    row.addEventListener("click", () => {
+      close();
+      void applyTrustChoice(option.id);
+    });
+    list.appendChild(row);
+  }
+  card.append(lead, list, actions);
+  backdrop.appendChild(card);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) close();
+  });
+  cancel.addEventListener("click", close);
+  document.addEventListener("keydown", esc);
+  document.body.appendChild(backdrop);
+  list.querySelector<HTMLButtonElement>("button")?.focus();
+}
+
+/** Saves the chosen option. The new setting is applied by a pi restart: with
+ *  an idle session the restart is automatic, while a running turn asks first
+ *  (restart now / restart later). */
+async function applyTrustChoice(id: TrustOptionId): Promise<void> {
+  const res = await ideRequest({ type: "applyTrustOption", option: id });
+  if (!res?.ok) {
+    addStatusLine(res?.error ?? t("trustApplyFailed"));
+    return;
+  }
+  const data = (res.data ?? null) as TrustResult | null;
+  if (data?.pendingRestart !== true) {
+    renderTrust(data);
+    return;
+  }
+  if (!working && !compacting) {
+    await restartSessionForTrust(data);
+    return;
+  }
+  const choice = await showModalChoice(t("trustRestartBusy"), [
+    { label: t("trustRestartNow"), value: "now", primary: true },
+    { label: t("trustRestartLater"), value: "later" },
+  ]);
+  if (choice === "now") {
+    await restartSessionForTrust(data);
+    return;
+  }
+  // keep the previous status + red "!" until the user restarts the session
+  renderTrust(data);
+}
+
+/** Restart pi so it reloads the project resources with the new trust setting
+ *  (transparent: connection_closed restart + pi_restarted → re-init, which
+ *  also re-reads the trust state and clears the pending marker). */
+async function restartSessionForTrust(data: TrustResult | null): Promise<void> {
+  renderTrust(data);
+  if (working) await stopWorking(); // interrupt the running turn, like STOP
+  await ideRequest({ type: "restartPi" });
 }
 
 // --- confirmation modal (same behavior in browser and VS Code webview) -------
@@ -7052,7 +7246,9 @@ els.btnThinking.addEventListener("click", (e) => {
 });
 els.trust.addEventListener("click", (e) => {
   e.stopPropagation();
-  openTrustPopover();
+  // the option list is host-provided (same list as the pi TUI prompt): refresh
+  // before opening so the dialog reflects the current workspace
+  void refreshTrust().then(() => openTrustDialog());
 });
 
 /** Render a user message exclusively from pi's authoritative content. */
@@ -7141,7 +7337,9 @@ const TERMINAL_ONLY_COMMANDS = new Set([
   "thinking",
 ]);
 
-function sendOrStop(): void {
+let slashCommandSubmissionPending = false;
+
+async function sendOrStop(): Promise<void> {
   if (!transport || switchingSession || sessionLoading || piRestarting) return;
   // /settings is the same special case as pi.dev TUI: opens the panel
   // instead of sending the text to the model
@@ -7152,8 +7350,7 @@ function sendOrStop(): void {
   // Built-in pi TUI commands: the ones with a native UI action repeat that
   // action (same code path as the GUI button); the terminal-only ones get
   // the informative line above and are never sent to pi.
-  const commandMatch = /^\/([^\s/]+)/.exec(els.input.value.trim());
-  const commandName = commandMatch?.[1]?.toLowerCase();
+  const commandName = slashCommandName(els.input.value);
   if (commandName) {
     if (TERMINAL_ONLY_COMMANDS.has(commandName)) {
       appendSystemBox("warn", t("terminalOnlyCommands"));
@@ -7162,6 +7359,7 @@ function sendOrStop(): void {
     if (commandName === "compact") {
       // same action as the compact UI button (context gauge)
       els.input.value = "";
+      resetSlashComposerState();
       resetInputHeight();
       void startCompactionFromUi();
       return;
@@ -7169,6 +7367,7 @@ function sendOrStop(): void {
     if (commandName === "new") {
       // same action as the "new session" button in the session box
       els.input.value = "";
+      resetSlashComposerState();
       resetInputHeight();
       void startNewSession();
       return;
@@ -7181,10 +7380,25 @@ function sendOrStop(): void {
         return;
       }
       els.input.value = "";
+      resetSlashComposerState();
       resetInputHeight();
       void applyCurrentSessionName(name);
       return;
     }
+  }
+  let extensionCommand = isExtensionSlashCommand(els.input.value);
+  if (commandName && !extensionCommand) {
+    if (slashCommandSubmissionPending) return;
+    slashCommandSubmissionPending = true;
+    const submittedText = els.input.value;
+    try {
+      await fetchSlashCommands();
+    } finally {
+      slashCommandSubmissionPending = false;
+    }
+    // Do not submit a command that the user changed while get_commands was in flight.
+    if (els.input.value !== submittedText) return;
+    extensionCommand = isExtensionSlashCommand(submittedText);
   }
   if (blockedResumeModel) {
     addStatusLine(tpl(t("resumeModelUnavailable"), { model: blockedResumeModel }));
@@ -7193,7 +7407,6 @@ function sendOrStop(): void {
   // Extension commands always go through prompt so pi can execute them
   // immediately. Every other message submitted while busy is handed to pi's
   // native steering queue right now; the webview never delays delivery.
-  const extensionCommand = isExtensionSlashCommand(els.input.value);
   if ((working || compacting) && !extensionCommand) {
     submitSteering();
     return;
@@ -7232,15 +7445,12 @@ function sendOrStop(): void {
     ),
   });
   // turn_start will arm the provider wait at the authoritative boundary.
-  // Only unknown slash commands still need the generic core warning.
-  // Commands advertised by get_commands are handled immediately by pi,
-  // including while the model is already processing.
-  if (message.trim().startsWith("/") && !isExtensionSlashCommand(message)) {
-    notifyCmdNotImplemented();
-  }
+  // Advertised extension commands are handled immediately by pi, even while
+  // busy; unmatched slash-prefixed text remains an ordinary prompt.
   // message_start renders accepted user prompts at the authoritative boundary.
   scrollToBottom(true);
   els.input.value = "";
+  resetSlashComposerState();
   resetInputHeight();
   clearAttachments();
   els.input.focus();
@@ -7433,41 +7643,49 @@ function applyToolChainIfToolFirst(): void {
 }
 
 // --- slash command palette (plan 0003): ONLY extension commands -------------
-interface SlashCommand {
-  name: string; // without the leading "/"
-  description?: string;
-}
 let slashCommands: SlashCommand[] = [];
 let cmdOpen = false;
 let cmdSelected = 0;
 let cmdMatches: SlashCommand[] = [];
+let slashInputActive = false;
+let cmdUpdateSeq = 0;
 
 function isExtensionSlashCommand(input: string): boolean {
-  const match = /^\/([^\s/]+)/.exec(input.trim());
-  return !!match && slashCommands.some((command) => command.name === match[1]);
+  return isKnownSlashCommand(input, slashCommands);
 }
 
-// extension command list from get_commands (source "extension"), fetched at
-// boot and lazily at the first "/" (the list can change with the extensions)
-async function fetchSlashCommands(): Promise<void> {
+// Extension commands can be registered after the initial page load. Coalesce
+// concurrent lookups, but allow every new slash-input sequence to refresh the
+// complete authoritative list before the palette or submit path relies on it.
+let slashCommandsFetch: Promise<boolean> | null = null;
+async function fetchSlashCommands(): Promise<boolean> {
+  if (slashCommandsFetch) return slashCommandsFetch;
+  slashCommandsFetch = (async () => {
+    try {
+      const res = await rpcRequest(rpc.getCommands(), `cmds-${++cmdSeq}`, 8000);
+      const cmds = (
+        res.data as
+          | {
+              commands?: Array<{
+                name?: string;
+                description?: string;
+                source?: string;
+              }>;
+            }
+          | undefined
+      )?.commands;
+      slashCommands = normalizeExtensionCommands(cmds ?? []);
+      return true;
+    } catch {
+      // Keep the last successful list. Text that does not match a registered
+      // command continues through the normal prompt path.
+      return false;
+    }
+  })();
   try {
-    const res = await rpcRequest(rpc.getCommands(), `cmds-${++cmdSeq}`, 8000);
-    const cmds = (
-      res.data as
-        | { commands?: Array<{ name?: string; description?: string; source?: string }> }
-        | undefined
-    )?.commands;
-    slashCommands = (cmds ?? [])
-      .filter(
-        (c) =>
-          c.source === "extension" && typeof c.name === "string" && c.name.length > 0,
-      )
-      .map((c) => ({
-        name: c.name!.replace(/^\/+/, ""),
-        description: c.description ?? "",
-      }));
-  } catch {
-    // pi not ready yet: stays empty; the lazy fetch retries at the next "/"
+    return await slashCommandsFetch;
+  } finally {
+    slashCommandsFetch = null;
   }
 }
 let cmdSeq = 0;
@@ -7478,14 +7696,24 @@ function closeCmdDropdown(): void {
   els.cmdDropdown.hidden = true;
 }
 
+function resetSlashComposerState(): void {
+  slashInputActive = false;
+  cmdUpdateSeq += 1;
+  closeCmdDropdown();
+}
+
 // filtering + render: the command is the first token (before the space); if
 // the user is already typing arguments (space) the command is chosen → closed
 function updateCmdDropdown(): void {
   const raw = els.input.value;
+  const updateSeq = ++cmdUpdateSeq;
   if (!raw.startsWith("/")) {
+    slashInputActive = false;
     closeCmdDropdown();
     return;
   }
+  const enteringSlashInput = !slashInputActive;
+  slashInputActive = true;
   const firstSpace = raw.indexOf(" ");
   if (firstSpace !== -1) {
     closeCmdDropdown(); // args in progress: the extension handles the rest
@@ -7493,8 +7721,14 @@ function updateCmdDropdown(): void {
   }
   const q = raw.slice(1).toLowerCase();
   void (async () => {
-    if (slashCommands.length === 0) await fetchSlashCommands();
-    const matches = slashCommands.filter((c) => !q || c.name.toLowerCase().includes(q));
+    if (enteringSlashInput || slashCommands.length === 0) {
+      await fetchSlashCommands();
+    }
+    // Ignore a slower lookup started for an older composer value.
+    if (updateSeq !== cmdUpdateSeq || els.input.value !== raw) return;
+    const matches = slashCommands.filter((c) =>
+      !q ? true : c.name.toLowerCase().includes(q),
+    );
     cmdMatches = matches;
     cmdSelected = 0;
     if (matches.length === 0) {
@@ -7532,17 +7766,6 @@ function renderCmdSelection(): void {
   els.cmdCounter.textContent = `(${cmdSelected + 1}/${cmdMatches.length})`;
 }
 
-// pi-core issue link (empty until we open the upstream issue):
-// when set, the "not yet implemented" block shows it
-const PI_CORE_ISSUE_URL = "";
-
-// informative block: the extension command requires the pi.dev core support
-// (ui.custom) not yet available — see docs/issues/pi-core
-function notifyCmdNotImplemented(): void {
-  const link = PI_CORE_ISSUE_URL ? `\n${PI_CORE_ISSUE_URL}` : "";
-  addStatusLine(`${t("cmdNotImplemented")}${link}`);
-}
-
 // accepts the selected command: fills the composer with "/name " (space
 // for possible subcommands) and closes the dropdown — NO send.
 // The extension commands require the pi.dev core (ui.custom): it is
@@ -7559,7 +7782,7 @@ function acceptCmd(name: string): void {
 // composer; Esc/outside click closes
 function openCmdPalette(): void {
   void (async () => {
-    if (slashCommands.length === 0) await fetchSlashCommands();
+    await fetchSlashCommands();
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
     const card = document.createElement("div");

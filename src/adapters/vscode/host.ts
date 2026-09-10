@@ -153,7 +153,7 @@ import {
   writeSessionSettings,
   sessionModelArgs,
 } from "../../bridge/sessions.ts";
-import { getTrust, setTrust } from "../../bridge/trust.ts";
+import { TrustRuntime } from "../../bridge/trust.ts";
 import {
   getPiSettings,
   setPiSettingFile,
@@ -196,6 +196,9 @@ export abstract class PiWebviewHost {
   private cliFlagsNeedSessionPersistence = false;
   /** true during an intentional restart (setCliFlags): pi's exit is not a crash */
   private restarting = false;
+  /** Project trust of the RUNNING pi process: a change (saved decision or
+   *  session-only override) is applied by the next restart. */
+  private trust: TrustRuntime | null = null;
 
   constructor(
     protected context: vscode.ExtensionContext,
@@ -247,6 +250,13 @@ export abstract class PiWebviewHost {
   protected effectiveNotifications(): "desktop" | "vscode" | "off" {
     const override = readSessionSettings(this.currentSessionPath ?? "").notifications;
     return override ?? this.config.get().notifications ?? "desktop";
+  }
+
+  /** trust state of the running pi process (workspace-aware) */
+  protected trustRuntime(): TrustRuntime {
+    const ws = this.workspace() ?? "";
+    if (!this.trust) this.trust = new TrustRuntime(ws);
+    return this.trust;
   }
 
   protected workspace(): string | undefined {
@@ -352,6 +362,10 @@ export abstract class PiWebviewHost {
     this.cliFlagsNeedSessionPersistence =
       !this.currentSessionPath && Object.keys(this.activeCliFlags).length > 0;
     const activeCliFlagArgs = cliFlagArgs(this.activeCliFlags);
+    // Project trust: the session-only options launch pi with `--approve` /
+    // `--no-approve` for THIS run (pi never persists them).
+    const trust = this.trustRuntime();
+    const trustArgs = trust.launchArgs();
     // actual command line used to launch pi (for error messages: suggested
     // to the user to verify pi works from a terminal)
     this.piCommand = [
@@ -361,6 +375,7 @@ export abstract class PiWebviewHost {
       ...sessionArgs,
       ...activeSessionModelArgs,
       ...activeCliFlagArgs,
+      ...trustArgs,
     ].join(" ");
 
     this.pi = new PiProcess(
@@ -450,11 +465,19 @@ export abstract class PiWebviewHost {
       // directory even if the session belongs to another folder
       {
         env: { ...process.env, PI_WEBVIEW_COMPANION: "1" },
-        args: [...sessionArgs, ...activeSessionModelArgs, ...activeCliFlagArgs],
+        args: [
+          ...sessionArgs,
+          ...activeSessionModelArgs,
+          ...activeCliFlagArgs,
+          ...trustArgs,
+        ],
         ...(this.workspace() ? { cwd: this.workspace() } : {}),
       },
     );
     this.pi.start();
+    // the pending trust change is now the state of the running process
+    trust.setWorkspace(this.workspace() ?? "");
+    trust.onLaunched();
     logLine(`spawning: ${this.piCommand}`);
   }
 
@@ -577,7 +600,7 @@ export abstract class PiWebviewHost {
           getPiSettings(
             {
               workspace: ws,
-              workspaceTrusted: ws ? getTrust(ws).status === "trusted" : undefined,
+              workspaceTrusted: ws ? this.trustRuntime().isTrusted() : undefined,
             },
             req.key,
           ),
@@ -587,7 +610,7 @@ export abstract class PiWebviewHost {
       case "setSetting":
       case "setSettings": {
         const ws = this.workspace();
-        const trusted = ws ? getTrust(ws).status === "trusted" : undefined;
+        const trusted = ws ? this.trustRuntime().isTrusted() : undefined;
         const ctx = { workspace: ws, workspaceTrusted: trusted };
         const res =
           req.type === "setSettings"
@@ -756,13 +779,19 @@ export abstract class PiWebviewHost {
         this.respond(req.id, true);
         return;
       case "getTrust": {
-        const ws = this.workspace() ?? "";
-        this.respond(req.id, true, getTrust(ws));
+        this.respond(req.id, true, this.trustRuntime().result());
         return;
       }
-      case "setTrust": {
-        const ws = this.workspace() ?? "";
-        this.respond(req.id, true, setTrust(ws, req.status));
+      case "applyTrustOption": {
+        try {
+          this.respond(req.id, true, this.trustRuntime().apply(req.option));
+        } catch (err) {
+          this.respond(
+            req.id,
+            false,
+            `trust option failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
         return;
       }
       case "saveAttachment":

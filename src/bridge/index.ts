@@ -48,7 +48,7 @@ import {
   sessionModelArgs,
   sessionPathForId,
 } from "./sessions.ts";
-import { getTrust, setTrust } from "./trust.ts";
+import { TrustRuntime } from "./trust.ts";
 import { getPiSettings, setPiSettingFile, setPiSettingsFile } from "./pi-settings.ts";
 import { readStartupInfo } from "./startup-info.ts";
 import { saveAttachment, pathExists, attachFromPath } from "./attachments.ts";
@@ -400,12 +400,15 @@ function main(): void {
       : intent.kind === "new" && intent.workspaceDir
         ? intent.workspaceDir
         : process.cwd();
+    // Project trust of the running pi process: a change is applied by a
+    // restart, and the session-only options arm a per-run override flag.
+    const trust = new TrustRuntime(workspaceDir);
     const makePi = (
       cwd: string,
       sessionPath?: string,
       flags: CliFlags = readSessionCliFlags(sessionPath ?? ""),
-    ): PiProcess =>
-      new PiProcess(
+    ): PiProcess => {
+      const proc = new PiProcess(
         piCommand,
         {
           onEvent: (event) => send({ channel: "rpc", payload: event as RpcEvent }),
@@ -438,9 +441,16 @@ function main(): void {
             ...(sessionPath ? ["--session", sessionPath] : []),
             ...(sessionPath ? sessionModelArgs(sessionPath) : []),
             ...cliFlagArgs(flags),
+            ...trust.launchArgs(),
           ],
         },
       );
+      // Project trust of the running process: the pending change (a saved
+      // decision or a session-only override) is now the state of this launch.
+      trust.setWorkspace(cwd);
+      trust.onLaunched();
+      return proc;
+    };
 
     let pi = makePi(workspaceDir, currentSessionPath, activeCliFlags);
     pi.start();
@@ -657,7 +667,7 @@ function main(): void {
           data: getPiSettings(
             {
               workspace: workspaceDir,
-              workspaceTrusted: getTrust(workspaceDir).status === "trusted",
+              workspaceTrusted: trust.isTrusted(),
             },
             req.key,
           ),
@@ -667,7 +677,7 @@ function main(): void {
       if (req.type === "setSetting" || req.type === "setSettings") {
         const ctx = {
           workspace: workspaceDir,
-          workspaceTrusted: getTrust(workspaceDir).status === "trusted",
+          workspaceTrusted: trust.isTrusted(),
         };
         const res =
           req.type === "setSettings"
@@ -685,14 +695,18 @@ function main(): void {
         return;
       }
       if (req.type === "getTrust") {
-        respond(req.id ?? "", { ok: true, data: getTrust(workspaceDir) });
+        respond(req.id ?? "", { ok: true, data: trust.result() });
         return;
       }
-      if (req.type === "setTrust") {
-        respond(req.id ?? "", {
-          ok: true,
-          data: setTrust(workspaceDir, req.status),
-        });
+      if (req.type === "applyTrustOption") {
+        try {
+          respond(req.id ?? "", { ok: true, data: trust.apply(req.option) });
+        } catch (err) {
+          respond(req.id ?? "", {
+            ok: false,
+            error: `trust option failed: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
         return;
       }
       if (req.type === "saveAttachment") {

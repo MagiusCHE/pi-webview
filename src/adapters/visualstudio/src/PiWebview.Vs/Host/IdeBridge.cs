@@ -59,8 +59,7 @@ public static class IdeBridge
                 case "getSettings":
                 {
                     var workspace = host.Workspace();
-                    var trusted = workspace is not null &&
-                                  TrustStore.GetTrust(workspace).Status == "trusted";
+                    var trusted = host.Trust.IsTrusted();
                     host.PostIdeResponse(Ok(req,
                         PiSettingsStore.Get(workspace, trusted, req.Key)));
                     return;
@@ -87,8 +86,7 @@ public static class IdeBridge
                         return;
                     }
                     var workspace = host.Workspace();
-                    var trusted = workspace is not null &&
-                                  TrustStore.GetTrust(workspace).Status == "trusted";
+                    var trusted = host.Trust.IsTrusted();
                     var result = PiSettingsStore.Set(changes, workspace, trusted);
                     if (!result.Ok)
                     {
@@ -163,11 +161,18 @@ public static class IdeBridge
                     host.PostIdeResponse(Ok(req, null));
                     return;
                 case "getTrust":
-                    host.PostIdeResponse(Ok(req, TrustStore.GetTrust(host.Workspace() ?? "")));
+                    host.PostIdeResponse(Ok(req, host.Trust.Result(host.Workspace() ?? "")));
                     return;
-                case "setTrust":
-                    if (req.Status is null) { host.PostIdeResponse(Fail(req, "setTrust: missing status")); return; }
-                    host.PostIdeResponse(Ok(req, TrustStore.SetTrust(host.Workspace() ?? "", req.Status)));
+                case "applyTrustOption":
+                    if (req.Option is null) { host.PostIdeResponse(Fail(req, "applyTrustOption: missing option")); return; }
+                    try
+                    {
+                        host.PostIdeResponse(Ok(req, host.Trust.Apply(host.Workspace() ?? "", req.Option)));
+                    }
+                    catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+                    {
+                        host.PostIdeResponse(Fail(req, $"trust option failed: {ex.Message}"));
+                    }
                     return;
                 case "saveAttachment":
                     if (req.Name is null || req.DataBase64 is null) { host.PostIdeResponse(Fail(req, "saveAttachment: missing fields")); return; }

@@ -1,0 +1,4 @@
+{
+  "channel": "ide",
+  "payload": { "type": "applyTrustOption", "option": "trust-parent", "id": "ide-3" }
+}

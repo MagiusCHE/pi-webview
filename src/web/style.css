@@ -1686,9 +1686,6 @@ footer {
   color: var(--fg);
   border-color: var(--border);
 }
-.trust-indicator[data-status="ask"] {
-  color: var(--ok);
-}
 .attach-btn {
   font-size: 14px;
   line-height: 1;
@@ -1698,7 +1695,15 @@ footer {
   color: var(--warn);
 }
 .trust-indicator[data-status="trusted"] {
+  color: var(--ok);
+}
+/* red "!" after the icon: a trust change is waiting for a pi restart */
+.trust-badge {
+  flex: 0 0 auto;
   color: var(--err);
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 1;
 }
 #btn-model {
   min-width: 0;
@@ -1853,25 +1858,6 @@ footer {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
-/* trust tones on the row: soft background, solid border and text */
-.pop-item[data-tone="ask"] {
-  background: color-mix(in srgb, var(--ok) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--ok) 55%, transparent);
-  color: var(--ok);
-}
-.pop-item[data-tone="untrusted"] {
-  background: color-mix(in srgb, var(--warn) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
-  color: var(--warn);
-}
-.pop-item[data-tone="trusted"] {
-  background: color-mix(in srgb, var(--err) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--err) 55%, transparent);
-  color: var(--err);
-}
-.pop-item[data-tone] .pop-item-meta {
-  color: inherit;
-}
 .pop-item-icon {
   flex: 0 0 auto;
   width: 18px;

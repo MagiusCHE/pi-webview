@@ -28,32 +28,106 @@ public sealed class TrustStoreTests : IDisposable
         }
     }
 
+    /// <summary>A workspace inside the test dir: parent-walk semantics are
+    /// platform independent (the Windows-only C:\ paths of the first version
+    /// silently skipped these cases on Linux).</summary>
+    private string Workspace(string name = "proj") => Path.Combine(_dir, name);
+
     [Fact]
-    public void Default_e_ask()
+    public void Nessuna_decisione_e_untrusted()
     {
-        var result = TrustStore.GetTrust(@"C:\proj", _dir);
-        Assert.Equal("ask", result.Status);
+        // pi never prompts in RPC mode: without a saved decision the protected
+        // project resources are ignored, so there is no "ask" state to show.
+        var result = TrustStore.GetTrust(Workspace(), _dir);
+        Assert.Equal("untrusted", result.Status);
     }
 
     [Fact]
-    public void SetTrusted_persiste_e_vale_per_i_parent()
+    public void Trust_persiste_e_vale_per_i_parent()
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            // C:\ path semantics (parent walk) are Windows-specific
-            return;
-        }
-        TrustStore.SetTrust(@"C:\proj", "trusted", _dir);
-        Assert.Equal("trusted", TrustStore.GetTrust(@"C:\proj", _dir).Status);
-        Assert.Equal("trusted", TrustStore.GetTrust(@"C:\proj\sub", _dir).Status);
+        var applied = TrustStore.ApplyOption(Workspace(), "trust", _dir);
+        Assert.Equal("trusted", applied.Status);
+        Assert.Null(applied.SessionOverride);
+        Assert.Equal("trusted", TrustStore.GetTrust(Workspace(), _dir).Status);
+        Assert.Equal("trusted", TrustStore.GetTrust(Path.Combine(Workspace(), "sub"), _dir).Status);
     }
 
     [Fact]
-    public void Ask_rimuove_la_decisione()
+    public void Untrust_persiste_la_decisione_negativa()
     {
-        TrustStore.SetTrust(@"C:\proj", "untrusted", _dir);
-        TrustStore.SetTrust(@"C:\proj", "ask", _dir);
-        Assert.Equal("ask", TrustStore.GetTrust(@"C:\proj", _dir).Status);
+        TrustStore.ApplyOption(Workspace(), "untrust", _dir);
+        Assert.Equal("untrusted", TrustStore.GetTrust(Workspace(), _dir).Status);
+    }
+
+    [Fact]
+    public void Trust_parent_salva_sul_parent_e_rimuove_la_cartella()
+    {
+        var sub = Path.Combine(Workspace(), "sub");
+        TrustStore.ApplyOption(sub, "untrust", _dir);
+        Assert.Equal("untrusted", TrustStore.GetTrust(sub, _dir).Status);
+        TrustStore.ApplyOption(sub, "trust-parent", _dir);
+        // the folder decision is removed, the parent decision applies
+        Assert.Equal("trusted", TrustStore.GetTrust(sub, _dir).Status);
+        Assert.Equal("trusted", TrustStore.GetTrust(Workspace(), _dir).Status);
+    }
+
+    [Fact]
+    public void Session_only_non_persiste_e_usa_i_flag_per_run()
+    {
+        var applied = TrustStore.ApplyOption(Workspace(), "trust-session", _dir);
+        Assert.Equal("trusted", applied.Status);
+        Assert.True(applied.SessionOverride);
+        // nothing was written: the decision is not persisted
+        Assert.Equal("untrusted", TrustStore.GetTrust(Workspace(), _dir).Status);
+        Assert.Equal(new[] { "--approve" }, TrustStore.OverrideArgs(true));
+        Assert.Equal(new[] { "--no-approve" }, TrustStore.OverrideArgs(false));
+        Assert.Empty(TrustStore.OverrideArgs(null));
+    }
+
+    [Fact]
+    public void Options_elencano_le_scelte_della_TUI()
+    {
+        var ids = TrustStore.Options(Workspace()).Select(o => o.Id).ToArray();
+        Assert.Equal(
+            new[] { "trust", "trust-parent", "trust-session", "untrust", "untrust-session" },
+            ids);
+    }
+
+    [Fact]
+    public void TrustRuntime_richiede_riavvio_e_consuma_l_override()
+    {
+        var workspace = Workspace();
+        var runtime = new TrustRuntime(workspace, _dir);
+        Assert.False(runtime.IsTrusted());
+        var result = runtime.Apply(workspace, "trust-session");
+        // the running process is unchanged: the chip keeps its status and shows
+        // the pending marker until the restart
+        Assert.True(result.PendingRestart);
+        Assert.Equal("untrusted", result.Status);
+        Assert.False(runtime.IsTrusted());
+        Assert.Equal(new[] { "--approve" }, runtime.LaunchArgs());
+        // the next launch consumes the override: it applies once only
+        runtime.OnLaunched();
+        Assert.True(runtime.IsTrusted());
+        Assert.True(runtime.Result(workspace).SessionOnly);
+        Assert.False(runtime.Result(workspace).PendingRestart);
+        Assert.Empty(runtime.LaunchArgs());
+        // a later restart ends the "this session only" choice
+        runtime.OnLaunched();
+        Assert.False(runtime.IsTrusted());
+    }
+
+    [Fact]
+    public void TrustRuntime_persiste_la_scelta_e_la_applica_al_riavvio()
+    {
+        var workspace = Workspace();
+        var runtime = new TrustRuntime(workspace, _dir);
+        var result = runtime.Apply(workspace, "trust");
+        Assert.True(result.PendingRestart);
+        Assert.False(runtime.IsTrusted()); // still the old process
+        runtime.OnLaunched();
+        Assert.True(runtime.IsTrusted());
+        Assert.False(runtime.Result(workspace).SessionOnly);
     }
 
     [Fact]

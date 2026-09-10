@@ -110,6 +110,10 @@ public sealed class IdeRequest
     [System.Text.Json.Serialization.JsonPropertyName("status")]
     public string? Status { get; set; }
 
+    // applyTrustOption: id of the chosen pi trust prompt option
+    [System.Text.Json.Serialization.JsonPropertyName("option")]
+    public string? Option { get; set; }
+
     public static IdeRequest? FromJson(JsonElement payload)
     {
         try
@@ -338,13 +342,43 @@ public sealed class ThinkingSettings
     public bool HideThinkingBlock { get; set; }
 }
 
+/// <summary>Options of the pi trust prompt (pi core trust-manager, same order):
+/// the "*-session" ones are not persisted, they launch pi with --approve /
+/// --no-approve for that run.</summary>
+public sealed class TrustOption
+{
+    [System.Text.Json.Serialization.JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [System.Text.Json.Serialization.JsonPropertyName("sessionOverride")]
+    [System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? SessionOverride { get; set; }
+}
+
 public sealed class TrustResult
 {
+    /// <summary>Status the RUNNING pi process was launched with (there is no
+    /// "ask" state: pi never prompts in RPC mode).</summary>
     [System.Text.Json.Serialization.JsonPropertyName("status")]
-    public string Status { get; set; } = "ask";
+    public string Status { get; set; } = "untrusted";
 
     [System.Text.Json.Serialization.JsonPropertyName("workspace")]
     public string Workspace { get; set; } = "";
+
+    [System.Text.Json.Serialization.JsonPropertyName("parentPath")]
+    [System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? ParentPath { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("pendingRestart")]
+    public bool PendingRestart { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("sessionOnly")]
+    public bool SessionOnly { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("options")]
+    public List<TrustOption> Options { get; set; } = new();
 }
 
 public sealed class ProviderBalance

@@ -54,14 +54,19 @@ import {
 } from "./tool-summary.ts";
 import {
   agenticHeaderLabelKey,
+  agenticMetricVisualState,
   agenticToolMetric,
   emptyAgenticCounts,
+  emptyAgenticMetricProgress,
+  transitionAgenticMetricProgress,
   WAITING_RESPONSE_DELAY_MS,
   waitingResponseDelayRemaining,
   waitingResponseRestartAt,
   visibleThinkingContent,
   type AgenticCounts,
+  type AgenticItemState,
   type AgenticMetric,
+  type AgenticMetricProgress,
 } from "./agentic-thinking.ts";
 import {
   attachEditorSelectionContext,
@@ -3209,22 +3214,54 @@ let activeAgenticBlock: AgenticBlock | null = null;
 let agenticRunStartedAt = 0;
 const runningAgenticBlocks = new Set<AgenticBlock>();
 
+const AGENTIC_DATA_SUFFIX: Record<AgenticMetric, string> = {
+  thought: "Thought",
+  read: "Read",
+  write: "Write",
+  bash: "Bash",
+  tools: "Tools",
+};
+
+function agenticMetricProgress(
+  root: HTMLElement,
+  metric: AgenticMetric,
+): AgenticMetricProgress {
+  const suffix = AGENTIC_DATA_SUFFIX[metric];
+  return {
+    count: Number(root.dataset[`count${suffix}`] ?? 0),
+    running: Number(root.dataset[`running${suffix}`] ?? 0),
+    errors: Number(root.dataset[`errors${suffix}`] ?? 0),
+  };
+}
+
+function storeAgenticMetricProgress(
+  root: HTMLElement,
+  metric: AgenticMetric,
+  progress: AgenticMetricProgress,
+): void {
+  const suffix = AGENTIC_DATA_SUFFIX[metric];
+  root.dataset[`count${suffix}`] = String(progress.count);
+  root.dataset[`running${suffix}`] = String(progress.running);
+  root.dataset[`errors${suffix}`] = String(progress.errors);
+}
+
 function agenticCounts(root: HTMLElement): AgenticCounts {
   return {
-    thought: Number(root.dataset.countThought ?? 0),
-    read: Number(root.dataset.countRead ?? 0),
-    write: Number(root.dataset.countWrite ?? 0),
-    bash: Number(root.dataset.countBash ?? 0),
-    tools: Number(root.dataset.countTools ?? 0),
+    thought: agenticMetricProgress(root, "thought").count,
+    read: agenticMetricProgress(root, "read").count,
+    write: agenticMetricProgress(root, "write").count,
+    bash: agenticMetricProgress(root, "bash").count,
+    tools: agenticMetricProgress(root, "tools").count,
   };
 }
 
 function storeAgenticCounts(root: HTMLElement, counts: AgenticCounts): void {
-  root.dataset.countThought = String(counts.thought);
-  root.dataset.countRead = String(counts.read);
-  root.dataset.countWrite = String(counts.write);
-  root.dataset.countBash = String(counts.bash);
-  root.dataset.countTools = String(counts.tools);
+  for (const metric of AGENTIC_METRICS) {
+    storeAgenticMetricProgress(root, metric, {
+      ...emptyAgenticMetricProgress(),
+      count: counts[metric],
+    });
+  }
 }
 
 function renderAgenticThinkingSummary(root: HTMLElement): void {
@@ -3235,16 +3272,23 @@ function renderAgenticThinkingSummary(root: HTMLElement): void {
   const summary = root.querySelector<HTMLElement>(".agentic-thinking-counts");
   if (!summary) return;
   summary.replaceChildren();
-  const counts = agenticCounts(root);
   for (const metric of AGENTIC_METRICS) {
-    const count = counts[metric];
-    if (count <= 0) continue;
+    const progress = agenticMetricProgress(root, metric);
+    if (progress.count <= 0) continue;
     const item = document.createElement("span");
-    item.className = "agentic-thinking-count";
+    item.className = `agentic-thinking-count agentic-thinking-count-${agenticMetricVisualState(progress)}`;
     const name = document.createElement("span");
     name.textContent = t(AGENTIC_LABELS[metric]);
     const value = document.createElement("strong");
-    value.textContent = String(count);
+    value.textContent = String(progress.count);
+    if (progress.errors > 0) {
+      const error = document.createElement("span");
+      error.className = "agentic-thinking-count-error";
+      error.textContent = "!";
+      error.title = t("agenticCountHasErrors");
+      error.setAttribute("aria-label", error.title);
+      value.appendChild(error);
+    }
     item.append(name, value);
     summary.appendChild(item);
   }
@@ -3256,14 +3300,17 @@ function refreshAgenticThinkingSummaries(): void {
   }
 }
 
-function updateAgenticMetric(
+function transitionAgenticMetric(
   root: HTMLElement,
   metric: AgenticMetric,
-  delta: number,
+  previous: AgenticItemState | null,
+  next: AgenticItemState | null,
 ): void {
-  const counts = agenticCounts(root);
-  counts[metric] = Math.max(0, counts[metric] + delta);
-  storeAgenticCounts(root, counts);
+  storeAgenticMetricProgress(
+    root,
+    metric,
+    transitionAgenticMetricProgress(agenticMetricProgress(root, metric), previous, next),
+  );
   renderAgenticThinkingSummary(root);
 }
 
@@ -3370,12 +3417,46 @@ function ensureLiveAgenticBlock(): AgenticBlock | null {
   return activeAgenticBlock;
 }
 
-function registerAgenticThought(card: HTMLElement): void {
+function storedAgenticItemState(card: HTMLElement): AgenticItemState | null {
+  const value = card.dataset.agenticState;
+  return value === "running" || value === "success" || value === "error" ? value : null;
+}
+
+function setAgenticItemState(card: HTMLElement, next: AgenticItemState): void {
   const root = card.closest<HTMLElement>(".agentic-thinking-card");
-  if (!root || card.dataset.agenticThought === "true") return;
+  const metric = card.dataset.agenticMetric as AgenticMetric | undefined;
+  const previous = storedAgenticItemState(card);
+  if (!root || !metric || previous === next) return;
+  transitionAgenticMetric(root, metric, previous, next);
+  card.dataset.agenticState = next;
+}
+
+function unregisterAgenticItem(card: HTMLElement): void {
+  const root = card.closest<HTMLElement>(".agentic-thinking-card");
+  const metric = card.dataset.agenticMetric as AgenticMetric | undefined;
+  const previous = storedAgenticItemState(card);
+  if (root && metric && previous) {
+    transitionAgenticMetric(root, metric, previous, null);
+  }
+  delete card.dataset.agenticMetric;
+  delete card.dataset.agenticState;
+}
+
+function registerAgenticThought(
+  card: HTMLElement,
+  state: AgenticItemState = "running",
+): void {
+  const root = card.closest<HTMLElement>(".agentic-thinking-card");
+  if (!root) return;
   delete root.dataset.waitingOnly;
+  if (card.dataset.agenticThought === "true") {
+    setAgenticItemState(card, state);
+    return;
+  }
   card.dataset.agenticThought = "true";
-  updateAgenticMetric(root, "thought", 1);
+  card.dataset.agenticMetric = "thought";
+  card.dataset.agenticState = state;
+  transitionAgenticMetric(root, "thought", null, state);
 }
 
 function registerAgenticTool(card: HTMLElement, name: string): void {
@@ -3383,11 +3464,21 @@ function registerAgenticTool(card: HTMLElement, name: string): void {
   if (!root || !name) return;
   delete root.dataset.waitingOnly;
   const metric = agenticToolMetric(name);
-  const previous = card.dataset.agenticMetric as AgenticMetric | undefined;
-  if (previous === metric) return;
-  if (previous) updateAgenticMetric(root, previous, -1);
+  const previousMetric = card.dataset.agenticMetric as AgenticMetric | undefined;
+  const previousState = storedAgenticItemState(card);
+  const toolStatus = card.dataset.toolStatus;
+  const state: AgenticItemState =
+    toolStatus === "success" || toolStatus === "error" ? toolStatus : "running";
+  if (previousMetric === metric) {
+    setAgenticItemState(card, state);
+    return;
+  }
+  if (previousMetric && previousState) {
+    transitionAgenticMetric(root, previousMetric, previousState, null);
+  }
   card.dataset.agenticMetric = metric;
-  updateAgenticMetric(root, metric, 1);
+  card.dataset.agenticState = state;
+  transitionAgenticMetric(root, metric, null, state);
 }
 
 function removeEmptyActiveAgenticBlock(): void {
@@ -3665,8 +3756,10 @@ function finishThinking(): void {
   const content = thinkingAccum.trim();
   if (content) {
     if (thinkingContentEl) thinkingContentEl.textContent = content;
+    setAgenticItemState(thinkingEl, "success");
     thinkingContentRendered = true;
   } else {
+    unregisterAgenticItem(thinkingEl);
     thinkingEl.remove();
     thinkingEl = null;
     thinkingContentEl = null;
@@ -4346,9 +4439,7 @@ function moveAskUserOutsideAgentic(card: HTMLElement): void {
   if (card.dataset.outsideAgentic === "true") return;
   const root = card.closest<HTMLElement>(".agentic-thinking-card");
   const oldWrapper = root?.closest<HTMLElement>(".agentic-thinking-wrapper");
-  const metric = card.dataset.agenticMetric as AgenticMetric | undefined;
-  if (root && metric) updateAgenticMetric(root, metric, -1);
-  delete card.dataset.agenticMetric;
+  unregisterAgenticItem(card);
   breakAgenticChain();
   const wrapper = addMsg("assistant");
   wrapper.appendChild(card);
@@ -4488,7 +4579,7 @@ function finalizeMessage(msg: FinalizedMessage): void {
       if (!agenticBlock) wireThinkingHead(head, body);
       card.append(head, body);
       (agenticBlock?.body ?? thinkingSlot)?.appendChild(card);
-      registerAgenticThought(card);
+      registerAgenticThought(card, "success");
       updateThinkingBlocksButton();
       thinkingContentRendered = true;
     }
@@ -4589,6 +4680,7 @@ function setToolExecutionStatus(card: HTMLElement, status: ToolExecutionStatus):
     name.before(indicator);
   }
   card.dataset.toolStatus = status;
+  setAgenticItemState(card, status);
   indicator.className = `tool-status tool-status-${status}`;
   const label = t(
     status === "running"
@@ -6268,9 +6360,9 @@ function renderHistory(messages: unknown[]): void {
       if (agenticThinking) {
         if (thinkingCards.length > 0) {
           const agenticBlock = ensureHistoryAgenticBlock(lastTs);
-          for (const card of thinkingCards) agenticBlock.body.appendChild(card);
-          for (let i = 0; i < thinkingCards.length; i += 1) {
-            updateAgenticMetric(agenticBlock.root, "thought", 1);
+          for (const card of thinkingCards) {
+            agenticBlock.body.appendChild(card);
+            registerAgenticThought(card, "success");
           }
         }
 
@@ -6293,8 +6385,10 @@ function renderHistory(messages: unknown[]): void {
             continue;
           }
           const agenticBlock = ensureHistoryAgenticBlock(assistantTs || lastTs);
-          for (const card of group.cards) agenticBlock.body.appendChild(card);
-          updateAgenticMetric(agenticBlock.root, agenticToolMetric(group.name), 1);
+          for (const card of group.cards) {
+            agenticBlock.body.appendChild(card);
+            registerAgenticTool(card, group.name);
+          }
         }
       } else {
         const wrapper = addMsg("assistant");

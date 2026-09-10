@@ -3,6 +3,7 @@
   "ui": {
     "abort": "Abort",
     "agenticBash": "bash",
+    "agenticCountHasErrors": "One or more items failed",
     "agenticRead": "read",
     "agenticThinking": "Agentic thinking",
     "agenticThought": "thought",

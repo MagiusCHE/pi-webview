@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   agenticHeaderLabelKey,
+  agenticMetricVisualState,
   agenticToolMetric,
   emptyAgenticCounts,
+  emptyAgenticMetricProgress,
+  transitionAgenticMetricProgress,
   WAITING_RESPONSE_DELAY_MS,
   waitingResponseDelayRemaining,
   waitingResponseRestartAt,
@@ -18,6 +21,46 @@ test("agentic thinking starts with no visible counters", () => {
     bash: 0,
     tools: 0,
   });
+});
+
+test("agentic metric stays yellow while one item runs, then turns green", () => {
+  let progress = emptyAgenticMetricProgress();
+  progress = transitionAgenticMetricProgress(progress, null, "running");
+  progress = transitionAgenticMetricProgress(progress, null, "running");
+  assert.deepEqual(progress, { count: 2, running: 2, errors: 0 });
+  assert.equal(agenticMetricVisualState(progress), "running");
+
+  progress = transitionAgenticMetricProgress(progress, "running", "success");
+  assert.deepEqual(progress, { count: 2, running: 1, errors: 0 });
+  assert.equal(agenticMetricVisualState(progress), "running");
+
+  progress = transitionAgenticMetricProgress(progress, "running", "success");
+  assert.deepEqual(progress, { count: 2, running: 0, errors: 0 });
+  assert.equal(agenticMetricVisualState(progress), "complete");
+});
+
+test("agentic metric keeps a red error marker independently from completion", () => {
+  let progress = emptyAgenticMetricProgress();
+  progress = transitionAgenticMetricProgress(progress, null, "running");
+  progress = transitionAgenticMetricProgress(progress, null, "running");
+  progress = transitionAgenticMetricProgress(progress, "running", "error");
+  assert.deepEqual(progress, { count: 2, running: 1, errors: 1 });
+  assert.equal(agenticMetricVisualState(progress), "running");
+
+  progress = transitionAgenticMetricProgress(progress, "running", "success");
+  assert.deepEqual(progress, { count: 2, running: 0, errors: 1 });
+  assert.equal(agenticMetricVisualState(progress), "complete");
+
+  progress = transitionAgenticMetricProgress(progress, "error", null);
+  assert.deepEqual(progress, { count: 1, running: 0, errors: 0 });
+});
+
+test("agentic metric ignores repeated lifecycle states", () => {
+  const progress = { count: 1, running: 1, errors: 0 };
+  assert.deepEqual(
+    transitionAgenticMetricProgress(progress, "running", "running"),
+    progress,
+  );
 });
 
 test("agentic live shell exposes waiting before real internal activity", () => {

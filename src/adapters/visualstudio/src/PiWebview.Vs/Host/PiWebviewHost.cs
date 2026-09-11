@@ -463,15 +463,23 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
 
     // --- messaggi dalla webview ------------------------------------------------
 
+    private async Task RestartAndSendNewSessionAsync(JsonElement payload)
+    {
+        await RestartPiAsync().ConfigureAwait(false);
+        _pi?.Send(payload);
+    }
+
     public void HandleFrame(Frame frame)
     {
         if (frame.Channel == "rpc")
         {
+            var recoverNewSession = false;
             if (frame.Payload.TryGetProperty("type", out var type) &&
                 type.ValueKind == JsonValueKind.String)
             {
                 if (type.GetString() == "new_session")
                 {
+                    recoverNewSession = _pi is null || !_pi.Running;
                     _currentSessionPath = null;
                     _cliFlagsNeedSessionPersistence = _activeCliFlags.Count > 0;
                     _cb.OnSessionChange("");
@@ -485,6 +493,11 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
                 }
             }
             Diag.Log("rpc→pi: " + frame.Payload.GetRawText());
+            if (recoverNewSession)
+            {
+                _ = RestartAndSendNewSessionAsync(frame.Payload.Clone());
+                return;
+            }
             _pi?.Send(frame.Payload);
             return;
         }

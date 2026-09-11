@@ -75,6 +75,12 @@ import {
   type ActiveEditorSelection,
 } from "./selection-context.ts";
 import {
+  pairQueuedAttachments,
+  SteeringAttachmentTracker,
+  stripRestoredAttachmentMentions,
+  type QueuedAttachmentEntry,
+} from "./steering-attachments.ts";
+import {
   effectiveStatsBarCompact,
   normalizeHiddenStatusKeys,
   setStatusKeyHidden,
@@ -3232,6 +3238,7 @@ function agenticMetricProgress(
     count: Number(root.dataset[`count${suffix}`] ?? 0),
     running: Number(root.dataset[`running${suffix}`] ?? 0),
     errors: Number(root.dataset[`errors${suffix}`] ?? 0),
+    interrupted: Number(root.dataset[`interrupted${suffix}`] ?? 0),
   };
 }
 
@@ -3244,6 +3251,7 @@ function storeAgenticMetricProgress(
   root.dataset[`count${suffix}`] = String(progress.count);
   root.dataset[`running${suffix}`] = String(progress.running);
   root.dataset[`errors${suffix}`] = String(progress.errors);
+  root.dataset[`interrupted${suffix}`] = String(progress.interrupted);
 }
 
 function agenticCounts(root: HTMLElement): AgenticCounts {
@@ -3502,7 +3510,12 @@ function ensureLiveAgenticBlock(): AgenticBlock | null {
 
 function storedAgenticItemState(card: HTMLElement): AgenticItemState | null {
   const value = card.dataset.agenticState;
-  return value === "running" || value === "success" || value === "error" ? value : null;
+  return value === "running" ||
+    value === "success" ||
+    value === "error" ||
+    value === "interrupted"
+    ? value
+    : null;
 }
 
 function setAgenticItemState(card: HTMLElement, next: AgenticItemState): void {
@@ -4159,9 +4172,10 @@ function inlineDialogCard(
   card.className = "inline-dialog";
   const head = document.createElement("div");
   head.className = "inline-dialog-head";
-  const titleEl = document.createElement("span");
+  const titleEl = document.createElement("div");
   titleEl.className = "inline-dialog-title";
-  titleEl.textContent = title || "…";
+  titleEl.innerHTML = renderMarkdown(title || "…");
+  enhanceCodeBlocks(titleEl);
   const x = document.createElement("button");
   x.type = "button";
   x.className = "inline-dialog-x";
@@ -4726,9 +4740,15 @@ function finalizeMessage(msg: FinalizedMessage): void {
   }
   // remember the answer for the turn-complete notification
   if (msg.text.trim()) lastAssistantText = msg.text.trim();
-  // provider/turn failure: show the error as its own box (the terminal
-  // console shows it, the webview must not swallow it)
-  if (msg.errorMessage) addSystemBox("error", msg.errorMessage);
+  // A provider failure can interrupt a tool call while its arguments are
+  // still streaming, before pi emits tool_execution_start/end. Finalize those
+  // orphaned cards before the error becomes a visible boundary so neither the
+  // tool timer nor its aggregate counter keeps running behind the next block.
+  if (msg.errorMessage) {
+    interruptStreamingTools();
+    breakAgenticChain();
+    addSystemBox("error", msg.errorMessage);
+  }
   currentMsg = null;
   currentText = null;
   thinkingSlot = null;
@@ -4752,7 +4772,11 @@ function createToolCard(tc: ToolCallInfo): void {
 
 type ToolExecutionStatus = "running" | "success" | "error";
 
-function setToolExecutionStatus(card: HTMLElement, status: ToolExecutionStatus): void {
+function setToolExecutionStatus(
+  card: HTMLElement,
+  status: ToolExecutionStatus,
+  agenticState: AgenticItemState = status,
+): void {
   const name = card.querySelector(".tool-name");
   if (!name) return;
   const sameStatus = card.dataset.toolStatus === status;
@@ -4763,7 +4787,7 @@ function setToolExecutionStatus(card: HTMLElement, status: ToolExecutionStatus):
     name.before(indicator);
   }
   card.dataset.toolStatus = status;
-  setAgenticItemState(card, status);
+  setAgenticItemState(card, agenticState);
   indicator.className = `tool-status tool-status-${status}`;
   const label = t(
     status === "running"
@@ -5114,6 +5138,15 @@ function failRunningTools(): void {
   )) {
     stopToolTimer(card);
     setToolExecutionStatus(card, "error");
+  }
+}
+
+function interruptStreamingTools(): void {
+  for (const card of Array.from(
+    els.thread.querySelectorAll<HTMLElement>('.tool-card[data-tool-status="running"]'),
+  )) {
+    stopToolTimer(card);
+    setToolExecutionStatus(card, "error", "interrupted");
   }
 }
 const toolOutputPre = new Map<string, HTMLPreElement>();
@@ -5516,7 +5549,7 @@ function renderRpcEvent(evt: RpcEvent): void {
       ? evt.followUp.filter((message): message is string => typeof message === "string")
       : [];
     // Preserve the exact arrays from pi, including repeated identical messages.
-    renderNativeQueues(steering, followUp);
+    renderNativeQueues(steeringAttachments.update(steering), followUp);
     return;
   }
   if (evt.type === "turn_end") return;
@@ -7638,6 +7671,10 @@ async function sendOrStop(): Promise<void> {
 // Enter while busy sends to pi immediately. prompt(streamingBehavior: "steer")
 // matches the TUI path while streaming; during compaction the dedicated steer
 // RPC hands the message straight to the same native queue without a webview wait.
+// Pi's queue protocol currently exposes text only. This sidecar retains attachment
+// bytes while queue_update remains the authority for membership and ordering.
+const steeringAttachments = new SteeringAttachmentTracker<PendingAttachment>();
+
 function submitSteering(): void {
   const text = els.input.value.trim();
   const imageAtts = modelSupportsVision
@@ -7662,11 +7699,16 @@ function submitSteering(): void {
         ...(images.length > 0 ? { images } : {}),
         streamingBehavior: "steer",
       });
+  const ticket = steeringAttachments.stage(message, attachments);
   void rpcRequest(command).then(
     (response) => {
+      steeringAttachments.settle(ticket);
       if (!response.success) addStatusLine(t("steerSendFailed"));
     },
-    () => addStatusLine(t("steerSendFailed")),
+    () => {
+      steeringAttachments.settle(ticket);
+      addStatusLine(t("steerSendFailed"));
+    },
   );
   els.input.value = "";
   resetInputHeight();
@@ -7674,8 +7716,14 @@ function submitSteering(): void {
   els.input.focus();
 }
 
-function renderNativeQueues(steering: string[], followUp: string[]): void {
-  renderSteerPanel([...steering, ...followUp]);
+function renderNativeQueues(
+  steering: QueuedAttachmentEntry<PendingAttachment>[],
+  followUp: string[],
+): void {
+  renderSteerPanel([
+    ...steering,
+    ...followUp.map((message) => ({ message, attachments: [] })),
+  ]);
 }
 
 function updateSteerPlaceholder(): void {
@@ -7691,7 +7739,7 @@ function updateSteerPlaceholder(): void {
 
 // queue_update is the sole source for this panel. Repeated equal messages are
 // intentionally rendered as separate rows in the exact order provided by pi.
-function renderSteerPanel(queued: string[]): void {
+function renderSteerPanel(queued: QueuedAttachmentEntry<PendingAttachment>[]): void {
   const panel = els.steerPanel;
   const wasHidden = panel.hidden;
   panel.textContent = "";
@@ -7715,11 +7763,14 @@ function renderSteerPanel(queued: string[]): void {
   dequeue.addEventListener("click", () => void dequeueSteering());
   head.appendChild(dequeue);
   panel.appendChild(head);
-  for (const message of queued)
-    appendSteerRow(panel, stripEditorSelectionContext(message));
+  for (const entry of queued) appendSteerRow(panel, entry);
 }
 
-function appendSteerRow(panel: HTMLElement, text: string): void {
+function appendSteerRow(
+  panel: HTMLElement,
+  entry: QueuedAttachmentEntry<PendingAttachment>,
+): void {
+  const text = stripEditorSelectionContext(entry.message);
   const row = document.createElement("div");
   row.className = "steer-row";
   const label = document.createElement("span");
@@ -7727,12 +7778,25 @@ function appendSteerRow(panel: HTMLElement, text: string): void {
   label.textContent = text;
   label.title = text;
   row.appendChild(label);
+  for (const attachment of entry.attachments) {
+    const chip = document.createElement("span");
+    chip.className = "steer-attachment";
+    const icon = document.createElement("span");
+    icon.className = "steer-attachment-icon";
+    icon.innerHTML = attachFileIcon();
+    const name = document.createElement("span");
+    name.textContent = attachment.name;
+    name.title = attachment.path;
+    chip.append(icon, name);
+    row.appendChild(chip);
+  }
   panel.appendChild(row);
 }
 
 // pi returns and clears both native queues. No local queue is mutated or
 // retried: queue_update remains authoritative for the visible state.
 async function dequeueSteering(): Promise<void> {
+  const attachmentSnapshot = steeringAttachments.snapshot();
   try {
     const response = await rpcRequest(rpc.clearQueue());
     if (!response.success) {
@@ -7746,12 +7810,26 @@ async function dequeueSteering(): Promise<void> {
     const followUp = Array.isArray(data?.followUp)
       ? data.followUp.filter((message): message is string => typeof message === "string")
       : [];
-    const text = [...steering, ...followUp]
-      .map((message) => stripEditorSelectionContext(message))
+    const restoredSteering = pairQueuedAttachments(steering, attachmentSnapshot);
+    const restored = [
+      ...restoredSteering,
+      ...followUp.map((message) => ({ message, attachments: [] as PendingAttachment[] })),
+    ];
+    const text = restored
+      .map((entry) =>
+        stripRestoredAttachmentMentions(
+          stripEditorSelectionContext(entry.message),
+          entry.attachments,
+        ),
+      )
+      .filter(Boolean)
       .join("\n\n");
-    if (!text) return;
+    const restoredAttachments = restored.flatMap((entry) => entry.attachments);
+    if (!text && restoredAttachments.length === 0) return;
     const current = els.input.value;
-    els.input.value = current.trim() ? `${text}\n\n${current}` : text;
+    els.input.value = current.trim() && text ? `${text}\n\n${current}` : text || current;
+    attachments.push(...restoredAttachments);
+    renderAttachments();
     autogrowInput();
     els.input.focus();
   } catch {
@@ -8767,6 +8845,7 @@ els.input.addEventListener("keydown", (e) => {
       if (msg !== undefined) {
         els.input.value = msg;
         els.input.selectionStart = els.input.selectionEnd = msg.length;
+        autogrowInput();
       }
       exitHistoryPreview();
       return;

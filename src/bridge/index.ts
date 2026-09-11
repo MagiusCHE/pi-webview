@@ -31,6 +31,7 @@ import type {
   RpcEvent,
 } from "../ide/protocol.ts";
 import { PiProcess } from "./pi-process.ts";
+import { shouldRestartPiForNewSession } from "./rpc-recovery.ts";
 import { resolvePi } from "./spawn.ts";
 import { cliFlagArgs, fetchAvailableCliFlags } from "./cli-flags.ts";
 import { createMockIde } from "./mock-ide.ts";
@@ -849,12 +850,14 @@ function main(): void {
       }
       if (frame.channel === "rpc") {
         const payload = frame.payload as { type?: string; sessionPath?: string };
+        const recoverNewSession = shouldRestartPiForNewSession(payload.type, pi.running);
         if (payload.type === "switch_session" && payload.sessionPath) {
           currentSessionPath = payload.sessionPath;
           cliFlagsNeedSessionPersistence = false;
         } else if (payload.type === "new_session") {
           currentSessionPath = undefined;
           cliFlagsNeedSessionPersistence = Object.keys(activeCliFlags).length > 0;
+          if (recoverNewSession) restartPi(undefined, activeCliFlags);
         }
         pi.send(frame.payload);
         return;

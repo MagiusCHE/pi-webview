@@ -32,19 +32,25 @@ export const emptyAgenticCounts = (): AgenticCounts => ({
   tools: 0,
 });
 
-export type AgenticItemState = "running" | "success" | "error";
+export type AgenticItemState = "running" | "success" | "error" | "interrupted";
 
 export interface AgenticMetricProgress {
   count: number;
   running: number;
   errors: number;
+  interrupted: number;
 }
 
 export const emptyAgenticMetricProgress = (): AgenticMetricProgress => ({
   count: 0,
   running: 0,
   errors: 0,
+  interrupted: 0,
 });
+
+function isAgenticError(state: AgenticItemState | null): boolean {
+  return state === "error" || state === "interrupted";
+}
 
 /** Applies one item lifecycle transition to a category aggregate. */
 export function transitionAgenticMetricProgress(
@@ -65,16 +71,28 @@ export function transitionAgenticMetricProgress(
     count,
     Math.max(
       0,
-      progress.errors - (previous === "error" ? 1 : 0) + (next === "error" ? 1 : 0),
+      progress.errors -
+        (isAgenticError(previous) ? 1 : 0) +
+        (isAgenticError(next) ? 1 : 0),
     ),
   );
-  return { count, running, errors };
+  const interrupted = Math.min(
+    count,
+    Math.max(
+      0,
+      progress.interrupted -
+        (previous === "interrupted" ? 1 : 0) +
+        (next === "interrupted" ? 1 : 0),
+    ),
+  );
+  return { count, running, errors, interrupted };
 }
 
 export function agenticMetricVisualState(
   progress: AgenticMetricProgress,
-): "running" | "complete" {
-  return progress.running > 0 ? "running" : "complete";
+): "running" | "complete" | "failed" {
+  if (progress.running > 0) return "running";
+  return progress.interrupted > 0 ? "failed" : "complete";
 }
 
 export const AGENTIC_COUNT_PULSE_MS = 360;

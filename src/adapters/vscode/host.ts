@@ -15,6 +15,7 @@ import {
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { PiProcess } from "../../bridge/pi-process.ts";
+import { shouldRestartPiForNewSession } from "../../bridge/rpc-recovery.ts";
 import { resolvePi, findPiFallback, findPiViaShell } from "../../bridge/spawn.ts";
 import { samePath } from "../../ide/paths.ts";
 
@@ -532,10 +533,19 @@ export abstract class PiWebviewHost {
   protected async handleFrame(frame: Frame): Promise<void> {
     if (frame.channel === "rpc") {
       const command = frame.payload as { type?: string; sessionPath?: string };
+      const recoverNewSession = shouldRestartPiForNewSession(
+        command.type,
+        this.pi?.running === true,
+      );
       if (command.type === "new_session") {
         this.currentSessionPath = undefined;
         this.cliFlagsNeedSessionPersistence = Object.keys(this.activeCliFlags).length > 0;
         this.cb.onSessionChange("");
+        // The previous resume may have exhausted its crash retries (for
+        // example because its JSONL header is invalid). Start a clean RPC
+        // process before forwarding New session instead of queueing the
+        // command forever on the stopped process.
+        if (recoverNewSession) this.restartPi();
       } else if (command.type === "switch_session" && command.sessionPath) {
         this.currentSessionPath = command.sessionPath;
         this.cliFlagsNeedSessionPersistence = false;

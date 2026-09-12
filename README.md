@@ -2,9 +2,11 @@
 
 A rich WebView UI for [pi](https://pi.dev), the coding agent — a modern alternative to running pi in a terminal. Built as a framework-agnostic web app, it works **standalone in the browser** and inside supported **IDE webviews** with the same codebase.
 
-![pi-webview preview](media/pi-webview-preview.jpg)
+![pi-webview in VS Code](media/pi-webview-preview.jpg)
 
-![Extension status in the webview UI](media/pi-webview-status.jpg)
+![pi-webview standalone in the browser](media/pi-webview-standalone.jpg)
+
+![Composer and extension status in the webview UI](media/pi-webview-status.jpg)
 
 ![status](https://img.shields.io/badge/status-early%20development-orange)
 

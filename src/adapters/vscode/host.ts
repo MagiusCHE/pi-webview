@@ -163,6 +163,11 @@ import {
 import { readStartupInfo } from "../../bridge/startup-info.ts";
 import { saveAttachment, pathExists, attachFromPath } from "../../bridge/attachments.ts";
 import { fetchProviderBalance } from "../../bridge/balance.ts";
+import {
+  LAST_EDITOR_SELECTION_KEY,
+  normalizePersistedEditorSelection,
+  type PersistedEditorSelection,
+} from "./selection-state.ts";
 import type {
   Frame,
   IdeEvent,
@@ -172,7 +177,6 @@ import type {
   SessionListResult,
   CliFlags,
   CliFlagInfo,
-  SelectionRange,
 } from "../../ide/protocol.ts";
 
 export interface PiHostCallbacks {
@@ -204,7 +208,11 @@ export abstract class PiWebviewHost {
   constructor(
     protected context: vscode.ExtensionContext,
     protected cb: PiHostCallbacks,
-  ) {}
+  ) {
+    this.lastSelection = normalizePersistedEditorSelection(
+      context.workspaceState.get<unknown>(LAST_EDITOR_SELECTION_KEY),
+    );
+  }
 
   /** restarts pi with the current launch options (setCliFlags): the webview
    *  gets connection_closed(reason restart) + pi_restarted to re-initialize
@@ -465,7 +473,11 @@ export abstract class PiWebviewHost {
       // host cwd (often another workspace) → the agent answers the wrong
       // directory even if the session belongs to another folder
       {
-        env: { ...process.env, PI_WEBVIEW_COMPANION: "1" },
+        env: {
+          ...process.env,
+          PI_WEBVIEW: "1",
+          PI_WEBVIEW_COMPANION: "1",
+        },
         args: [
           ...sessionArgs,
           ...activeSessionModelArgs,
@@ -911,11 +923,13 @@ export abstract class PiWebviewHost {
 
   /** last known selection (persists even when focus goes to the webview
    *  or the terminal: the selection must NOT disappear when clicking the input) */
-  private lastSelection: {
-    filePath?: string;
-    workspaceFolder?: string;
-    ranges: SelectionRange[];
-  } | null = null;
+  private lastSelection: PersistedEditorSelection | null = null;
+
+  private persistLastSelection(): void {
+    void this.context.workspaceState
+      .update(LAST_EDITOR_SELECTION_KEY, this.lastSelection ?? undefined)
+      .then(undefined, () => undefined);
+  }
 
   postSelection(): void {
     const editor = vscode.window.activeTextEditor;
@@ -960,6 +974,7 @@ export abstract class PiWebviewHost {
         workspaceFolder: vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath,
         ranges,
       };
+      this.persistLastSelection();
       this.post({
         channel: "ide",
         payload: {
@@ -971,6 +986,7 @@ export abstract class PiWebviewHost {
     }
     // EMPTY selection in the active file: the user really deselected
     this.lastSelection = null;
+    this.persistLastSelection();
     this.post({
       channel: "ide",
       payload: {

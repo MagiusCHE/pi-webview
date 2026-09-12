@@ -196,6 +196,16 @@ header {
   min-width: 0;
   margin-right: auto;
 }
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.67px;
+  flex: 0 0 auto;
+}
+.header-actions .icon-btn {
+  min-width: 24px;
+  padding-inline: 3px;
+}
 .conn-dot {
   width: 8px;
   height: 8px;

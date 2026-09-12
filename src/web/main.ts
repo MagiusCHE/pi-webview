@@ -87,10 +87,23 @@ import {
 } from "./status-preferences.ts";
 import { bridgeUrlWithPageIntent, pageUrlForSession } from "./session-url.ts";
 import { ReconnectLoop, RECONNECT_INTERVAL_MS } from "./reconnect.ts";
+import {
+  isBlockedNpmInstallScriptsUpdate,
+  isRemoteNpmDependencyDisabledUpdate,
+  updateExecutionOutcome,
+  type UpdateExecutionOutcome,
+} from "../ide/update-errors.ts";
 import { joinCollapseHeaderParts, shouldShowCollapseFooter } from "./collapse-footer.ts";
+import { updateShieldVisualState } from "./update-shield.ts";
+import {
+  transitionComposerActivity,
+  type ComposerActivityEvent,
+} from "./composer-activity.ts";
 import {
   isKnownSlashCommand,
   normalizeExtensionCommands,
+  shouldAttachImplicitEditorContext,
+  shouldBlockUnverifiedSlashCommand,
   slashCommandName,
   type SlashCommand,
 } from "./slash-commands.ts";
@@ -162,6 +175,24 @@ const els = {
   ) as HTMLLabelElement,
   agenticThinkingNote: document.getElementById(
     "settings-agentic-thinking-note",
+  ) as HTMLElement,
+  allowRemoteNpmUpdates: document.getElementById(
+    "settings-allow-remote-npm",
+  ) as HTMLInputElement,
+  allowRemoteNpmUpdatesLabel: document.getElementById(
+    "settings-allow-remote-npm-label",
+  ) as HTMLLabelElement,
+  allowRemoteNpmUpdatesNote: document.getElementById(
+    "settings-allow-remote-npm-note",
+  ) as HTMLElement,
+  allowNpmInstallScripts: document.getElementById(
+    "settings-allow-npm-scripts",
+  ) as HTMLInputElement,
+  allowNpmInstallScriptsLabel: document.getElementById(
+    "settings-allow-npm-scripts-label",
+  ) as HTMLLabelElement,
+  allowNpmInstallScriptsNote: document.getElementById(
+    "settings-allow-npm-scripts-note",
   ) as HTMLElement,
   notificationsLabel: document.getElementById(
     "settings-notifications-label",
@@ -461,6 +492,11 @@ function setupTransport(tr: Transport): void {
         // Config must be known before history rendering: presentation-only
         // preferences such as agenticThinking apply to the complete reload.
         await requestConfig();
+        // The host's eager selection broadcast can precede the fresh page's
+        // message listener after Reload Window. Request a replay only once the
+        // VS Code webview transport is ready; the host can restore its saved
+        // last selection even when focus returned directly to the sidebar.
+        if (runtime.isVsCode) await ideRequest({ type: "attachSelection" });
         if (!demoMode) {
           // loading begins NOW (before get_state): slow extensions logging
           // during the resume must land in the loader box, not in the chat
@@ -573,6 +609,10 @@ let statsBarPosition: StatsBarPosition = "above";
 let statsBarCompact = true;
 /** global display preference: group each agent run's thoughts and tools */
 let agenticThinking = false;
+/** explicit security opt-in used only by the Webview-triggered update child */
+let allowRemoteNpmUpdates = false;
+/** dangerous opt-in that lets every dependency install script execute */
+let dangerouslyAllowAllNpmScripts = false;
 /** RPC setStatus keys hidden by the user (the only stable source id RPC exposes) */
 let hiddenStatusKeys: string[] = [];
 let sessionNotificationsOverride: "desktop" | "vscode" | "off" | undefined;
@@ -668,6 +708,16 @@ function applyUiStrings(): void {
   els.agenticThinking.title = t("settingsAgenticThinkingDesc");
   els.agenticThinkingNote.textContent = t("settingsAgenticThinkingDesc");
   els.agenticThinking.checked = agenticThinking;
+  els.allowRemoteNpmUpdatesLabel.textContent = t("settingsAllowRemoteNpmUpdates");
+  els.allowRemoteNpmUpdatesLabel.title = t("settingsAllowRemoteNpmUpdatesDesc");
+  els.allowRemoteNpmUpdates.title = t("settingsAllowRemoteNpmUpdatesDesc");
+  els.allowRemoteNpmUpdatesNote.textContent = t("settingsAllowRemoteNpmUpdatesDesc");
+  els.allowRemoteNpmUpdates.checked = allowRemoteNpmUpdates;
+  els.allowNpmInstallScriptsLabel.textContent = t("settingsAllowNpmInstallScripts");
+  els.allowNpmInstallScriptsLabel.title = t("settingsAllowNpmInstallScriptsDesc");
+  els.allowNpmInstallScripts.title = t("settingsAllowNpmInstallScriptsDesc");
+  els.allowNpmInstallScriptsNote.textContent = t("settingsAllowNpmInstallScriptsDesc");
+  els.allowNpmInstallScripts.checked = dangerouslyAllowAllNpmScripts;
   refreshAgenticThinkingSummaries();
   // settings modal: 4 sections (Info / Webview / pi.dev / CLI flags)
   els.settingsInfoTitle.textContent = t("settingsSectionInfo");
@@ -839,6 +889,10 @@ async function requestConfig(): Promise<void> {
     }
     agenticThinking = cfg.agenticThinking === true;
     els.agenticThinking.checked = agenticThinking;
+    allowRemoteNpmUpdates = cfg.allowRemoteNpmUpdates === true;
+    els.allowRemoteNpmUpdates.checked = allowRemoteNpmUpdates;
+    dangerouslyAllowAllNpmScripts = cfg.dangerouslyAllowAllNpmScripts === true;
+    els.allowNpmInstallScripts.checked = dangerouslyAllowAllNpmScripts;
     hiddenStatusKeys = normalizeHiddenStatusKeys(cfg.hiddenStatusKeys);
     renderStatusSlots();
     applyUiStrings();
@@ -873,6 +927,14 @@ function handleIdeResponse(res: IdeResponse): void {
     }
     if (typeof cfg.agenticThinking === "boolean") {
       applyAgenticThinkingPreference(cfg.agenticThinking);
+    }
+    if (typeof cfg.allowRemoteNpmUpdates === "boolean") {
+      allowRemoteNpmUpdates = cfg.allowRemoteNpmUpdates;
+      els.allowRemoteNpmUpdates.checked = allowRemoteNpmUpdates;
+    }
+    if (typeof cfg.dangerouslyAllowAllNpmScripts === "boolean") {
+      dangerouslyAllowAllNpmScripts = cfg.dangerouslyAllowAllNpmScripts;
+      els.allowNpmInstallScripts.checked = dangerouslyAllowAllNpmScripts;
     }
     if (Object.prototype.hasOwnProperty.call(cfg, "hiddenStatusKeys")) {
       hiddenStatusKeys = normalizeHiddenStatusKeys(cfg.hiddenStatusKeys);
@@ -1769,6 +1831,44 @@ function applyAgenticThinkingPreference(enabled: boolean): void {
 els.agenticThinking.addEventListener("change", () => {
   applyAgenticThinkingPreference(els.agenticThinking.checked);
   persistWebviewConfig({ agenticThinking });
+});
+
+els.allowRemoteNpmUpdates.addEventListener("change", () => {
+  void (async () => {
+    if (!els.allowRemoteNpmUpdates.checked) {
+      allowRemoteNpmUpdates = false;
+      persistWebviewConfig({ allowRemoteNpmUpdates: false });
+      return;
+    }
+    // Never persist the security-sensitive opt-in before explicit confirmation.
+    els.allowRemoteNpmUpdates.checked = false;
+    els.allowRemoteNpmUpdates.disabled = true;
+    const confirmed = await showConfirm(t("settingsAllowRemoteNpmUpdatesConfirm"));
+    els.allowRemoteNpmUpdates.disabled = false;
+    if (!confirmed) return;
+    allowRemoteNpmUpdates = true;
+    els.allowRemoteNpmUpdates.checked = true;
+    persistWebviewConfig({ allowRemoteNpmUpdates: true });
+  })();
+});
+
+els.allowNpmInstallScripts.addEventListener("change", () => {
+  void (async () => {
+    if (!els.allowNpmInstallScripts.checked) {
+      dangerouslyAllowAllNpmScripts = false;
+      persistWebviewConfig({ dangerouslyAllowAllNpmScripts: false });
+      return;
+    }
+    // This bypass lets arbitrary dependency lifecycle scripts run as the user.
+    els.allowNpmInstallScripts.checked = false;
+    els.allowNpmInstallScripts.disabled = true;
+    const confirmed = await showConfirm(t("settingsAllowNpmInstallScriptsConfirm"));
+    els.allowNpmInstallScripts.disabled = false;
+    if (!confirmed) return;
+    dangerouslyAllowAllNpmScripts = true;
+    els.allowNpmInstallScripts.checked = true;
+    persistWebviewConfig({ dangerouslyAllowAllNpmScripts: true });
+  })();
 });
 
 // history limit: saved in the config and re-applied right away (truncates from the top)
@@ -2784,7 +2884,7 @@ function stopWorking(): Promise<void> {
   // promise. Abort is sent right afterwards: no client-side delivery delay.
   const restored = dequeueSteering();
   transport.send({ channel: "rpc", payload: rpc.abort() });
-  working = false;
+  setComposerActivity("abort");
   disarmWaitingResponse();
   updateSendButton();
   updateSteerPlaceholder();
@@ -4122,6 +4222,23 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       disarmWaitingResponse();
       const msg = (evt.message as string | undefined) ?? (evt.title as string) ?? "";
       if (msg) addStatusLine(msg);
+      if (msg && !allowRemoteNpmUpdates && isRemoteNpmDependencyDisabledUpdate(msg)) {
+        addSystemBox("warn", t("updateAllowRemoteNpmSuggestion"));
+      }
+      if (
+        msg &&
+        !dangerouslyAllowAllNpmScripts &&
+        isBlockedNpmInstallScriptsUpdate(msg)
+      ) {
+        addSystemBox("warn", t("updateAllowNpmInstallScriptsSuggestion"));
+      }
+      const executionOutcome = updateExecutionOutcome(msg);
+      if (executionOutcome === "success") {
+        addSystemBox("warn", t("updateRestartRequiredWarning"));
+      }
+      if (updateRunPending && executionOutcome) {
+        finishUpdateRun(executionOutcome);
+      }
       // a manual shield check just finished (outcome box in the chat) →
       // re-enable the shield right away, even on a host that cannot report
       // the startup-info timestamp the poll is watching for
@@ -5609,6 +5726,7 @@ function renderRpcEvent(evt: RpcEvent): void {
       // INTENTIONAL restart (Apply CLI flags): pi is restarting with the new
       // command line → no error; the re-init arrives with pi_restarted
       renderNativeQueues([], []);
+      setComposerActivity("connection_closed");
       piRestarting = true;
       updateSendButton();
       return;
@@ -5624,7 +5742,7 @@ function renderRpcEvent(evt: RpcEvent): void {
     if (compacting) finishCompaction(true, (evt.errorMessage as string) ?? undefined);
     disarmWaitingResponse();
     renderNativeQueues([], []);
-    working = false;
+    setComposerActivity("connection_closed");
     initialAgentWaitStartedAt = 0;
     updateSendButton();
     if (evt.reason === "invalid_session") {
@@ -6726,7 +6844,7 @@ function showCompactionBlock(): void {
   // thinking. Any later internal activity starts in a fresh block.
   breakInternalActivityChain();
   compacting = true;
-  working = true; // composer guard: no sends during the compaction
+  setComposerActivity("compaction_start");
   updateSendButton();
   updateSteerPlaceholder();
   updateThinkingStopBtn(false);
@@ -6777,9 +6895,9 @@ function finishCompaction(error: boolean, errMsg?: string): void {
   }
   compactWrapper = null;
   compactTimerEl = null;
-  // ALWAYS restore: the compact aborts the current turn, so the client's
-  // working state could have stayed dirty (no agent_settled)
-  working = false;
+  // Automatic compaction may continue the same outer agent run. Preserve
+  // steering/STOP until agent_settled; an idle manual compact still unlocks.
+  setComposerActivity("compaction_end");
   updateSendButton();
   updateSteerPlaceholder();
   updateThinkingStopBtn(false);
@@ -6811,6 +6929,17 @@ async function startCompactionFromUi(): Promise<void> {
 // --- send/stop button and info boxes (model, credit, trust) -----------------
 
 let working = false;
+let agentRunActive = false;
+
+function setComposerActivity(event: ComposerActivityEvent): void {
+  const next = transitionComposerActivity(
+    { agentActive: agentRunActive, working },
+    event,
+  );
+  agentRunActive = next.agentActive;
+  working = next.working;
+}
+
 // INTENTIONAL pi restart in progress (Apply CLI flags): the send stays disabled
 let piRestarting = false;
 // webview in an editor panel (not sidebar): the selection block is disabled
@@ -7601,14 +7730,27 @@ async function sendOrStop(): Promise<void> {
     if (slashCommandSubmissionPending) return;
     slashCommandSubmissionPending = true;
     const submittedText = els.input.value;
+    let commandListAvailable = false;
     try {
-      await fetchSlashCommands();
+      commandListAvailable = await fetchSlashCommands();
     } finally {
       slashCommandSubmissionPending = false;
     }
     // Do not submit a command that the user changed while get_commands was in flight.
     if (els.input.value !== submittedText) return;
     extensionCommand = isExtensionSlashCommand(submittedText);
+    // Fail closed: without pi's authoritative command list, a real extension
+    // command could otherwise be mistaken for steering and leak to the model.
+    if (
+      shouldBlockUnverifiedSlashCommand({
+        commandName,
+        isExtensionCommand: extensionCommand,
+        commandListAvailable,
+      })
+    ) {
+      appendSystemBox("warn", t("extensionCommandsUnavailable"));
+      return;
+    }
   }
   if (blockedResumeModel) {
     addStatusLine(tpl(t("resumeModelUnavailable"), { model: blockedResumeModel }));
@@ -7640,7 +7782,12 @@ async function sendOrStop(): Promise<void> {
   }));
   const fileMentions = fileAtts.map((a) => `[attachment: ${a.path}]`);
   const visibleMessage = [text, ...fileMentions].filter(Boolean).join("\n\n");
-  const message = attachEditorSelectionContext(visibleMessage, visibleEditorSelection());
+  // pi recognizes extension commands from their command text. Appending the
+  // editor-selection transport block makes a valid command a normal model
+  // prompt, so commands must be sent without implicit editor context.
+  const message = shouldAttachImplicitEditorContext(extensionCommand)
+    ? attachEditorSelectionContext(visibleMessage, visibleEditorSelection())
+    : visibleMessage;
   // Direct prompts are rendered from pi's message_start event, not
   // optimistically. Extension commands do not emit a user message, so keep
   // their invocation visible without creating a queue or delivery tracker.
@@ -7929,7 +8076,8 @@ async function fetchSlashCommands(): Promise<boolean> {
             }
           | undefined
       )?.commands;
-      slashCommands = normalizeExtensionCommands(cmds ?? []);
+      if (!res.success || !Array.isArray(cmds)) return false;
+      slashCommands = normalizeExtensionCommands(cmds);
       return true;
     } catch {
       // Keep the last successful list. Text that does not match a registered
@@ -8538,28 +8686,34 @@ els.newChat.addEventListener("click", () => {
 // chat channel — extension command, pi executes it)
 let updateInfo: UpdateAvailable | null = null;
 let updateChecking = false;
+let updateRunPending = false;
+let updateAttemptInfo: UpdateAvailable | null = null;
+let updateRestartRequired = false;
 // true only while a MANUAL shield check is in flight (not while an update is
 // running via proceedUpdate): the check-outcome notify is a completion signal
 let manualCheckOutcomePending = false;
 
 /** shield visual state: blue (up-to-date) / yellow (update available) /
- *  dimmed while a manual check is in flight; the tooltip follows the state */
+ *  dimmed while work is in flight; after a successful update it stays blue
+ *  and disabled until the required pi restart reloads this page. */
 function applyUpdateShield(): void {
-  if (updateChecking) {
-    els.updatePi.disabled = true;
-    els.updatePi.title = t("updateCheckingTooltip");
-    return;
-  }
-  els.updatePi.disabled = false;
-  if (updateInfo) {
-    els.updatePi.classList.add("update-pi-warn");
-    els.updatePi.classList.remove("update-pi-ok");
-    els.updatePi.title = t("updateAvailableTooltip");
-  } else {
-    els.updatePi.classList.add("update-pi-ok");
-    els.updatePi.classList.remove("update-pi-warn");
-    els.updatePi.title = t("updateUpToDateTooltip");
-  }
+  const visual = updateShieldVisualState({
+    checking: updateChecking,
+    hasUpdate: updateInfo !== null,
+    restartRequired: updateRestartRequired,
+  });
+  els.updatePi.disabled = visual.disabled;
+  els.updatePi.classList.toggle("update-pi-ok", visual.tone === "ok");
+  els.updatePi.classList.toggle("update-pi-warn", visual.tone === "warn");
+  const tooltipKey =
+    visual.tooltip === "restartRequired"
+      ? "updateRestartRequiredTooltip"
+      : visual.tooltip === "checking"
+        ? "updateCheckingTooltip"
+        : visual.tooltip === "available"
+          ? "updateAvailableTooltip"
+          : "updateUpToDateTooltip";
+  els.updatePi.title = t(tooltipKey);
 }
 
 // true when the chat message is the outcome of the manual shield check
@@ -8679,11 +8833,30 @@ function closeUpdateModal(): void {
   els.updateModal.hidden = true;
 }
 
+function finishUpdateRun(outcome: UpdateExecutionOutcome): void {
+  updateRunPending = false;
+  updateChecking = false;
+  if (outcome === "success") {
+    updateInfo = null;
+    updateRestartRequired = true;
+  } else {
+    // Restore the yellow, clickable shield with the last reviewed update so
+    // the user can retry immediately after resolving the reported failure.
+    updateInfo = updateAttemptInfo;
+    updateRestartRequired = false;
+  }
+  updateAttemptInfo = null;
+  applyUpdateShield();
+}
+
 function proceedUpdate(): void {
   closeUpdateModal();
-  // the update takes minutes and ends with a pi restart (page re-init, which
-  // re-runs the load-time check): keep the shield in the checking state
-  updateInfo = null;
+  // Keep the reviewed update available so a failed attempt can restore the
+  // yellow clickable shield. A successful attempt settles it to disabled blue
+  // until the required pi restart reloads the page.
+  updateAttemptInfo = updateInfo;
+  updateRunPending = true;
+  updateRestartRequired = false;
   updateChecking = true;
   applyUpdateShield();
   els.input.value = "/piw update.pi.core.exts";
@@ -8942,7 +9115,7 @@ document.addEventListener("keydown", (e) => {
 // the working state comes from the pi events
 function trackWorking(evt: RpcEvent): void {
   if (evt.type === "agent_start") {
-    working = true;
+    setComposerActivity("agent_start");
     initialAgentWaitStartedAt = performance.now();
     armWaitingResponse(false, initialAgentWaitStartedAt);
     // an agent run is part of the extension work at resume: the loading
@@ -8952,13 +9125,20 @@ function trackWorking(evt: RpcEvent): void {
     updateSteerPlaceholder();
     updateThinkingStopBtn(true);
   } else if (evt.type === "turn_start") {
+    // A post-compaction continuation may emit turn_start without a second
+    // agent_start. Restore steering and STOP at this authoritative boundary.
+    setComposerActivity("turn_start");
+    loadingAgentActive = true;
+    updateSendButton();
+    updateSteerPlaceholder();
+    updateThinkingStopBtn(true);
     // The first request inherits the agent_start clock instead of resetting
     // it. Later retries/follow-up turns start a fresh one-second wait.
     const startedAt = initialAgentWaitStartedAt || performance.now();
     armWaitingResponse(false, startedAt);
     initialAgentWaitStartedAt = 0;
   } else if (evt.type === "agent_settled") {
-    working = false;
+    setComposerActivity("agent_settled");
     initialAgentWaitStartedAt = 0;
     loadingAgentActive = false;
     // extension run finished: re-evaluate the loading end (quiet + idle)

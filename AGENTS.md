@@ -84,6 +84,10 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   pi-webview NON deve collidere con pi-x-ide in alcun punto (niente
   `~/.pi/pi-x-ide/`, niente porte/file condivisi). Il riuso dei lock file citato
   nel concept 0001 è stato superato dal piano 0002 (webview in-process).
+  Il companion VS Code conserva l'ultima selezione in `workspaceState` e la
+  ripubblica su richiesta della Webview dopo che il transport è pronto, così
+  un Reload Window non la perde anche se il broadcast iniziale arriva troppo
+  presto o il focus viene ripristinato direttamente sulla sidebar
 - Riferimenti: `docs/concept/0001-webview-al-posto-del-terminale.md`,
   `docs/concept/0002-architettura-standalone-multi-ide-lazy-ui.md`,
   `docs/concept/0003-extension-ui-in-webview.md` (come i plugin "interfacciati"
@@ -178,7 +182,9 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   thought normale; l'attività interna successiva apre sempre un nuovo blocco.
   Prima di attività reale, dopo 1 secondo dall'avvio dell'elaborazione, il live
   shell mostra `Waiting for response`; diventa `Agentic thinking` solo al primo
-  thought/tool
+  thought/tool. Durante una compaction automatica l'outer agent run resta
+  attivo fino ad `agent_settled`: al `compaction_end` e al successivo
+  `turn_start` composer, steering e STOP devono quindi restare attivi
 - **Header**: niente brand/stato testuale — dropdown sessioni (lista da
   `src/bridge/sessions.ts`, `~/.pi/agent/sessions/`; switch via
   `switch_session` RPC + ricarica cronologia) + dot connessione + pulsante
@@ -208,14 +214,29 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   click; se emerge un aggiornamento → scudo giallo + dialog), giallo pulsante
   = aggiornamento disponibile (click → dialog di revisione →
   `/piw update.pi.core.exts`). I 3 host servono `getStartupInfo` dallo stesso
-  file `~/.pi/pi-webview/startup-info-<pid>.json`
+  file `~/.pi/pi-webview/startup-info-<pid>.json`. L'opt-in Webview
+  `allowRemoteNpmUpdates`, protetto da conferma del rischio supply-chain,
+  aggiunge `npm_config_allow_remote=all` solo all'ambiente del child
+  `pi update`; un fallimento `EALLOWREMOTE` senza opt-in produce anche un
+  suggerimento warning localizzato nella chat. L'opt-in separato
+  `dangerouslyAllowAllNpmScripts`, con conferma esplicita del rischio di
+  esecuzione arbitraria, aggiunge
+  `npm_config_dangerously_allow_all_scripts=true` allo stesso child; il warning
+  npm sugli install script bloccati suggerisce questa impostazione senza
+  trasformare l'update riuscito in errore. Al termine dell'update, un errore
+  riabilita lo scudo giallo per il retry; il successo lo rende azzurro,
+  senza pulse e disabilitato fino al riavvio richiesto di pi, segnalato anche
+  da un warning localizzato nella chat
 - **Comandi TUI di pi nel composer**: `/compact`, `/new` e `/name` ripetono
   le azioni GUI omonime (compact RPC, nuova sessione, rename della sessione
   corrente via `set_session_name`). I comandi senza equivalente webview
   (`/reload`, `/login`, `/logout`, `/import`, `/share`, `/scoped-models`,
   `/changelog`, `/hotkeys`, `/quit`, `/model`, `/thinking`) non vengono mai
   inviati a pi (né prompt né steering): mostrano solo un messaggio in chat
-  («validi solo da terminale»)
+  («validi solo da terminale»). I comandi delle estensioni vengono inviati col
+  testo esatto, senza allegare automaticamente il contesto editor; se
+  `get_commands` fallisce, un input slash non verificato viene bloccato invece
+  di rischiare di finire come prompt/steering al modello
 - **Project trust (chip + dialog)**: il chip mostra solo lo stato effettivo del
   processo pi in esecuzione (`trusted`/`untrusted`). In RPC non esiste il
   livello `ask`: senza decisione salvata e con `defaultProjectTrust: "ask"` le

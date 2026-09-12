@@ -27,6 +27,8 @@ public sealed class UserConfigStore
         HistoryLimit = 30,
         StatsBarPosition = "above",
         AgenticThinking = false,
+        AllowRemoteNpmUpdates = false,
+        DangerouslyAllowAllNpmScripts = false,
     };
 
     private UserConfig _config;
@@ -57,6 +59,8 @@ public sealed class UserConfigStore
                 StatsBarPosition = parsed.StatsBarPosition ?? Default.StatsBarPosition,
                 StatsBarCompact = parsed.StatsBarCompact,
                 AgenticThinking = parsed.AgenticThinking,
+                AllowRemoteNpmUpdates = parsed.AllowRemoteNpmUpdates,
+                DangerouslyAllowAllNpmScripts = parsed.DangerouslyAllowAllNpmScripts,
                 HiddenStatusKeys = parsed.HiddenStatusKeys?
                     .Where(key => !string.IsNullOrWhiteSpace(key))
                     .Distinct(StringComparer.Ordinal)
@@ -109,6 +113,16 @@ public sealed class UserConfigStore
         {
             _config.AgenticThinking = agenticThinking.GetBoolean();
         }
+        if (patch.TryGetValue("allowRemoteNpmUpdates", out var allowRemoteNpmUpdates) &&
+            allowRemoteNpmUpdates.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            _config.AllowRemoteNpmUpdates = allowRemoteNpmUpdates.GetBoolean();
+        }
+        if (patch.TryGetValue("dangerouslyAllowAllNpmScripts", out var allowAllNpmScripts) &&
+            allowAllNpmScripts.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            _config.DangerouslyAllowAllNpmScripts = allowAllNpmScripts.GetBoolean();
+        }
         if (patch.TryGetValue("hiddenStatusKeys", out var hidden) &&
             hidden.ValueKind == JsonValueKind.Array)
         {
@@ -142,6 +156,8 @@ public sealed class UserConfigStore
         StatsBarPosition = c.StatsBarPosition,
         StatsBarCompact = c.StatsBarCompact,
         AgenticThinking = c.AgenticThinking,
+        AllowRemoteNpmUpdates = c.AllowRemoteNpmUpdates,
+        DangerouslyAllowAllNpmScripts = c.DangerouslyAllowAllNpmScripts,
         HiddenStatusKeys = c.HiddenStatusKeys is null ? null : new List<string>(c.HiddenStatusKeys),
     };
 }

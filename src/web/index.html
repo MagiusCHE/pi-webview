@@ -43,32 +43,34 @@
           </div>
         </div>
       </div>
-      <button
-        id="btn-new-chat"
-        class="icon-btn"
-        title="Nuova chat in un altro pannello"
-      ></button>
-      <button
-        id="btn-thinking-blocks"
-        class="icon-btn"
-        title="Espandi tutti i blocchi di pensiero"
-        disabled
-      ></button>
-      <button
-        id="btn-update-pi"
-        class="icon-btn"
-        title="Aggiorna pi e le estensioni"
-        hidden
-      ></button>
-      <button id="btn-reload" class="icon-btn" title="Ricarica"></button>
-      <button
-        id="btn-settings"
-        class="icon-btn"
-        title="Impostazioni"
-        aria-expanded="false"
-      >
-        ⚙
-      </button>
+      <div class="header-actions">
+        <button
+          id="btn-new-chat"
+          class="icon-btn"
+          title="Nuova chat in un altro pannello"
+        ></button>
+        <button
+          id="btn-thinking-blocks"
+          class="icon-btn"
+          title="Espandi tutti i blocchi di pensiero"
+          disabled
+        ></button>
+        <button
+          id="btn-update-pi"
+          class="icon-btn"
+          title="Aggiorna pi e le estensioni"
+          hidden
+        ></button>
+        <button id="btn-reload" class="icon-btn" title="Ricarica"></button>
+        <button
+          id="btn-settings"
+          class="icon-btn"
+          title="Impostazioni"
+          aria-expanded="false"
+        >
+          ⚙
+        </button>
+      </div>
       <div id="stats-topbar-row" class="stats-topbar-row"></div>
     </header>
 
@@ -133,6 +135,28 @@
             <input id="agentic-thinking" class="field-checkbox" type="checkbox" />
           </div>
           <div class="settings-note" id="settings-agentic-thinking-note"></div>
+          <div class="settings-row">
+            <label id="settings-allow-remote-npm-label" for="settings-allow-remote-npm">
+              Consenti dipendenze npm remote negli aggiornamenti
+            </label>
+            <input
+              id="settings-allow-remote-npm"
+              class="field-checkbox"
+              type="checkbox"
+            />
+          </div>
+          <div class="settings-note" id="settings-allow-remote-npm-note"></div>
+          <div class="settings-row">
+            <label id="settings-allow-npm-scripts-label" for="settings-allow-npm-scripts">
+              Consenti tutti gli script di installazione npm negli aggiornamenti
+            </label>
+            <input
+              id="settings-allow-npm-scripts"
+              class="field-checkbox"
+              type="checkbox"
+            />
+          </div>
+          <div class="settings-note" id="settings-allow-npm-scripts-note"></div>
           <div class="settings-row">
             <label id="settings-stats-bar-label" for="stats-bar-pos"
               >Posizione barra stato</label

@@ -167,6 +167,8 @@ public sealed class UserConfigStoreTests : IDisposable
         Assert.Equal("above", store.Get().StatsBarPosition);
         Assert.Null(store.Get().StatsBarCompact);
         Assert.False(store.Get().AgenticThinking);
+        Assert.False(store.Get().AllowRemoteNpmUpdates);
+        Assert.False(store.Get().DangerouslyAllowAllNpmScripts);
     }
 
     [Fact]
@@ -182,6 +184,8 @@ public sealed class UserConfigStoreTests : IDisposable
               "statsBarPosition": "topbar",
               "statsBarCompact": true,
               "agenticThinking": true,
+              "allowRemoteNpmUpdates": true,
+              "dangerouslyAllowAllNpmScripts": true,
               "hiddenStatusKeys": ["mcp", "control", "mcp"]
             }
             """);
@@ -198,6 +202,8 @@ public sealed class UserConfigStoreTests : IDisposable
         Assert.Equal("topbar", reloaded.StatsBarPosition);
         Assert.True(reloaded.StatsBarCompact);
         Assert.True(reloaded.AgenticThinking);
+        Assert.True(reloaded.AllowRemoteNpmUpdates);
+        Assert.True(reloaded.DangerouslyAllowAllNpmScripts);
         Assert.Equal(new[] { "mcp", "control" }, reloaded.HiddenStatusKeys);
     }
 
@@ -212,6 +218,8 @@ public sealed class UserConfigStoreTests : IDisposable
               "statsBarPosition": "left",
               "statsBarCompact": "yes",
               "agenticThinking": "yes",
+              "allowRemoteNpmUpdates": "yes",
+              "dangerouslyAllowAllNpmScripts": "yes",
               "hiddenStatusKeys": "mcp"
             }
             """);
@@ -223,6 +231,8 @@ public sealed class UserConfigStoreTests : IDisposable
         Assert.Equal("above", store.Get().StatsBarPosition);
         Assert.Null(store.Get().StatsBarCompact);
         Assert.False(store.Get().AgenticThinking);
+        Assert.False(store.Get().AllowRemoteNpmUpdates);
+        Assert.False(store.Get().DangerouslyAllowAllNpmScripts);
         Assert.Null(store.Get().HiddenStatusKeys);
     }
 }

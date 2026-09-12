@@ -59,6 +59,8 @@ test("ConfigStore: default, patch e persistenza", () => {
       historyLimit: 120,
       statsBarPosition: "above",
       agenticThinking: false,
+      allowRemoteNpmUpdates: false,
+      dangerouslyAllowAllNpmScripts: false,
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -73,12 +75,16 @@ test("ConfigStore: persiste preferenze UI e sorgenti di stato nascoste", () => {
       statsBarPosition: "topbar",
       statsBarCompact: true,
       agenticThinking: true,
+      allowRemoteNpmUpdates: true,
+      dangerouslyAllowAllNpmScripts: true,
       hiddenStatusKeys: ["mcp", "control"],
     });
     const reloaded = new ConfigStore(dir).get();
     assert.equal(reloaded.statsBarPosition, "topbar");
     assert.equal(reloaded.statsBarCompact, true);
     assert.equal(reloaded.agenticThinking, true);
+    assert.equal(reloaded.allowRemoteNpmUpdates, true);
+    assert.equal(reloaded.dangerouslyAllowAllNpmScripts, true);
     assert.deepEqual(reloaded.hiddenStatusKeys, ["mcp", "control"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });

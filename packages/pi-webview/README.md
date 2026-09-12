@@ -194,6 +194,10 @@ The shield in the header is always visible. Every pi process performs a fresh, n
 
 The update command executes `pi update --all --approve` in a child process. It updates the `@earendil-works/pi-coding-agent` core package and all installed npm extensions without prompting. Local and git extension sources are intentionally excluded from registry comparisons.
 
+If npm stops an update with `EALLOWREMOTE` because an extension depends directly on a remote URL, the **Webview** settings include **Allow remote npm dependencies during updates**. Enabling it requires confirmation of a supply-chain warning; while enabled, only Webview-started update child processes receive `npm_config_allow_remote=all`. The npm override is not applied to pi, the bridge, the IDE, or terminal-started updates. The chat suggests this setting when it recognizes the corresponding npm failure.
+
+npm can also complete an update while warning that dependency install scripts were blocked by `allowScripts`. The chat reports this condition and points to the separate **Allow all npm install scripts during updates** Webview setting. Enabling it requires confirmation of the arbitrary-code-execution risk and adds `npm_config_dangerously_allow_all_scripts=true` only to Webview-started update child processes. This bypass allows every dependency lifecycle script, including explicitly denied ones; leave it disabled unless every involved package is trusted.
+
 The running process keeps its loaded code until pi is restarted. The reload button in the header restarts pi, resumes the current session and reloads the page or IDE webview. In standalone mode the page reload is local and still happens if the bridge connection has already dropped; restarting pi is best-effort in that case.
 
 The companion spawns `pi --mode rpc` and bridges the UI via `postMessage` (same UI and protocol as standalone; editor selection flows directly to the webview).

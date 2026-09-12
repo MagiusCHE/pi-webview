@@ -178,7 +178,9 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
         {
             if (e.Key is string k && e.Value is string v) env[k] = v;
         }
-        // marker: the pi-webview extension (pi side) knows it is already integrated
+        // Webview marker scopes UI-only extension behavior to this child.
+        env["PI_WEBVIEW"] = "1";
+        // Companion marker also prevents redundant IDE installation.
         env["PI_WEBVIEW_COMPANION"] = "1";
         // bash required by pi on Windows: prepend its directory to PATH
         if (bashDir is not null)

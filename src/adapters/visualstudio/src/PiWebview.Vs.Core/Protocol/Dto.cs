@@ -234,6 +234,12 @@ public sealed class UserConfig
     [System.Text.Json.Serialization.JsonPropertyName("agenticThinking")]
     public bool AgenticThinking { get; set; }
 
+    [System.Text.Json.Serialization.JsonPropertyName("allowRemoteNpmUpdates")]
+    public bool AllowRemoteNpmUpdates { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("dangerouslyAllowAllNpmScripts")]
+    public bool DangerouslyAllowAllNpmScripts { get; set; }
+
     [System.Text.Json.Serialization.JsonPropertyName("hiddenStatusKeys")]
     public List<string>? HiddenStatusKeys { get; set; }
 }

@@ -438,6 +438,7 @@ function main(): void {
         },
         {
           cwd,
+          env: { ...process.env, PI_WEBVIEW: "1" },
           args: [
             ...(sessionPath ? ["--session", sessionPath] : []),
             ...(sessionPath ? sessionModelArgs(sessionPath) : []),

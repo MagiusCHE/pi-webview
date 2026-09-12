@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   isKnownSlashCommand,
   normalizeExtensionCommands,
+  shouldAttachImplicitEditorContext,
+  shouldBlockUnverifiedSlashCommand,
   slashCommandName,
 } from "../src/web/slash-commands.ts";
 
@@ -36,6 +38,27 @@ test("slash command matching is case-insensitive and supports arguments", () => 
   assert.equal(isKnownSlashCommand("/ACCOUNTS provider", commands), true);
   assert.equal(isKnownSlashCommand("/unknown", commands), false);
   assert.equal(isKnownSlashCommand("ordinary prompt", commands), false);
+});
+
+test("extension commands keep exact syntax and unverified commands fail closed", () => {
+  assert.equal(shouldAttachImplicitEditorContext(true), false);
+  assert.equal(shouldAttachImplicitEditorContext(false), true);
+  assert.equal(
+    shouldBlockUnverifiedSlashCommand({
+      commandName: "accounts",
+      isExtensionCommand: false,
+      commandListAvailable: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldBlockUnverifiedSlashCommand({
+      commandName: "accounts",
+      isExtensionCommand: true,
+      commandListAvailable: false,
+    }),
+    false,
+  );
 });
 
 test("absolute Linux paths remain ordinary prompt text", () => {

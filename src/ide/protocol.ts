@@ -415,6 +415,12 @@ export interface UserConfig {
   /** group all thinking and tool calls of an agent run in one collapsible
    *  presentation block. Global UI preference; never persisted in sessions. */
   agenticThinking?: boolean;
+  /** Webview-only security opt-in. When true, the `/piw update.pi.core.exts`
+   *  child receives npm_config_allow_remote=all; no other process inherits it. */
+  allowRemoteNpmUpdates?: boolean;
+  /** Dangerous Webview-only opt-in. When true, the update child receives
+   *  npm_config_dangerously_allow_all_scripts=true. */
+  dangerouslyAllowAllNpmScripts?: boolean;
   /** setStatus keys hidden by the user. RPC exposes the key as the stable
    *  identifier of the status source. */
   hiddenStatusKeys?: string[];

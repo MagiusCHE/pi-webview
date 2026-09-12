@@ -43,9 +43,19 @@ import {
   formatCompanionNotes,
   companionReloadHints,
 } from "../../src/bridge/companions.ts";
+import { ConfigStore } from "../../src/bridge/config.ts";
 import { resolveDirectNode } from "../../src/bridge/spawn.ts";
+import {
+  hasBlockedNpmInstallScripts,
+  hasRemoteNpmDependencyDisabledError,
+} from "../../src/ide/update-errors.ts";
 import { checkPiUpdate, locatePi } from "./lib/update-check.ts";
 import type { UpdateAvailable } from "./lib/update-check.ts";
+import {
+  shouldAllowRemoteNpmUpdates,
+  shouldDangerouslyAllowAllNpmScripts,
+  updateChildEnvironment,
+} from "./lib/update-exec.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -828,6 +838,17 @@ export default async function (pi: PiApi): Promise<void> {
               // Windows: pi is an npm .cmd shim → node + cli.js directly
               const direct = resolveDirectNode(bin);
               const updateArgs = ["update", "--all", "--approve"];
+              const config = new ConfigStore().get();
+              const allowRemoteNpm = shouldAllowRemoteNpmUpdates(
+                config.allowRemoteNpmUpdates === true,
+              );
+              const allowAllNpmScripts = shouldDangerouslyAllowAllNpmScripts(
+                config.dangerouslyAllowAllNpmScripts === true,
+              );
+              const updateEnv = updateChildEnvironment(process.env, {
+                allowRemote: allowRemoteNpm,
+                dangerouslyAllowAllScripts: allowAllNpmScripts,
+              });
               const runUpdate = (
                 cwd?: string,
               ): Promise<{
@@ -842,6 +863,7 @@ export default async function (pi: PiApi): Promise<void> {
                     maxBuffer: 8 * 1024 * 1024,
                     windowsHide: true,
                     cwd,
+                    env: updateEnv,
                   },
                 );
               let stdout = "";
@@ -867,8 +889,12 @@ export default async function (pi: PiApi): Promise<void> {
                   throw firstErr;
                 }
               }
+              const rawOutput = `${stdout}\n${stderr ?? ""}`;
+              const scriptsWarningMarker = hasBlockedNpmInstallScripts(rawOutput)
+                ? " npm warn install-scripts: install scripts blocked because they are not covered by allowScripts."
+                : "";
               notify(
-                `pi-webview: update finished. Restart pi to load the new version.\n${tail(`${stdout}\n${stderr ?? ""}`)}`,
+                `pi-webview: update finished.${scriptsWarningMarker} Restart pi to load the new version.\n${tail(rawOutput)}`,
                 "info",
               );
             } catch (err) {
@@ -877,9 +903,18 @@ export default async function (pi: PiApi): Promise<void> {
                 stderr?: string;
                 code?: number;
               };
-              const out = tail(`${e.stdout ?? ""}\n${e.stderr ?? ""}`);
+              const errorMessage = err instanceof Error ? err.message : String(err);
+              const rawError = `${e.stdout ?? ""}\n${e.stderr ?? ""}`;
+              const errorSignal = `${rawError}\n${errorMessage}`;
+              const out = tail(rawError);
+              const remoteErrorMarker = hasRemoteNpmDependencyDisabledError(errorSignal)
+                ? " npm error code EALLOWREMOTE."
+                : "";
+              const scriptsErrorMarker = hasBlockedNpmInstallScripts(errorSignal)
+                ? " npm: install scripts blocked because they are not covered by allowScripts."
+                : "";
               notify(
-                `pi-webview: update failed${e.code !== undefined ? ` (exit ${e.code})` : ""}. ${out || (err instanceof Error ? err.message : String(err))}`,
+                `pi-webview: update failed${e.code !== undefined ? ` (exit ${e.code})` : ""}.${remoteErrorMarker}${scriptsErrorMarker} ${out || errorMessage}`,
                 "error",
               );
             } finally {

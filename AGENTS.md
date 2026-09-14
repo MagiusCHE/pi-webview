@@ -185,6 +185,13 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   thought/tool. Durante una compaction automatica l'outer agent run resta
   attivo fino ad `agent_settled`: al `compaction_end` e al successivo
   `turn_start` composer, steering e STOP devono quindi restare attivi
+- **Tool result come risposta finale**: durante un agent run la Webview conserva
+  l'ultima sequenza di tool result. Se `agent_settled` arriva senza contenuto
+  assistant visibile successivo, quei risultati vengono promossi fuori dalle
+  card e dall'Agentic thinking come risposta finale. La history ricostruisce la
+  stessa decisione dall'ordine dei messaggi. Il renderer è type-aware: testo,
+  JSON, code fence, immagini, file, media e resource link hanno presentazioni
+  dedicate; un tipo sconosciuto usa sempre un fallback JSON e non viene perso
 - **Header**: niente brand/stato testuale — dropdown sessioni (lista da
   `src/bridge/sessions.ts`, `~/.pi/agent/sessions/`; switch via
   `switch_session` RPC + ricarica cronologia) + dot connessione + pulsante

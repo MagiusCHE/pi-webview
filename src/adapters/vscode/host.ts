@@ -1022,7 +1022,7 @@ export abstract class PiWebviewHost {
     html = html.replace(/href="\/style\.css"/g, `href="${root}/style.css"`);
     html = html.replace(
       "<head>",
-      `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource}; script-src ${webview.cspSource}; font-src ${webview.cspSource};">`,
+      `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; media-src ${webview.cspSource} data: blob:; style-src ${webview.cspSource}; script-src ${webview.cspSource}; font-src ${webview.cspSource};">`,
     );
     return html;
   }

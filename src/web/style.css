@@ -2563,7 +2563,7 @@ footer {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-/* attachments in the user message: BEFORE the text, images in grid + files */
+/* Images in user, assistant and tool-result content. */
 .chat-image-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -2592,13 +2592,31 @@ footer {
   max-height: 240px;
   object-fit: contain;
 }
+/* Tool images stay inside the result section instead of becoming text. */
+.tool-output > .tool-result-images {
+  max-width: 100%;
+  margin: 0;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+}
 /* lightbox: enlarged image above everything */
-.lightbox-img {
+.lightbox-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
   max-width: 92vw;
   max-height: 92vh;
+}
+.lightbox-img {
+  max-width: 92vw;
+  max-height: calc(92vh - 42px);
   border-radius: var(--radius-md);
   box-shadow: 0 8px 40px rgb(0 0 0 / 0.6);
-  cursor: zoom-out;
+}
+.lightbox-download {
+  flex: 0 0 auto;
+  text-decoration: none;
 }
 .chat-file {
   display: inline-flex;
@@ -2939,6 +2957,66 @@ body.stats-bar-expanded .stats-slots {
 
 .tool-output {
   border-top: 1px solid var(--border);
+}
+.tool-result-promoted-note {
+  padding: 7px 12px 9px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-tertiary);
+  font-size: 11.5px;
+}
+.presented-tool-response {
+  gap: 16px;
+}
+.presented-tool-output {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+.presented-tool-output.error {
+  padding-left: 10px;
+  border-left: 3px solid var(--err);
+}
+.presented-tool-source {
+  color: var(--fg-tertiary);
+  font-size: 11.5px;
+}
+.presented-output-text {
+  width: 100%;
+  color: var(--fg);
+  font-size: 16.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.presented-output-code {
+  width: 100%;
+}
+.presented-output-file {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-elevated);
+  color: var(--fg-secondary);
+}
+.presented-output-action {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  text-decoration: none;
+}
+.presented-output-media {
+  width: min(100%, 640px);
+  max-height: 70vh;
+}
+.presented-output-link {
+  color: var(--accent-text);
+  overflow-wrap: anywhere;
 }
 
 /* --- folder browse modal (standalone) --- */

@@ -2,7 +2,8 @@
 // The streaming state is assembled from deltas: message_end is the
 // authoritative snapshot (docs/rpc.md).
 
-import type { RpcEvent, AssistantDelta } from "./protocol.ts";
+import type { RpcEvent, AssistantDelta, ImageContent } from "./protocol.ts";
+import { imageContentBlocks } from "./content-blocks.ts";
 
 export interface ToolCallInfo {
   id: string;
@@ -14,6 +15,7 @@ export interface FinalizedMessage {
   text: string;
   thinking: string;
   toolCalls: ToolCallInfo[];
+  images: ImageContent[];
   /** provider/turn error (message stopReason "error"): shown as an error box */
   errorMessage?: string;
 }
@@ -90,7 +92,8 @@ export function handleRpcEvent(state: StreamState, evt: RpcEvent): UiAction {
       // provider/turn failure: the authoritative final message carries the
       // error (message.errorMessage / stopReason "error") — surface it.
       const rawMsg = evt.message as
-        { errorMessage?: unknown; stopReason?: unknown } | undefined;
+        { content?: unknown; errorMessage?: unknown; stopReason?: unknown } | undefined;
+      const images = imageContentBlocks(rawMsg?.content);
       const errorMessage =
         typeof rawMsg?.errorMessage === "string" && rawMsg.errorMessage.length > 0
           ? rawMsg.errorMessage
@@ -100,7 +103,7 @@ export function handleRpcEvent(state: StreamState, evt: RpcEvent): UiAction {
       state.active = false;
       return {
         kind: "message_end",
-        message: { text, thinking, toolCalls, errorMessage },
+        message: { text, thinking, toolCalls, images, errorMessage },
       };
     }
 

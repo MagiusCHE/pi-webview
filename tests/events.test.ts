@@ -59,6 +59,18 @@ test("thinking e toolcall delta vengono bufferizzati per contentIndex", () => {
   }
 });
 
+test("message_end conserva i blocchi immagine autoritativi dell'assistente", () => {
+  const s = emptyStream();
+  handleRpcEvent(s, { type: "message_start", message: { role: "assistant" } });
+  const image = { type: "image", mimeType: "image/png", data: "aW1hZ2U=" };
+  const end = handleRpcEvent(s, {
+    type: "message_end",
+    message: { role: "assistant", content: [image] },
+  });
+  assert.equal(end.kind, "message_end");
+  if (end.kind === "message_end") assert.deepEqual(end.message.images, [image]);
+});
+
 test("eventi di stato non producono più status line (loader nel pensiero)", () => {
   const s = emptyStream();
   assert.equal(handleRpcEvent(s, { type: "agent_start" }).kind, "none");

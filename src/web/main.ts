@@ -20,9 +20,21 @@ import type {
   PiModelSettingValue,
   TrustOptionId,
   TrustResult,
+  ImageContent,
 } from "../ide/protocol.ts";
 import { rpc } from "../ide/protocol.ts";
 import { samePath } from "../ide/paths.ts";
+import {
+  displayMessageContent,
+  historyToolResultContent,
+  hasPresentedContent,
+  imageContentBlocks,
+  imageDataUrl,
+  imageDownloadName,
+  toolExecutionEndContent,
+  type DisplayMessageContent,
+  type PresentedContentItem,
+} from "../ide/content-blocks.ts";
 import {
   createWsTransport,
   createVsCodeTransport,
@@ -99,6 +111,7 @@ import {
   transitionComposerActivity,
   type ComposerActivityEvent,
 } from "./composer-activity.ts";
+import { TrailingToolOutputResolver } from "./tool-output-resolver.ts";
 import {
   isKnownSlashCommand,
   normalizeExtensionCommands,
@@ -4768,8 +4781,13 @@ let lastAssistantText = "";
 
 function finalizeMessage(msg: FinalizedMessage): void {
   const hasVisibleText = msg.text.trim().length > 0;
+  if (hasVisibleText || msg.images.length > 0) trailingToolOutputs.assistantVisible();
+  else if (msg.toolCalls.length > 0) trailingToolOutputs.assistantToolCall();
   const hasFinalContent =
-    hasVisibleText || msg.thinking.trim().length > 0 || msg.toolCalls.length > 0;
+    hasVisibleText ||
+    msg.thinking.trim().length > 0 ||
+    msg.toolCalls.length > 0 ||
+    msg.images.length > 0;
   if (!assistantStreamPrepared) prepareAssistantStream();
   if (
     !currentMsg &&
@@ -4846,12 +4864,18 @@ function finalizeMessage(msg: FinalizedMessage): void {
       for (const tc of toolCalls.slice(1)) createToolCard(tc);
     }
   }
+  if (msg.images.length > 0) {
+    breakAgenticChain();
+    if (!currentMsg) openAssistantBubble();
+    if (currentMsg) appendChatImages(currentMsg, msg.images);
+  }
   // assistant wrapper without content (e.g. empty stream): remove it,
   // otherwise it creates ghost gaps between the tool blocks in the history
   if (currentMsg) {
     const hasContent =
       !!currentMsg.querySelector(".thinking-card") ||
       !!currentMsg.querySelector(".tool-card") ||
+      !!currentMsg.querySelector(".chat-image-grid") ||
       (currentText ? currentText.textContent.trim().length > 0 : false);
     if (!hasContent) currentMsg.remove();
   }
@@ -5162,7 +5186,11 @@ function buildThinkingCard(
 }
 
 // compact card for a tool result (truncated output)
-function buildResultCard(toolName: string, output: string, isError = false): HTMLElement {
+function buildResultCard(
+  toolName: string,
+  content: DisplayMessageContent,
+  isError = false,
+): HTMLElement {
   const d = document.createElement("details");
   d.className = "tool-card";
   d.dataset.toolName = toolName;
@@ -5182,15 +5210,19 @@ function buildResultCard(toolName: string, output: string, isError = false): HTM
   label.className = "code-label";
   label.textContent = isShellTool(toolName) ? t("result") : "output";
   const MAX = 10_000;
-  const truncated = output.length > MAX;
+  const truncated = content.text.length > MAX;
   const pre = document.createElement("pre");
-  pre.textContent = truncated ? output.slice(0, MAX) + "\n… (troncato)" : output;
+  pre.textContent = truncated
+    ? content.text.slice(0, MAX) + "\n… (troncato)"
+    : content.text;
+  pre.hidden = content.text.length === 0;
   header.append(label);
-  addCopyButton(header, output);
+  addCopyButton(header, content.text);
   body.append(header, pre);
+  appendChatImages(body, content.images, "tool-result-images");
   d.append(s, body);
   setToolExecutionStatus(d, isError ? "error" : "success");
-  renderShellResultExitCode(d, output, isError);
+  renderShellResultExitCode(d, content.text, isError);
   return d;
 }
 
@@ -5267,6 +5299,49 @@ function interruptStreamingTools(): void {
   }
 }
 const toolOutputPre = new Map<string, HTMLPreElement>();
+
+interface PendingToolOutput {
+  id: string;
+  toolName: string;
+  content: DisplayMessageContent;
+  isError: boolean;
+  card: HTMLElement;
+}
+
+const trailingToolOutputs = new TrailingToolOutputResolver<PendingToolOutput>();
+
+function markToolOutputPromoted(output: PendingToolOutput): void {
+  const registered = askUserInfoByTool.get(output.id)?.cards;
+  const cards = registered?.length ? registered : [output.card];
+  for (const card of cards) {
+    for (const result of Array.from(
+      card.querySelectorAll<HTMLElement>(":scope > .tool-output"),
+    )) {
+      result.remove();
+    }
+    if (!card.querySelector(":scope > .tool-result-promoted-note")) {
+      const note = document.createElement("div");
+      note.className = "tool-result-promoted-note";
+      note.textContent = t("toolResultShownBelow");
+      card.appendChild(note);
+    }
+  }
+  for (const key of Array.from(toolOutputPre.keys())) {
+    if (key === output.id || key.startsWith(`${output.id}-q`)) toolOutputPre.delete(key);
+  }
+}
+
+function promoteToolOutputs(outputs: PendingToolOutput[]): void {
+  if (outputs.length === 0) return;
+  const wrapper = addMsg("assistant");
+  wrapper.classList.add("presented-tool-response");
+  for (const output of outputs) {
+    markToolOutputPromoted(output);
+    wrapper.appendChild(buildPresentedToolOutput(output));
+  }
+  scrollToBottom(true);
+}
+
 // start timestamps of the tools in the history (assistant → toolResult)
 const toolStartTimes = new Map<string, number>();
 
@@ -5450,13 +5525,7 @@ function parseTs(msg: unknown): number {
 }
 
 function extractTextContent(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((b) => (b as { type?: string; text?: string }).text ?? "")
-      .join("");
-  }
-  return "";
+  return displayMessageContent(content).text;
 }
 
 function ensureToolOutput(card: HTMLElement, id: string): HTMLPreElement {
@@ -5476,6 +5545,32 @@ function ensureToolOutput(card: HTMLElement, id: string): HTMLPreElement {
     card.appendChild(body);
     toolOutputPre.set(id, pre);
   }
+  return pre;
+}
+
+function renderToolResultImages(card: HTMLElement, images: ImageContent[]): void {
+  const output = card.querySelector<HTMLElement>(":scope > .tool-output");
+  output?.querySelector(":scope > .tool-result-images")?.remove();
+  if (!output || images.length === 0) return;
+  appendChatImages(output, images, "tool-result-images");
+}
+
+function renderToolResultContent(
+  card: HTMLElement,
+  id: string,
+  content: DisplayMessageContent,
+): void {
+  const pre = ensureToolOutput(card, id);
+  pre.textContent = content.text;
+  pre.hidden = content.text.length === 0;
+  renderToolResultImages(card, content.images);
+}
+
+function resetToolResultContent(card: HTMLElement, id: string): HTMLPreElement {
+  const pre = ensureToolOutput(card, id);
+  pre.hidden = false;
+  pre.textContent = "";
+  renderToolResultImages(card, []);
   return pre;
 }
 
@@ -5596,13 +5691,13 @@ function handleToolExecution(evt: RpcEvent): void {
       setToolExecutionStatus(c, "running");
       startToolTimer(c);
     });
-    const pre = ensureToolOutput(card, id);
-    pre.textContent = "";
+    resetToolResultContent(card, id);
   } else if (evt.type === "tool_execution_update") {
     const part = evt.partialResult as { content?: unknown } | undefined;
     const text = extractTextContent(part?.content);
     if (text) {
       const pre = ensureToolOutput(card, id);
+      pre.hidden = false;
       pre.textContent += text;
       scrollToBottom();
     }
@@ -5623,20 +5718,28 @@ function handleToolExecution(evt: RpcEvent): void {
     // added/removed/modified lines from the diff (edit/write/edit-diff)
     const diff = res?.details?.diff;
     if (diff) renderToolDiff(card, diff);
-    const text = extractTextContent(res?.content);
-    if (text) {
-      // ask_user: distribute the result per question (one card each)
-      if (distributeAskUserResult(id, text)) {
-        scrollToBottom();
-        return;
-      }
-      const pre = ensureToolOutput(card, id);
-      pre.textContent = text;
+    const content = toolExecutionEndContent(evt);
+    if (hasPresentedContent(content)) {
+      trailingToolOutputs.record({
+        id,
+        toolName: card.dataset.toolName ?? "tool",
+        content,
+        isError,
+        card,
+      });
+    }
+    if (content.text && distributeAskUserResult(id, content.text)) {
+      renderToolResultImages(card, content.images);
+      scrollToBottom();
+      return;
+    }
+    if (hasPresentedContent(content)) {
+      renderToolResultContent(card, id, content);
       scrollToBottom();
     }
     renderShellResultExitCode(
       card,
-      text,
+      content.text,
       isError,
       res?.exitCode ?? res?.details?.exitCode,
     );
@@ -5646,6 +5749,7 @@ function handleToolExecution(evt: RpcEvent): void {
 function renderRpcEvent(evt: RpcEvent): void {
   trackWorking(evt);
   if (evt.type === "agent_start") {
+    trailingToolOutputs.beginRun();
     finishRunningAgenticBlocks();
     activeAgenticBlock = null;
     agenticRunStartedAt = agenticThinking ? performance.now() : 0;
@@ -5657,6 +5761,7 @@ function renderRpcEvent(evt: RpcEvent): void {
     finishRunningAgenticBlocks();
     activeAgenticBlock = null;
     agenticRunStartedAt = 0;
+    if (evt.type === "agent_settled") promoteToolOutputs(trailingToolOutputs.settle());
   }
   if (evt.type === "queue_update") {
     const steering = Array.isArray(evt.steering)
@@ -5722,6 +5827,7 @@ function renderRpcEvent(evt: RpcEvent): void {
     // A successful continuation emits turn_start immediately before its next
     // provider request; do not guess that boundary from compaction completion.
   } else if (evt.type === "connection_closed") {
+    trailingToolOutputs.clear();
     if (evt.reason === "restart") {
       // INTENTIONAL restart (Apply CLI flags): pi is restarting with the new
       // command line → no error; the re-init arrives with pi_restarted
@@ -5850,6 +5956,7 @@ function renderRpcEvent(evt: RpcEvent): void {
       if (!agenticThinking) openAssistantBubble();
       break;
     case "text_delta":
+      trailingToolOutputs.assistantVisible();
       // Visible model text is a hard boundary: close the current consecutive
       // thinking/tool chain before rendering the text itself.
       if (thinkingEl && !thinkingContentRendered) finishThinking();
@@ -5886,6 +5993,7 @@ function renderRpcEvent(evt: RpcEvent): void {
       flushThinkingContentRender();
       break;
     case "tool_call_start":
+      trailingToolOutputs.assistantToolCall();
       if (thinkingEl && !thinkingContentRendered) finishThinking();
       // the name arrives with toolcall_start (partial.content[index].name):
       // the card is born ALREADY with the real name, no "tool" placeholder
@@ -5944,6 +6052,7 @@ function renderRpcEvent(evt: RpcEvent): void {
       break;
     case "tool_args_delta":
       // Fallback for providers/older pi versions that omit toolcall_start.
+      trailingToolOutputs.assistantToolCall();
       if (thinkingEl && !thinkingContentRendered) finishThinking();
       disarmWaitingResponse(agenticThinking);
       const fallbackCard = ensureToolCard();
@@ -6001,6 +6110,7 @@ function renderRpcEvent(evt: RpcEvent): void {
       scrollToBottom();
       break;
     case "tool_call":
+      trailingToolOutputs.assistantToolCall();
       if (thinkingEl && !thinkingContentRendered) finishThinking();
       disarmWaitingResponse(agenticThinking);
       if (toolsEl) {
@@ -6467,6 +6577,7 @@ function contentToText(content: unknown): string {
 
 // faithful history: text, thinking and CARDS of the used tools (like the live view)
 function renderHistory(messages: unknown[]): void {
+  trailingToolOutputs.clear();
   finishRunningAgenticBlocks();
   els.thread.textContent = "";
   activeAgenticBlock = null;
@@ -6490,6 +6601,15 @@ function renderHistory(messages: unknown[]): void {
     }
     return historyAgenticBlock;
   };
+  const historyTrailingOutputs = new TrailingToolOutputResolver<PendingToolOutput>();
+  historyTrailingOutputs.beginRun();
+  const promoteHistoryTrailingOutputs = (): void => {
+    const outputs = historyTrailingOutputs.settle();
+    if (outputs.length === 0) return;
+    finishHistoryAgenticBlock(lastTs);
+    promoteToolOutputs(outputs);
+  };
+  let historyToolOutputSequence = 0;
   toolCardsById.clear();
   clearToolTimers();
   toolOutputPre.clear();
@@ -6511,12 +6631,9 @@ function renderHistory(messages: unknown[]): void {
     };
     const ts = parseTs(msg);
     if (msg.role === "user") {
+      promoteHistoryTrailingOutputs();
       finishHistoryAgenticBlock(lastTs);
-      const wrapper = addMsg("user");
-      const bubble = document.createElement("div");
-      bubble.className = "bubble user";
-      bubble.textContent = stripEditorSelectionContext(contentToText(msg.content));
-      wrapper.appendChild(bubble);
+      renderUserContent(msg.content);
     } else if (
       msg.role === "custom" &&
       (msg as { display?: unknown }).display !== false
@@ -6527,6 +6644,7 @@ function renderHistory(messages: unknown[]): void {
       if ((msg as { customType?: string }).customType === "pi-webview-startup") {
         continue;
       }
+      promoteHistoryTrailingOutputs();
       // message injected from another session (session-control send):
       // collapsible card like the tools, also in history (otherwise it
       // would disappear on reload)
@@ -6588,8 +6706,17 @@ function renderHistory(messages: unknown[]): void {
         }
       }
       const text = textParts.join("\n").trim();
+      const images = imageContentBlocks(msg.content);
       const toolCards = toolGroups.flatMap((group) => group.cards);
-      if (!text && thinkingCards.length === 0 && toolCards.length === 0) continue;
+      if (text || images.length > 0) historyTrailingOutputs.assistantVisible();
+      else if (toolCards.length > 0) historyTrailingOutputs.assistantToolCall();
+      if (
+        !text &&
+        images.length === 0 &&
+        thinkingCards.length === 0 &&
+        toolCards.length === 0
+      )
+        continue;
 
       if (agenticThinking) {
         if (thinkingCards.length > 0) {
@@ -6600,15 +6727,18 @@ function renderHistory(messages: unknown[]): void {
           }
         }
 
-        // Visible model text always terminates the preceding consecutive chain.
-        if (text) {
+        // Visible model content always terminates the preceding consecutive chain.
+        if (text || images.length > 0) {
           finishHistoryAgenticBlock(assistantTs);
           const wrapper = addMsg("assistant");
-          const md = document.createElement("div");
-          md.className = "md";
-          md.innerHTML = renderMarkdown(text);
-          enhanceCodeBlocks(md);
-          wrapper.appendChild(md);
+          if (text) {
+            const md = document.createElement("div");
+            md.className = "md";
+            md.innerHTML = renderMarkdown(text);
+            enhanceCodeBlocks(md);
+            wrapper.appendChild(md);
+          }
+          appendChatImages(wrapper, images);
         }
 
         for (const group of toolGroups) {
@@ -6647,6 +6777,7 @@ function renderHistory(messages: unknown[]): void {
           enhanceCodeBlocks(md);
           wrapper.appendChild(md);
         }
+        appendChatImages(wrapper, images);
         for (const card of toolCards) wrapper.appendChild(card);
       }
       // failed turn (provider error): the session entry keeps the error —
@@ -6658,12 +6789,14 @@ function renderHistory(messages: unknown[]): void {
         appendSystemBox("error", errMsg);
       }
     } else if (msg.role === "toolResult" || msg.role === "bashExecution") {
-      const output =
+      const content =
         msg.role === "bashExecution"
-          ? String(msg.output ?? msg.command ?? "")
-          : contentToText(msg.content);
+          ? displayMessageContent(String(msg.output ?? msg.command ?? ""))
+          : historyToolResultContent(msg);
+      const output = content.text;
       const tcId = (msg as { toolCallId?: string }).toolCallId;
       const card = tcId ? toolCardsById.get(tcId) : undefined;
+      let renderedCard = card;
       if (card && tcId) {
         forEachToolCard(tcId, (c) =>
           setToolExecutionStatus(c, msg.isError === true ? "error" : "success"),
@@ -6673,6 +6806,7 @@ function renderHistory(messages: unknown[]): void {
         // ask_user: distribute the result per question (header → answer,
         // segment in the body) and timer on ALL the cards — final state at resume
         if (distributeAskUserResult(tcId, output)) {
+          renderToolResultImages(card, content.images);
           if (start !== undefined && ts > 0 && ts >= start) {
             forEachToolCard(tcId, (c) => {
               const timerEl = c.querySelector<HTMLElement>(".tool-timer");
@@ -6681,9 +6815,9 @@ function renderHistory(messages: unknown[]): void {
           }
           scrollToBottom();
         } else {
-          // risultato DENTRO la card del tool (come nel runtime)
-          const pre = ensureToolOutput(card, tcId);
-          pre.textContent = output;
+          // Result inside the tool card, using the same text/image renderer as
+          // the live tool_execution_end path.
+          renderToolResultContent(card, tcId, content);
           // diff badge (edit): il diff è nei details a livello message
           const det = (msg as { details?: { diff?: string; exitCode?: unknown } })
             .details;
@@ -6707,13 +6841,26 @@ function renderHistory(messages: unknown[]): void {
         // command), the result does not belong to an agentic flow.
         finishHistoryAgenticBlock(lastTs);
         const wrapper = addMsg("assistant");
-        wrapper.appendChild(
-          buildResultCard(msg.toolName ?? "bash", output, msg.isError === true),
+        renderedCard = buildResultCard(
+          msg.toolName ?? "bash",
+          content,
+          msg.isError === true,
         );
+        wrapper.appendChild(renderedCard);
+      }
+      if (renderedCard && hasPresentedContent(content)) {
+        historyTrailingOutputs.record({
+          id: tcId ?? `history-tool-output-${++historyToolOutputSequence}`,
+          toolName: msg.toolName ?? renderedCard.dataset.toolName ?? "tool",
+          content,
+          isError: msg.isError === true,
+          card: renderedCard,
+        });
       }
     }
     if (ts > 0) lastTs = ts; // base for the next thinking duration
   }
+  promoteHistoryTrailingOutputs();
   finishHistoryAgenticBlock(lastTs);
   updateThinkingBlocksButton();
   stickToBottom = true;
@@ -7507,15 +7654,183 @@ async function restartSessionForTrust(data: TrustResult | null): Promise<void> {
 
 // --- confirmation modal (same behavior in browser and VS Code webview) -------
 
-// lightbox: enlarged attached image (outside click or ESC to close)
-function openImageLightbox(src: string, name: string): void {
+// Shared image renderer for user, assistant and tool-result content. Image
+// bytes stay in data URLs and are never folded into visible/copyable text.
+function appendChatImages(
+  container: HTMLElement,
+  images: ImageContent[],
+  className?: string,
+): HTMLElement | null {
+  if (images.length === 0) return null;
+  const grid = document.createElement("div");
+  grid.className = "chat-image-grid";
+  if (className) grid.classList.add(className);
+  if (images.length === 1) grid.classList.add("single");
+  images.forEach((image, index) => {
+    const number = String(index + 1);
+    const label = tpl(t("chatImageLabel"), { number });
+    const src = imageDataUrl(image);
+    const img = document.createElement("img");
+    img.className = "chat-image";
+    img.src = src;
+    img.alt = label;
+    img.title = label;
+    img.addEventListener("click", () =>
+      openImageLightbox(src, label, imageDownloadName(image, index)),
+    );
+    grid.appendChild(img);
+  });
+  container.appendChild(grid);
+  return grid;
+}
+
+function appendPresentedCode(container: HTMLElement, text: string, label: string): void {
+  const block = document.createElement("div");
+  block.className = "code-block presented-output-code";
+  const header = document.createElement("div");
+  header.className = "code-header";
+  const title = document.createElement("span");
+  title.className = "code-label";
+  title.textContent = label;
+  const pre = document.createElement("pre");
+  pre.textContent = text;
+  header.appendChild(title);
+  addCopyButton(header, text);
+  block.append(header, pre);
+  container.appendChild(block);
+}
+
+function appendPresentedFile(
+  container: HTMLElement,
+  item: Extract<PresentedContentItem, { kind: "file" }>,
+): void {
+  const row = document.createElement("div");
+  row.className = "presented-output-file";
+  const icon = document.createElement("span");
+  icon.className = "chat-file-icon";
+  icon.innerHTML = attachFileIcon();
+  const name = document.createElement("span");
+  name.className = "chat-file-name";
+  name.textContent = item.name;
+  name.title = item.path ?? item.name;
+  row.append(icon, name);
+  if (item.path) {
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "btn presented-output-action";
+    open.textContent = t("openFile");
+    open.addEventListener("click", async () => {
+      const result = await ideRequest({ type: "openFile", path: item.path! });
+      if (!result?.ok) {
+        addSystemBox("error", tpl(t("openFileFailed"), { error: result?.error ?? "?" }));
+      }
+    });
+    row.appendChild(open);
+  }
+  if (item.data) {
+    const download = document.createElement("a");
+    download.className = "btn presented-output-action";
+    download.href = `data:${item.mimeType ?? "application/octet-stream"};base64,${item.data}`;
+    download.download = item.name;
+    download.textContent = t("downloadFile");
+    row.appendChild(download);
+  }
+  container.appendChild(row);
+  if (item.text) appendPresentedCode(container, item.text, item.mimeType ?? item.name);
+}
+
+function appendPresentedItem(container: HTMLElement, item: PresentedContentItem): void {
+  if (item.kind === "text") {
+    if (item.format === "plain") {
+      const text = document.createElement("div");
+      text.className = "presented-output-text";
+      text.textContent = item.text;
+      container.appendChild(text);
+    } else {
+      appendPresentedCode(
+        container,
+        item.text,
+        item.language ?? (item.format === "json" ? "json" : t("code")),
+      );
+    }
+    return;
+  }
+  if (item.kind === "file") {
+    appendPresentedFile(container, item);
+    return;
+  }
+  if (item.kind === "media") {
+    const media =
+      item.mediaType === "audio"
+        ? document.createElement("audio")
+        : document.createElement("video");
+    media.className = "presented-output-media";
+    media.controls = true;
+    media.src = `data:${item.mimeType};base64,${item.data}`;
+    media.title = item.name ?? item.mimeType;
+    container.appendChild(media);
+    const download = document.createElement("a");
+    download.className = "btn presented-output-action";
+    download.href = media.src;
+    download.download = item.name ?? `pi-webview-${item.mediaType}`;
+    download.textContent = t("downloadFile");
+    container.appendChild(download);
+    return;
+  }
+  if (item.kind === "link") {
+    if (/^https?:\/\//i.test(item.uri)) {
+      const link = document.createElement("a");
+      link.className = "presented-output-link";
+      link.href = item.uri;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = item.name ?? item.uri;
+      container.appendChild(link);
+    } else {
+      const text = document.createElement("div");
+      text.className = "presented-output-text";
+      text.textContent = item.name ? `${item.name}: ${item.uri}` : item.uri;
+      container.appendChild(text);
+    }
+  }
+}
+
+function buildPresentedToolOutput(output: PendingToolOutput): HTMLElement {
+  const section = document.createElement("section");
+  section.className = "presented-tool-output";
+  if (output.isError) section.classList.add("error");
+  const source = document.createElement("div");
+  source.className = "presented-tool-source";
+  source.textContent = tpl(t("toolResultFrom"), { tool: output.toolName });
+  section.appendChild(source);
+  const images = output.content.items.flatMap((item) =>
+    item.kind === "image" ? [item.image] : [],
+  );
+  for (const item of output.content.items) {
+    if (item.kind !== "image") appendPresentedItem(section, item);
+  }
+  appendChatImages(section, images);
+  return section;
+}
+
+// Lightbox shared by sent and received images. Clicking outside or pressing
+// Escape closes it; the localized action downloads the original image bytes.
+function openImageLightbox(src: string, name: string, downloadName: string): void {
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
+  const content = document.createElement("div");
+  content.className = "lightbox-content";
   const img = document.createElement("img");
   img.className = "lightbox-img";
   img.src = src;
   img.alt = name;
-  backdrop.appendChild(img);
+  const download = document.createElement("a");
+  download.className = "btn lightbox-download";
+  download.href = src;
+  download.download = downloadName;
+  download.textContent = t("downloadImage");
+  content.append(img, download);
+  backdrop.appendChild(content);
   const close = () => {
     backdrop.remove();
     document.removeEventListener("keydown", esc);
@@ -7523,7 +7838,9 @@ function openImageLightbox(src: string, name: string): void {
   const esc = (e: KeyboardEvent) => {
     if (e.key === "Escape") close();
   };
-  backdrop.addEventListener("click", close);
+  backdrop.addEventListener("click", (event) => {
+    if (event.target === backdrop) close();
+  });
   document.addEventListener("keydown", esc);
   document.body.appendChild(backdrop);
 }
@@ -7601,35 +7918,11 @@ function renderUserContent(content: unknown): void {
     return false;
   });
   const text = textBlocks.join("\n\n").trim();
-  const images = Array.isArray(content)
-    ? content.filter(
-        (part): part is { type: "image"; data: string; mimeType: string } =>
-          typeof part === "object" &&
-          part !== null &&
-          (part as { type?: unknown }).type === "image" &&
-          typeof (part as { data?: unknown }).data === "string" &&
-          typeof (part as { mimeType?: unknown }).mimeType === "string",
-      )
-    : [];
+  const images = imageContentBlocks(content);
   if (!text && filePaths.length === 0 && images.length === 0) return;
 
   const wrapper = addMsg("user");
-  if (images.length > 0) {
-    const grid = document.createElement("div");
-    grid.className = "chat-image-grid";
-    if (images.length === 1) grid.classList.add("single");
-    for (const image of images) {
-      const label = t("attachBtn");
-      const img = document.createElement("img");
-      img.className = "chat-image";
-      img.src = `data:${image.mimeType};base64,${image.data}`;
-      img.alt = label;
-      img.title = label;
-      img.addEventListener("click", () => openImageLightbox(img.src, label));
-      grid.appendChild(img);
-    }
-    wrapper.appendChild(grid);
-  }
+  appendChatImages(wrapper, images);
   for (const path of filePaths) {
     const chip = document.createElement("div");
     chip.className = "chat-file";

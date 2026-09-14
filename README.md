@@ -28,6 +28,7 @@ The terminal TUI of pi limits interaction: no rich markdown, no proper mouse/tex
 
 - **Shared chat UI**: streaming markdown, thinking with elapsed time, collapsible tool cards, copy actions and smart auto-scroll in the browser and supported IDEs
 - **Optional Agentic thinking view**: groups consecutive thoughts and tool calls, reports live `thought`, `read`, `write`, `bash` and `tools` counters, avoids empty assistant wrappers, and starts a fresh block after visible text, `ask_user`, compaction or an injected steering message
+- **Final tool outputs**: when an agent run ends on tool results without a later visible assistant response, the final tool batch becomes the chat response outside the Agentic block. Text, JSON, fenced code, images, files, audio/video and resource links use type-aware renderers, with the same result after resume
 - **IDE integration**: the same UI in **VS Code**, **Visual Studio 2022** and **Visual Studio 2026**, distributed as a pi package with companion auto-install. VS Code includes editor selection context and native dialogs; selection is intentionally limited to the sidebar view
 - **Sessions**: folder filtering, switching, forking across workspaces, renaming, deletion and creation, with an immediate full-UI loading lock during transitions; resume summaries include activity, compactions and session-file size
 - **Browser-safe attachments**: paste, drag and drop, and a paperclip picker. Standalone selection happens on the browser device, then uploads the bytes to the bridge instead of browsing the bridge host filesystem

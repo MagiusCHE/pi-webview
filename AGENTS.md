@@ -341,8 +341,10 @@ companion** — modello pi-x-ide, ognuno solo se l'IDE è presente:
 > `ignoreAutoInstall: true` (funzionano anche con `PI_WEBVIEW_AUTO_INSTALL=0`).
 
 - **VS Code**: il CLI `code` è risolto da `PATH` o dalle posizioni di
-  installazione standard; ultima risorsa: estrazione diretta del vsix nella
-  cartella extensions (nessun CLI richiesto) — `code --install-extension` sul
+  installazione standard; ultima risorsa: estrazione ZIP in-process del VSIX in
+  tutte le directory extensions desktop/Server rilevate (`VSCODE_AGENT_FOLDER`,
+  `.vscode-server`, varianti Insiders), senza utility esterne e senza rimuovere
+  la copia precedente prima della validazione — `code --install-extension` sul
   vsix incluso (`companion/pi-webview-ide.vsix`); il companion crea la webview
   della sidebar, spawna `pi --mode rpc` (env `PI_WEBVIEW_COMPANION=1`) e parla
   l'IDE bridge protocol via postMessage. Sviluppo dell'adapter: F5 con

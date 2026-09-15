@@ -16,18 +16,21 @@
 
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import { unzipSync } from "fflate";
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
   type Dirent,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { readVsixVersion } from "../../packages/pi-webview/lib/vsix-version.ts";
 
 const execFileAsync = promisify(execFile);
@@ -199,35 +202,74 @@ export async function resolveCodeCli(): Promise<string | null> {
 }
 
 // --- VS Code companion install without the CLI (Level 2) --------------------
-// Last resort when no `code` CLI can be resolved: unzip the vsix straight
-// into the VS Code extensions folder (~/.vscode/extensions on all platforms)
-// with the same layout `code --install-extension` produces
-// (<publisher>.<name>-<version>). Best effort: anything failing is reported
-// and never breaks startup.
+// Last resort when no `code` CLI can be resolved: extract the VSIX with a
+// bundled ZIP reader into every recognized desktop/server extensions folder.
+// No external archive utility is required.
 
-export function vsCodeExtensionsDir(): string {
-  return process.platform === "win32"
-    ? join(process.env.USERPROFILE ?? "", ".vscode", "extensions")
-    : join(homedir(), ".vscode", "extensions");
+export interface VsCodeExtensionsTarget {
+  dir: string;
+  label: string;
+}
+
+export function vsCodeExtensionsDirs(
+  options: { homeDir?: string; agentFolder?: string } = {},
+): VsCodeExtensionsTarget[] {
+  const home = options.homeDir ?? homedir();
+  const agentFolder = options.agentFolder ?? process.env.VSCODE_AGENT_FOLDER;
+  const candidates: VsCodeExtensionsTarget[] = [
+    ...(agentFolder && isAbsolute(agentFolder)
+      ? [{ dir: join(agentFolder, "extensions"), label: "VS Code Agent" }]
+      : []),
+    { dir: join(home, ".vscode-server", "extensions"), label: "VS Code Server" },
+    {
+      dir: join(home, ".vscode-server-insiders", "extensions"),
+      label: "VS Code Server Insiders",
+    },
+    { dir: join(home, ".vscode", "extensions"), label: "VS Code Desktop" },
+    {
+      dir: join(home, ".vscode-insiders", "extensions"),
+      label: "VS Code Insiders",
+    },
+  ];
+  const seen = new Set<string>();
+  return candidates.filter((target) => {
+    const absolute = resolve(target.dir);
+    const key = process.platform === "win32" ? absolute.toLowerCase() : absolute;
+    if (seen.has(key)) return false;
+    try {
+      if (!statSync(absolute).isDirectory()) return false;
+    } catch {
+      return false;
+    }
+    seen.add(key);
+    target.dir = absolute;
+    return true;
+  });
+}
+
+function listVsCodeCompanionFolders(dir: string): string[] {
+  return readdirSync(dir)
+    .filter((name) => name.toLowerCase().startsWith(`${COMPANION_ID}-`))
+    .map((name) => join(dir, name));
 }
 
 // Installed companion folder: the HIGHEST version matching
 // `magiusche.pi-webview-ide-*` (readdir order is not deterministic, and a
 // leftover old version must never shadow the current one).
 export function findVsCodeCompanionFolder(dir: string): string | null {
-  let entries: string[];
+  let folders: string[];
   try {
-    entries = readdirSync(dir);
+    folders = listVsCodeCompanionFolders(dir);
   } catch {
     return null; // unreadable/missing extensions dir
   }
   let best: string | null = null;
   let bestVersion: string | null = null;
-  for (const name of entries) {
-    if (!name.toLowerCase().startsWith(`${COMPANION_ID}-`)) continue;
+  for (const folder of folders) {
+    const name = folder.slice(dir.length + 1);
     const version = name.slice(COMPANION_ID.length + 1);
     if (bestVersion === null || compareVersions(version, bestVersion) > 0) {
-      best = join(dir, name);
+      best = folder;
       bestVersion = version;
     }
   }
@@ -256,58 +298,196 @@ export function readVsCodeCompanionVersion(folder: string): string | null {
   }
 }
 
-async function installVsCodeCompanionDirect(
+function folderVersion(folder: string): string {
+  const name = folder.slice(dirname(folder).length + 1);
+  return name.slice(COMPANION_ID.length + 1);
+}
+
+function extractVsix(vsixPath: string, destination: string): void {
+  const root = resolve(destination);
+  const entries = unzipSync(readFileSync(vsixPath));
+  for (const [archivePath, contents] of Object.entries(entries)) {
+    const normalized = archivePath.replace(/\\/g, "/");
+    if (
+      normalized.includes("\0") ||
+      normalized.startsWith("/") ||
+      /^[A-Za-z]:\//.test(normalized)
+    ) {
+      throw new Error("VSIX contains an unsafe absolute path");
+    }
+    const output = resolve(root, normalized);
+    const withinRoot = relative(root, output);
+    if (
+      withinRoot === ".." ||
+      withinRoot.startsWith(`..${sep}`) ||
+      isAbsolute(withinRoot)
+    ) {
+      throw new Error("VSIX contains a path outside the extraction directory");
+    }
+    if (normalized.endsWith("/")) {
+      mkdirSync(output, { recursive: true });
+    } else {
+      mkdirSync(dirname(output), { recursive: true });
+      writeFileSync(output, contents);
+    }
+  }
+}
+
+function validateVsCodePayload(payload: string, vsixVersion: string): void {
+  const manifestPath = join(payload, "package.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+    name?: unknown;
+    publisher?: unknown;
+    version?: unknown;
+  };
+  if (
+    manifest.name !== "pi-webview-ide" ||
+    manifest.publisher !== "magiusche" ||
+    manifest.version !== vsixVersion
+  ) {
+    throw new Error("VSIX extension/package.json does not match the companion manifest");
+  }
+}
+
+async function installVsCodeCompanionInTarget(
+  target: VsCodeExtensionsTarget,
   vsixPath: string,
   vsixVersion: string,
   force: boolean,
-): Promise<CompanionNote | null> {
-  const dir = vsCodeExtensionsDir();
-  if (!existsSync(dir)) return null; // VS Code never started: silent skip
-  const installedFolder = findVsCodeCompanionFolder(dir);
+  onAction?: (kind: "installed" | "updated", fromVersion?: string) => void,
+): Promise<{ kind: "current" | "installed" | "updated"; fromVersion?: string }> {
+  const folders = listVsCodeCompanionFolders(target.dir);
+  const installedFolder = findVsCodeCompanionFolder(target.dir);
   const installedVersion = installedFolder
-    ? readVsCodeCompanionVersion(installedFolder)
-    : null;
-  if (!force && installedVersion !== null && installedVersion === vsixVersion) {
-    clearReloadSignal(); // already current
-    return null;
-  }
-  // extract OUTSIDE the extensions dir (sibling ~/.vscode) so VS Code never
-  // sees the half-written folder; same filesystem → rename works on all OS
-  const tmp = join(dirname(dir), `.${COMPANION_ID}-${vsixVersion}.tmp`);
+    ? (readVsCodeCompanionVersion(installedFolder) ?? folderVersion(installedFolder))
+    : undefined;
+  if (!force && installedVersion === vsixVersion) return { kind: "current" };
+  onAction?.(installedFolder ? "updated" : "installed", installedVersion);
+
+  // The temporary container is a sibling of the extensions directory, so the
+  // validated payload can be moved into place atomically on the same filesystem.
+  const tmp = mkdtempSync(join(dirname(target.dir), `.${COMPANION_ID}-`));
+  const payload = join(tmp, "extension");
+  const destination = join(target.dir, `${COMPANION_ID}-${vsixVersion}`);
+  const backup = join(tmp, "previous");
+  let destinationBackedUp = false;
   try {
-    rmSync(tmp, { recursive: true, force: true });
-    mkdirSync(tmp, { recursive: true });
-    // tar reads zips on Windows 10+ (bsdtar), macOS and Linux
-    await execFileAsync("tar", ["-xf", vsixPath, "-C", tmp], {
-      timeout: 60_000,
-      windowsHide: true,
-    });
-    // `code --install-extension` strips these two from the folder
-    for (const f of ["extension.vsixmanifest", "[Content_Types].xml"]) {
-      rmSync(join(tmp, f), { force: true });
+    extractVsix(vsixPath, tmp);
+    validateVsCodePayload(payload, vsixVersion);
+
+    if (existsSync(destination)) {
+      renameSync(destination, backup);
+      destinationBackedUp = true;
     }
-    rmSync(join(tmp, "__MACOSX"), { recursive: true, force: true });
-    if (installedFolder) rmSync(installedFolder, { recursive: true, force: true });
-    const dest = join(dir, `${COMPANION_ID}-${vsixVersion}`);
-    rmSync(dest, { recursive: true, force: true });
-    renameSync(tmp, dest);
-    if (installedVersion !== null) writeReloadSignal(vsixVersion);
-    return installedVersion === null
-      ? { target: "vscode", kind: "installed", version: vsixVersion }
-      : {
-          target: "vscode",
-          kind: "updated",
-          version: vsixVersion,
-          fromVersion: installedVersion,
-        };
-  } catch (err) {
-    rmSync(tmp, { recursive: true, force: true }); // best effort cleanup
-    return {
-      target: "vscode",
-      kind: "error",
-      error: describeExecError(err),
-    };
+    try {
+      renameSync(payload, destination);
+    } catch (error) {
+      if (destinationBackedUp && !existsSync(destination))
+        renameSync(backup, destination);
+      throw error;
+    }
+    for (const folder of folders) {
+      if (resolve(folder) !== resolve(destination)) {
+        rmSync(folder, { recursive: true, force: true });
+      }
+    }
+    return installedFolder
+      ? { kind: "updated", fromVersion: installedVersion }
+      : { kind: "installed" };
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+export async function installVsCodeCompanionDirect(
+  vsixPath: string,
+  vsixVersion: string,
+  force: boolean,
+  options: {
+    targets?: VsCodeExtensionsTarget[];
+    onStep?: (step: string, action?: boolean) => void;
+    writeReload?: (version: string) => void;
+    clearReload?: () => void;
+  } = {},
+): Promise<CompanionNote[]> {
+  const targets = options.targets ?? vsCodeExtensionsDirs();
+  const notes: CompanionNote[] = [];
+  let installed = 0;
+  const previousVersions: string[] = [];
+  if (targets.length === 0) {
+    options.onStep?.("VS Code: no recognized extensions directory (skip)");
+    return notes;
+  }
+  for (const target of targets) {
+    try {
+      const result = await installVsCodeCompanionInTarget(
+        target,
+        vsixPath,
+        vsixVersion,
+        force,
+        (kind, fromVersion) =>
+          options.onStep?.(
+            `${target.label}: ${kind === "installed" ? "installing" : "updating"} ${vsixVersion}${fromVersion ? ` (${fromVersion} → ${vsixVersion})` : ""}…`,
+            true,
+          ),
+      );
+      if (result.kind === "current") {
+        options.onStep?.(`${target.label}: companion already current (${vsixVersion})`);
+      } else {
+        options.onStep?.(`${target.label}: companion ${result.kind} (${vsixVersion})`);
+        if (result.kind === "installed") installed++;
+        else previousVersions.push(result.fromVersion ?? "unknown");
+      }
+    } catch (error) {
+      const description = describeExecError(error);
+      options.onStep?.(`${target.label}: error — ${description}`, true);
+      notes.push({
+        target: "vscode",
+        kind: "error",
+        label: target.label,
+        error: description,
+      });
+    }
+  }
+  if (previousVersions.length > 0) {
+    (options.writeReload ?? writeReloadSignal)(vsixVersion);
+    notes.unshift({
+      target: "vscode",
+      kind: "updated",
+      version: vsixVersion,
+      fromVersion: previousVersions[0],
+    });
+  } else if (installed > 0) {
+    notes.unshift({ target: "vscode", kind: "installed", version: vsixVersion });
+  } else if (notes.length === 0) {
+    (options.clearReload ?? clearReloadSignal)();
+  }
+  return notes;
+}
+
+export interface VsCodeDirectUninstallResult {
+  removed: number;
+  errors: Array<{ label: string; error: string }>;
+}
+
+export function uninstallVsCodeCompanionDirect(
+  targets: VsCodeExtensionsTarget[] = vsCodeExtensionsDirs(),
+): VsCodeDirectUninstallResult {
+  const result: VsCodeDirectUninstallResult = { removed: 0, errors: [] };
+  for (const target of targets) {
+    try {
+      for (const folder of listVsCodeCompanionFolders(target.dir)) {
+        rmSync(folder, { recursive: true });
+        result.removed++;
+      }
+    } catch (error) {
+      result.errors.push({
+        label: target.label,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return result;
 }
 
 // execFile errors: Node's message is "Command failed: <cmd>" WITHOUT the
@@ -699,17 +879,14 @@ export async function ensureCompanions(
           });
         }
       } else {
-        // no `code` CLI anywhere → last resort: direct vsix extraction into
-        // the extensions folder (VS Code scans folders, no CLI involved)
-        step("VS Code: no code CLI — direct vsix extraction", true);
-        const direct = await installVsCodeCompanionDirect(vsCodeVsix, vsixVersion, force);
-        if (direct) {
-          step(
-            `VS Code: ${direct.kind === "error" ? "error" : "installed"} (${vsixVersion})`,
-            true,
-          );
-          notes.push(direct);
-        }
+        // no `code` CLI anywhere → last resort: direct VSIX extraction into
+        // every recognized desktop/server extensions directory
+        step("VS Code: no code CLI — checking direct-install destinations");
+        notes.push(
+          ...(await installVsCodeCompanionDirect(vsCodeVsix, vsixVersion, force, {
+            onStep: step,
+          })),
+        );
       }
     } catch (err) {
       const desc = describeExecError(err);
@@ -943,8 +1120,8 @@ export function formatCompanionNotes(
         }
         return n.target === "vscode"
           ? it
-            ? `${prefix}installazione companion VS Code fallita: ${n.error}`
-            : `${prefix}companion install failed in VS Code: ${n.error}`
+            ? `${prefix}installazione companion VS Code fallita${label ? ` in ${label}` : ""}: ${n.error}`
+            : `${prefix}companion install failed in VS Code${label ? ` (${label})` : ""}: ${n.error}`
           : it
             ? `${prefix}installazione companion Visual Studio fallita in ${label || "Visual Studio"}: ${n.error}`
             : `${prefix}companion install failed in Visual Studio (${label || "Visual Studio"}): ${n.error}`;

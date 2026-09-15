@@ -5,14 +5,25 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { strToU8, zipSync } from "fflate";
 import {
   parseVsInstances,
   isVsVersionSupported,
   findVsCodeCompanionFolder,
   readVsCodeCompanionVersion,
+  vsCodeExtensionsDirs,
+  installVsCodeCompanionDirect,
+  uninstallVsCodeCompanionDirect,
   ensureCompanions,
   formatCompanionNotes,
   companionReloadHints,
@@ -20,6 +31,7 @@ import {
   CHROME_WEB_STORE_ID,
   type CompanionNote,
 } from "../src/bridge/companions.ts";
+import { readVsixVersion } from "../packages/pi-webview/lib/vsix-version.ts";
 
 // Real vswhere output shape for a machine with VS 2019 + 2022 + 18 (preview),
 // like the one where the companion only reached the newest instance.
@@ -106,6 +118,264 @@ test("readVsCodeCompanionVersion: reads package.json version", () => {
     assert.equal(readVsCodeCompanionVersion(join(root, "missing")), null);
     writeFileSync(join(folder, "package.json"), "not json");
     assert.equal(readVsCodeCompanionVersion(folder), null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("vsCodeExtensionsDirs discovers Remote SSH and desktop destinations", () => {
+  const home = mkdtempSync(join(tmpdir(), "piw-vsc-home-"));
+  try {
+    const server = join(home, ".vscode-server", "extensions");
+    const desktop = join(home, ".vscode", "extensions");
+    mkdirSync(server, { recursive: true });
+    mkdirSync(desktop, { recursive: true });
+    assert.deepEqual(vsCodeExtensionsDirs({ homeDir: home, agentFolder: "relative" }), [
+      { dir: server, label: "VS Code Server" },
+      { dir: desktop, label: "VS Code Desktop" },
+    ]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("vsCodeExtensionsDirs deduplicates VSCODE_AGENT_FOLDER and skips missing dirs", () => {
+  const home = mkdtempSync(join(tmpdir(), "piw-vsc-home-"));
+  try {
+    const agent = join(home, ".vscode-server");
+    mkdirSync(join(agent, "extensions"), { recursive: true });
+    assert.deepEqual(vsCodeExtensionsDirs({ homeDir: home, agentFolder: agent }), [
+      { dir: join(agent, "extensions"), label: "VS Code Agent" },
+    ]);
+    assert.deepEqual(
+      vsCodeExtensionsDirs({ homeDir: join(home, "missing"), agentFolder: "relative" }),
+      [],
+    );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+const realVsix = join("packages", "pi-webview", "companion", "pi-webview-ide.vsix");
+const realVsixVersion = readVsixVersion(realVsix);
+if (!realVsixVersion) throw new Error("bundled VS Code companion version is missing");
+
+function directTarget(
+  dir: string,
+  label = "Test VS Code",
+): { dir: string; label: string } {
+  return { dir, label };
+}
+
+test("direct VSIX install skips silently when no destination is recognized", async () => {
+  const steps: Array<{ text: string; action?: boolean }> = [];
+  const notes = await installVsCodeCompanionDirect(realVsix, realVsixVersion, false, {
+    targets: [],
+    onStep: (text, action) => steps.push({ text, action }),
+    clearReload: () => assert.fail("an absent installation must not change reload state"),
+  });
+  assert.deepEqual(notes, []);
+  assert.equal(steps.length, 1);
+  assert.notEqual(steps[0]?.action, true);
+});
+
+function seedVsCodeCompanion(dir: string, version: string): string {
+  const folder = join(dir, `magiusche.pi-webview-ide-${version}`);
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(
+    join(folder, "package.json"),
+    JSON.stringify({ name: "pi-webview-ide", publisher: "magiusche", version }),
+  );
+  return folder;
+}
+
+test("direct VSIX install promotes extension payload without archive metadata", async () => {
+  const root = mkdtempSync(join(tmpdir(), "piw-vsc-direct-"));
+  const extensions = join(root, "extensions");
+  mkdirSync(extensions);
+  try {
+    const notes = await installVsCodeCompanionDirect(realVsix, realVsixVersion, false, {
+      targets: [directTarget(extensions)],
+      clearReload: () => {},
+    });
+    assert.deepEqual(notes, [
+      { target: "vscode", kind: "installed", version: realVsixVersion },
+    ]);
+    const installed = join(extensions, `magiusche.pi-webview-ide-${realVsixVersion}`);
+    const manifest = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
+    assert.equal(manifest.version, realVsixVersion);
+    assert.equal(existsSync(join(installed, "extension", "package.json")), false);
+    assert.equal(existsSync(join(installed, "extension.vsixmanifest")), false);
+    assert.equal(existsSync(join(installed, "[Content_Types].xml")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("direct VSIX install leaves an already-current companion untouched", async () => {
+  const root = mkdtempSync(join(tmpdir(), "piw-vsc-current-"));
+  const extensions = join(root, "extensions");
+  mkdirSync(extensions);
+  try {
+    const installed = seedVsCodeCompanion(extensions, realVsixVersion);
+    const marker = join(installed, "keep-me");
+    writeFileSync(marker, "unchanged");
+    let cleared = 0;
+    const notes = await installVsCodeCompanionDirect(realVsix, realVsixVersion, false, {
+      targets: [directTarget(extensions)],
+      clearReload: () => cleared++,
+    });
+    assert.deepEqual(notes, []);
+    assert.equal(readFileSync(marker, "utf8"), "unchanged");
+    assert.equal(cleared, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("direct VSIX update replaces an older copy and requests reload", async () => {
+  const root = mkdtempSync(join(tmpdir(), "piw-vsc-update-"));
+  const extensions = join(root, "extensions");
+  mkdirSync(extensions);
+  try {
+    const previous = seedVsCodeCompanion(extensions, "0.1.0");
+    const reloads: string[] = [];
+    const notes = await installVsCodeCompanionDirect(realVsix, realVsixVersion, false, {
+      targets: [directTarget(extensions)],
+      writeReload: (version) => reloads.push(version),
+    });
+    assert.deepEqual(notes, [
+      {
+        target: "vscode",
+        kind: "updated",
+        version: realVsixVersion,
+        fromVersion: "0.1.0",
+      },
+    ]);
+    assert.equal(existsSync(previous), false);
+    assert.equal(
+      readVsCodeCompanionVersion(
+        join(extensions, `magiusche.pi-webview-ide-${realVsixVersion}`),
+      ),
+      realVsixVersion,
+    );
+    assert.deepEqual(reloads, [realVsixVersion]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("invalid VSIX keeps the previous companion intact", async () => {
+  const root = mkdtempSync(join(tmpdir(), "piw-vsc-invalid-"));
+  const extensions = join(root, "extensions");
+  mkdirSync(extensions);
+  try {
+    const previous = seedVsCodeCompanion(extensions, "0.1.0");
+    const invalid = join(root, "invalid.vsix");
+    writeFileSync(invalid, "not a zip");
+    const notes = await installVsCodeCompanionDirect(invalid, realVsixVersion, false, {
+      targets: [directTarget(extensions)],
+      writeReload: () => assert.fail("reload must not be requested"),
+    });
+    assert.equal(notes.length, 1);
+    assert.equal(notes[0]?.kind, "error");
+    assert.equal(existsSync(previous), true);
+    assert.equal(readVsCodeCompanionVersion(previous), "0.1.0");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("direct VSIX extraction rejects path traversal", async () => {
+  const root = mkdtempSync(join(tmpdir(), "piw-vsc-traversal-"));
+  const extensions = join(root, "extensions");
+  mkdirSync(extensions);
+  try {
+    const previous = seedVsCodeCompanion(extensions, "0.1.0");
+    const malicious = join(root, "malicious.vsix");
+    writeFileSync(malicious, zipSync({ "../escaped.txt": strToU8("unsafe") }));
+    const notes = await installVsCodeCompanionDirect(malicious, realVsixVersion, false, {
+      targets: [directTarget(extensions)],
+      writeReload: () => assert.fail("reload must not be requested"),
+    });
+    assert.equal(notes[0]?.kind, "error");
+    assert.equal(existsSync(join(root, "escaped.txt")), false);
+    assert.equal(readVsCodeCompanionVersion(previous), "0.1.0");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("forced direct install reinstalls the current version", async () => {
+  const root = mkdtempSync(join(tmpdir(), "piw-vsc-force-"));
+  const extensions = join(root, "extensions");
+  mkdirSync(extensions);
+  try {
+    const previous = seedVsCodeCompanion(extensions, realVsixVersion);
+    writeFileSync(join(previous, "stale"), "remove");
+    const reloads: string[] = [];
+    const notes = await installVsCodeCompanionDirect(realVsix, realVsixVersion, true, {
+      targets: [directTarget(extensions)],
+      writeReload: (version) => reloads.push(version),
+    });
+    assert.equal(notes[0]?.kind, "updated");
+    assert.equal(notes[0]?.fromVersion, realVsixVersion);
+    assert.equal(existsSync(join(previous, "stale")), false);
+    assert.deepEqual(reloads, [realVsixVersion]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("direct VSIX install continues after a destination error", async () => {
+  const root = mkdtempSync(join(tmpdir(), "piw-vsc-partial-"));
+  const broken = join(root, "not-a-directory");
+  const extensions = join(root, "extensions");
+  writeFileSync(broken, "file");
+  mkdirSync(extensions);
+  try {
+    const notes = await installVsCodeCompanionDirect(realVsix, realVsixVersion, false, {
+      targets: [directTarget(broken, "Broken target"), directTarget(extensions)],
+      clearReload: () => {},
+    });
+    assert.equal(
+      notes.some((note) => note.kind === "installed"),
+      true,
+    );
+    assert.equal(
+      notes.some((note) => note.kind === "error" && note.label === "Broken target"),
+      true,
+    );
+    assert.equal(
+      existsSync(join(extensions, `magiusche.pi-webview-ide-${realVsixVersion}`)),
+      true,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("direct uninstall removes every companion copy from every destination", () => {
+  const root = mkdtempSync(join(tmpdir(), "piw-vsc-uninstall-"));
+  const desktop = join(root, "desktop");
+  const server = join(root, "server");
+  mkdirSync(desktop);
+  mkdirSync(server);
+  try {
+    const copies = [
+      seedVsCodeCompanion(desktop, "0.1.0"),
+      seedVsCodeCompanion(desktop, "0.2.0"),
+      seedVsCodeCompanion(server, "0.3.0"),
+    ];
+    const result = uninstallVsCodeCompanionDirect([
+      directTarget(desktop, "Desktop"),
+      directTarget(server, "Server"),
+    ]);
+    assert.deepEqual(result, { removed: 3, errors: [] });
+    assert.equal(
+      copies.some((folder) => existsSync(folder)),
+      false,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

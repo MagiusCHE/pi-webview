@@ -4,8 +4,9 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
-## [0.4.0] - 2026-09-15
+## [0.4.0] - 2026-09-16
 
+- Fixed direct VS Code companion installation on Remote SSH hosts by discovering VS Code Server extension directories and safely extracting the bundled VSIX without external archive tools.
 - Added the official Google Chrome Side Panel companion with page context, selection and handoff from Browser View.
 - Added browser tools for DOM and screenshot capture with explicit consent per origin and panel session.
 - Improved persistence, resume and empty-session handling in the Chrome companion.

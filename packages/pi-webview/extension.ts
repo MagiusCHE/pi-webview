@@ -35,8 +35,7 @@ import {
   resolveCodeCli,
   installedCompanionVersion,
   installCompanion,
-  vsCodeExtensionsDir,
-  findVsCodeCompanionFolder,
+  uninstallVsCodeCompanionDirect,
   visualStudioInstances,
   isVsVersionSupported,
   ensureCompanions,
@@ -769,15 +768,20 @@ export default async function (pi: PiApi): Promise<void> {
                   );
                 }
               } else {
-                // no code CLI: remove the companion folder directly (best effort)
-                const folder = findVsCodeCompanionFolder(vsCodeExtensionsDir());
-                if (folder === null) {
-                  lines.push("pi-webview: companion not installed in VS Code.");
-                } else {
-                  rmSync(folder, { recursive: true, force: true });
-                  removedVsCode = true;
+                // No code CLI: remove every direct-install copy from all
+                // recognized desktop/server extensions directories.
+                const direct = uninstallVsCodeCompanionDirect();
+                removedVsCode = direct.removed > 0;
+                if (removedVsCode) {
                   lines.push(
                     `pi-webview: companion ${COMPANION_ID} removed from VS Code.`,
+                  );
+                } else if (direct.errors.length === 0) {
+                  lines.push("pi-webview: companion not installed in VS Code.");
+                }
+                for (const error of direct.errors) {
+                  lines.push(
+                    `pi-webview: companion uninstall failed in ${error.label}: ${error.error}`,
                   );
                 }
               }

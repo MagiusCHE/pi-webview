@@ -4,7 +4,8 @@
 // Usage:
 //   pnpm release -- --version 0.1.1                 → ONLY prepare (no publish)
 //   pnpm release -- --version 0.1.1 --tag next      → prepare (the tag is used by the publish)
-//   pnpm release -- --publish                       → publish the current version
+//   pnpm release -- --publish                       → rebuild + publish current version
+//   pnpm release -- --publish --publish-only        → publish already-built artifacts
 //   pnpm release -- --version 0.1.1 --publish       → bump + rebuild + publish
 //   pnpm release -- --version 0.1.1 --publish --tag beta
 //
@@ -14,6 +15,8 @@
 // - `--publish`: runs `npm publish --access public` and, after a successful
 //   publish, automatically creates the git tag `v<version>` + the GitHub
 //   release (idempotent: skips if tag/release already exist for that version).
+// - `--publish-only`: valid only with `--publish`; skips compilation and reuses
+//   artifacts produced by a successful full build of the same version.
 
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -39,6 +42,7 @@ const value = (name) => {
 const version = value("--version");
 const tag = value("--tag");
 const publish = has("--publish");
+const publishOnly = has("--publish-only");
 
 const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 if (version !== undefined && !SEMVER.test(version)) {
@@ -48,9 +52,17 @@ if (version !== undefined && !SEMVER.test(version)) {
 if (tag !== undefined && !publish) {
   console.warn("⚠ --tag ignored: without --publish nothing is published.");
 }
+if (publishOnly && !publish) {
+  console.error("✗ --publish-only requires --publish.");
+  process.exit(1);
+}
+if (publishOnly && version) {
+  console.error("✗ --publish-only cannot be combined with --version.");
+  process.exit(1);
+}
 if (!version && !publish) {
   console.error(
-    "✗ usage: pnpm release -- --version <semver> [--tag <dist-tag>] [--publish]",
+    "✗ usage: pnpm release -- --version <semver> [--publish] [--publish-only] [--tag <dist-tag>]",
   );
   process.exit(1);
 }
@@ -82,16 +94,38 @@ if (version) {
 }
 
 // --- 2) rebuild (companion vsix + pi bundle) ---
-console.log("\n→ build companion VS Code (vsix)…");
-execSync("node tools/build-ide-vsix.mjs", { cwd: root, stdio: "inherit" });
-// A release must contain a freshly built Visual Studio companion. On Linux,
-// any Wine/VSSDK failure aborts the release instead of reusing a stale VSIX.
-console.log("\n→ build companion Visual Studio (vsix)…");
-execSync("node tools/build-vs-vsix.mjs", { cwd: root, stdio: "inherit" });
-console.log("\n→ build companion Chrome (zip)…");
-execSync("node tools/build-chrome-extension.mjs", { cwd: root, stdio: "inherit" });
-console.log("→ build pacchetto pi (bundle + copia companion)…");
-execSync("node tools/build-addon.mjs", { cwd: root, stdio: "inherit" });
+if (publishOnly) {
+  const requiredArtifacts = [
+    join(root, "dist", "pi-webview-ide.vsix"),
+    join(root, "dist", "pi-webview-visualstudio.vsix"),
+    join(root, "dist", "pi-webview-chrome.zip"),
+    join(piDir, "companion", "pi-webview-ide.vsix"),
+    join(piDir, "companion", "pi-webview-visualstudio.vsix"),
+    join(piDir, "companion", "pi-webview-chrome.zip"),
+    join(piDir, "dist", "extension.js"),
+    join(piDir, "dist", "bridge.cjs"),
+    join(piDir, "dist", "piw.js"),
+    join(piDir, "dist", "web", "index.html"),
+  ];
+  const missing = requiredArtifacts.filter((file) => !existsSync(file));
+  if (missing.length > 0) {
+    console.error("✗ --publish-only cannot continue: release artifacts are missing:");
+    for (const file of missing) console.error(`  - ${relative(root, file)}`);
+    process.exit(1);
+  }
+  console.log("\n→ --publish-only: reusing the existing release artifacts (no build).");
+} else {
+  console.log("\n→ build companion VS Code (vsix)…");
+  execSync("node tools/build-ide-vsix.mjs", { cwd: root, stdio: "inherit" });
+  // A release must contain a freshly built Visual Studio companion. On Linux,
+  // any Wine/VSSDK failure aborts the release instead of reusing a stale VSIX.
+  console.log("\n→ build companion Visual Studio (vsix)…");
+  execSync("node tools/build-vs-vsix.mjs", { cwd: root, stdio: "inherit" });
+  console.log("\n→ build companion Chrome (zip)…");
+  execSync("node tools/build-chrome-extension.mjs", { cwd: root, stdio: "inherit" });
+  console.log("→ build pacchetto pi (bundle + copia companion)…");
+  execSync("node tools/build-addon.mjs", { cwd: root, stdio: "inherit" });
+}
 
 // --- 3) tarball check ---
 const piJson = JSON.parse(readFileSync(pkgPi, "utf-8"));
@@ -221,5 +255,7 @@ if (publish) {
   }
 } else {
   console.log("\n✓ package ready. Nothing was published.");
-  console.log("→ to publish: pnpm release -- --publish [--tag <dist-tag>]");
+  console.log(
+    "→ to publish: pnpm release -- --publish [--publish-only] [--tag <dist-tag>]",
+  );
 }

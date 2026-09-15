@@ -118,6 +118,9 @@ pnpm dev          # then open http://localhost:5173/?demo=1&theme=dark&lang=en
 | `pnpm package:pi`                                                | Assemble the pi package (`packages/pi-webview/`, VSIXes and Chrome companion included)                                                                                                                                                                                                                                      |
 | `pnpm release -- --version 0.1.1 [--publish] [--tag <dist-tag>]` | Release prep: bump versione in entrambi i package.json, rebuild vsix+bundle+UI, `npm pack` di verifica. Con `--publish` esegue anche `npm publish --access public` e crea automaticamente il tag git `v<version>` + la GitHub release (idempotente: skip se tag/release già esistenti). Senza `--publish` non pubblica mai. |
 
+After a full build has already succeeded, `pnpm release -- --publish --publish-only`
+retries tarball verification and publication without rebuilding the artifacts.
+
 ## Companion integration
 
 The IDE integration is distributed as a **pi package** (installed through pi's own

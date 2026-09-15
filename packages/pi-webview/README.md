@@ -10,13 +10,14 @@ A rich WebView UI for [pi](https://pi.dev), the coding agent — a modern altern
 
 > ⚠️ **Experimental.** Actively developed. Things can break, change or disappear. Use it for exploration, not production.
 
-## Implemented IDE companions
+## Implemented companions
 
 - **VS Code**
 - **Visual Studio 2022**
 - **Visual Studio 2026**
+- **Google Chrome** — Side Panel companion; Chrome Web Store publication pending
 
-All three companions are included in the package and are automatically installed or updated when the corresponding IDE is present.
+The three IDE companions are included in the package and installed or updated automatically when the corresponding IDE is present. Chrome requires the installation confirmation imposed by the browser; `/piw install` opens the official Web Store flow when available, or the guided local installation during development.
 
 ## Standalone (browser)
 
@@ -33,6 +34,8 @@ piw --no-idle       # disables the automatic idle shutdown
 piw --background    # starts detached in the background and opens the browser
 piw -b              # same as --background
 piw -k              # stops the background bridge (same as --kill)
+piw --install-chrome # opens the official Chrome installation flow
+piw --uninstall-chrome # opens Chrome extension management for removal
 ```
 
 `piw` resolves `pi` on the `PATH` (on Windows the `pi.cmd` shim), spawns it with `--mode rpc` and opens `http://127.0.0.1:<port>/`. A new session starts in the shell directory from which `piw` was invoked—even when reusing an existing bridge—and falls back to the user home if that directory is unavailable. Exit with Ctrl+C.
@@ -40,6 +43,41 @@ piw -k              # stops the background bridge (same as --kill)
 The default bind remains loopback-only. `--ip <IPv4>` (also accepted as `--host <IPv4>`) adds a specific local address while preserving `127.0.0.1`; `--ip 0.0.0.0` listens on every IPv4 interface. For a non-loopback bind, `piw` prints authenticated remote-access links. Treat those links as secrets: anyone who has one can operate pi with your local user permissions. Use this only on a trusted network, preferably behind a host firewall or private VPN. If the active single-instance bridge has a different binding, stop it with `piw -k` before restarting it with the desired `--ip`.
 
 A reverse proxy on the same machine may keep `piw` loopback-only and forward HTTP/WebSocket traffic to it. The bridge trusts `X-Forwarded-For` and `X-Forwarded-Proto` only when the direct peer is loopback, so remote token checks remain active and HTTPS proxies receive a `wss://` URL.
+
+### Chrome Side Panel companion
+
+The Chrome companion runs the same chat UI in the browser’s Side Panel. It connects to a `piw` server that is already running and does not start or stop it.
+
+Its connection setting accepts a complete HTTP or HTTPS URL and defaults to:
+
+```text
+http://127.0.0.1:7361
+```
+
+Authenticated URLs printed by `piw-public`, including HTTP addresses over Tailscale, are supported. The complete URL can contain a private token and is stored only in Chrome’s local extension storage. Session-resume intents are stored separately, so the settings field always contains only the endpoint entered by the user. If the connection fails, the panel explains the problem before opening connection settings.
+
+A direct Side Panel connection starts new sessions in the operating-system user’s home directory. Resumed sessions keep the workspace stored in their session header, while an accepted handoff keeps the standalone session’s current workspace.
+
+When the standalone UI detects the enabled companion, it asks whether to move the current session into the Side Panel before loading config, sessions and history. An accepted handoff reuses the existing bridge channel and pi process; as soon as the bridge confirms atomic adoption, Chrome replaces the original standalone tab with a normal New Tab without waiting for the panel history loader.
+
+The composer shows the active page favicon and title, with the page URL on hover. URL and title remain prompt context even when no text is selected. A current selection is added to the same visible context chip.
+
+The agent gains two browser tools while running through `piw`:
+
+- `browser_page_dom` serializes the active page DOM. Large results are saved in a private temporary file on the piw machine;
+- `browser_page_screenshot` captures the visible viewport as an image result.
+
+The first tool call for each website origin during a Side Panel session asks for confirmation. Chrome-protected pages cannot be read or captured.
+
+Once the Web Store listing is approved, install it with:
+
+```bash
+piw --install-chrome
+```
+
+Chrome opens the Web Store listing and requires the normal browser confirmation. `piw --uninstall-chrome` opens Chrome’s extension manager for user-confirmed removal.
+
+Until the Web Store listing is approved, developers can run `pnpm package:chrome`, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select `dist/pi-webview-chrome`.
 
 ### Browser-local attachments
 
@@ -116,6 +154,8 @@ The bridge shuts down by itself after **1 minute with no open session** (no conn
 pi install npm:@magiusche/pi-webview
 ```
 
+On the first start after an install or update, pi-webview shows a one-time reminder of every available mode: Browser View (`piw` / `piw-public`), the automatically managed VS Code and Visual Studio companions, and the [Google Chrome Side Panel companion](https://chromewebstore.google.com/detail/hcdjfkcgojomhpmcfgipginghhlncamn). A second box shows the localized notes for that version from the bundled [`CHANGELOG.md`](https://github.com/MagiusCHE/pi-webview/blob/main/CHANGELOG.md). The reminder is stored outside conversation sessions and is not repeated for the same version.
+
 > **⚠️ The companions are checked at every pi start** — the check **blocks
 > startup until it finishes** (pi.dev / the webview never start with a pending
 > install). The check steps are silent while nothing is being done; the **first
@@ -136,7 +176,10 @@ pi install npm:@magiusche/pi-webview
 > - **Visual Studio** companion (Windows only): detected via `vswhere.exe`,
 >   installed per instance with `VSIXInstaller.exe /quiet /instanceIds:`
 >   (VS 2022 + 2026; VS 2019 is out of the manifest range) when VS is present;
->   disable the automatic check with `PI_WEBVIEW_AUTO_INSTALL=0` (explicit
+> - **Chrome** companion: `/piw install` opens the browser-managed installation
+>   flow. Chrome always requires the user’s confirmation; the package does not
+>   claim a silent installation;
+>   disable the automatic IDE check with `PI_WEBVIEW_AUTO_INSTALL=0` (explicit
 >   commands below are NOT affected).
 >   You can also install explicitly with **`/piw install`** (or reinstall
 >   with **`/piw reinstall`**) from a pi terminal: the command reports every
@@ -166,7 +209,7 @@ This package has **no npm install scripts** (nothing to approve, no `npm warn in
 
 It removes, in order:
 
-1. the IDE companion extension (`magiusche.pi-webview-ide`, if installed in VS Code — via `code --uninstall-extension`),
+1. the IDE companion extension (`magiusche.pi-webview-ide`, if installed in VS Code — via `code --uninstall-extension`), and opens Chrome’s extension manager so the browser companion can be removed with Chrome’s required confirmation;
 2. the `piw` and `piw-public` links on your `PATH` (`~/.local/bin/<name>` / `%APPDATA%\npm\<name>.cmd` — only when they point to this package, never user files), and
 3. the package itself from pi (`pi remove npm:@magiusche/pi-webview` — il prefisso `npm:` è richiesto, come per `pi install`).
 
@@ -179,7 +222,7 @@ If `pi remove` fails, or you already removed the package manually, do it by hand
 The extension and standalone bridge run the **same centralized companion logic** (`ensureCompanions` in `src/bridge/companions.ts`):
 
 - **`pi` start (the extension)**: (1) checks the **VS Code companion** against the bundled VSIX (installs/updates if missing or outdated; idempotent; the `code` CLI is resolved from `PATH` or known install locations, falling back to direct vsix extraction into the extensions folder when no CLI exists; silent when VS Code is not installed; disable with `PI_WEBVIEW_AUTO_INSTALL=0`), (2) checks the **Visual Studio companion** on Windows (vswhere → `VSIXInstaller /instanceIds:` for **each** VS 2022/2026 instance, silent when no VS or no bundled vsix) and (3) re-creates the **`piw` and `piw-public` links** on your `PATH` if either is missing (the package has no install scripts; it never touches user files, only its own links).
-- **`piw` start (standalone bridge)**: runs the **same check for both companions** (VS Code + Visual Studio), printing the outcome to the console.
+- **`piw` start (standalone bridge)**: runs the same silent IDE companion check (VS Code + Visual Studio), printing an outcome only when work is required. Browser installation remains an explicit, user-confirmed action.
 
 Every install/update/error is reported — in the pi.dev TUI and in the webview (via `ui.notify`, `pi-webview: …`) and on the `piw` console (`piw: …`). Only two cases stay silent: the target app is not installed, or the installed companion already matches the bundled VSIX.
 
@@ -216,7 +259,8 @@ The companion spawns `pi --mode rpc` and bridges the UI via `postMessage` (same 
 - Node.js >= 22.6
 - VS Code ^1.90 (for the VS Code companion)
 - Visual Studio 2022/2026 (for the VS companion, Windows only — the vsix is included in the package)
-- pi installed on the same machine
+- Google Chrome 116 or newer (for the Side Panel companion)
+- pi installed on the same machine as `piw`
 
 ## Features
 
@@ -226,7 +270,7 @@ The companion spawns `pi --mode rpc` and bridges the UI via `postMessage` (same 
 - **Sessions** — switch, rename, delete, filter by folder, fork across workspaces and create new sessions. Confirmed session-changing operations immediately show the loading overlay and lock the complete UI until the refreshed history is ready. Resume summaries include relative activity, compaction count and session-file size. Browser refresh resumes the same session in its saved workspace
 - **Composer controls** — model picker, thinking level and project trust. The trust chip always shows the effective status of the running pi process (trusted / untrusted): pi never prompts in RPC mode, so with no saved decision the project-local resources are ignored. Clicking it opens the same choices as the pi terminal prompt (Trust / Trust parent folder / Trust this session only / Do not trust / Do not trust this session only); a session-only choice is not persisted and starts pi with `--approve` / `--no-approve` for that process only. A new decision is applied by restarting pi: the restart is automatic on an idle session, otherwise the dialog asks for _Restart now_ / _Restart later_, and a red `!` next to the icon marks the pending restart until it happens
 - **Attachments** — paperclip picker, paste and drag and drop, multiple files and inline image previews. Browser mode selects files on the browser device and uploads their bytes to the bridge
-- **Editor selection context** — available in the VS Code sidebar. It is intentionally inhibited in editor-area panels because focusing a panel clears the active editor context
+- **Editor and browser context** — editor selection is available in the VS Code sidebar. The Chrome companion keeps active-page URL/title visible and attached to prompts, adds the current page selection, and offers consent-gated DOM and viewport-screenshot tools
 - **Built-in commands** — `/compact`, `/new` and `/name` map to their webview actions. Terminal-only commands are blocked locally with an explanatory chat message instead of being sent to the model
 - **Header controls** — session picker, connection state, reload and live update shield
 - **Automatic reconnect (browser)** — if the bridge is restarted or disappears, the page retries every 5 seconds while the window/tab is active (and immediately when it becomes visible again). When the bridge is back the status dot turns green again and the same session resumes without a manual page reload
@@ -239,6 +283,8 @@ CLI flags are **per-session**: they are stored as a `pi-webview-cli-flags` custo
 ## Security
 
 Pi extensions run with your full system permissions and can execute arbitrary code. Review the source before installing — as you would with any third-party package.
+
+The Chrome companion declares `<all_urls>` host access because Chrome requires it for asynchronous `captureVisibleTab` screenshots. The implementation still limits page context and tools to HTTP and HTTPS pages. URL/title and selected text are visible in the composer; DOM and screenshots require consent once per origin and Side Panel session. Chrome-protected pages remain inaccessible. See the [privacy policy](https://github.com/MagiusCHE/pi-webview/blob/main/PRIVACY.md).
 
 ## License
 

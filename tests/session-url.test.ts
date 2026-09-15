@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   bridgeUrlWithPageIntent,
+  pageUrlForNewSession,
   pageUrlForSession,
   sessionIdFromPageSearch,
 } from "../src/web/session-url.ts";
@@ -18,6 +19,18 @@ test("browser session URL exposes only the session id and preserves unrelated pa
   assert.equal(result.searchParams.get("session"), null);
   assert.equal(result.searchParams.get("theme"), "dark");
   assert.equal(result.hash, "#thread");
+});
+
+test("an empty browser session keeps only a new-session intent", () => {
+  const result = new URL(
+    pageUrlForNewSession(
+      "chrome-extension://test/index.html?s=stale&session=old&theme=dark",
+    ),
+  );
+  assert.equal(result.searchParams.get("new"), "1");
+  assert.equal(result.searchParams.get("s"), null);
+  assert.equal(result.searchParams.get("session"), null);
+  assert.equal(result.searchParams.get("theme"), "dark");
 });
 
 test("page session id becomes an internal websocket id intent", () => {

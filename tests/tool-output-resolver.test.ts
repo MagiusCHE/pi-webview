@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { TrailingToolOutputResolver } from "../src/web/tool-output-resolver.ts";
+import {
+  assistantOnlyReferencesToolOutput,
+  TrailingToolOutputResolver,
+} from "../src/web/tool-output-resolver.ts";
 
 type Output = { id: string; value: string };
 
@@ -23,6 +26,21 @@ test("a later visible assistant response consumes trailing tool results", () => 
   value.record({ id: "tool-1", value: "technical result" });
   value.assistantVisible();
   assert.deepEqual(value.settle(), []);
+});
+
+test("a short assistant pointer keeps the tool result visible as the response", () => {
+  const value = resolver();
+  value.record({ id: "tool-1", value: "important image" });
+  value.assistantVisible("Ecco lo screenshot della pagina.");
+  assert.deepEqual(value.settle(), [{ id: "tool-1", value: "important image" }]);
+
+  assert.equal(assistantOnlyReferencesToolOutput("Here's the result."), true);
+  assert.equal(
+    assistantOnlyReferencesToolOutput(
+      "Il risultato contiene tre record validi e due record non validi che richiedono una correzione.",
+    ),
+    false,
+  );
 });
 
 test("a later tool call makes the previous result intermediate", () => {

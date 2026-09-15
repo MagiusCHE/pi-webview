@@ -184,6 +184,22 @@ export type IdeRequest =
   | { type: "deleteSession"; path: string; id?: string }
   | { type: "notifyDesktop"; title: string; body: string; id?: string }
   | { type: "debugNotify"; count: number; id?: string }
+  | { type: "createBrowserHandoff"; id?: string }
+  | {
+      type: "browserToolResponse";
+      requestId: string;
+      result: {
+        ok: boolean;
+        operation?: "dom" | "screenshot";
+        url?: string;
+        title?: string;
+        documentId?: string;
+        html?: string;
+        imageDataUrl?: string;
+        error?: string;
+      };
+      id?: string;
+    }
   /** restart the pi process (same path as applying CLI flags): the webview
    *  gets connection_closed(reason restart) + pi_restarted and re-initializes
    *  transparently, resuming the current session */
@@ -434,7 +450,28 @@ export type IdeEvent =
       ranges?: SelectionRange[];
     }
   | { type: "selection_cleared"; reason?: string }
+  | { type: "browser_context_changed"; context: BrowserPageContext }
+  | { type: "browser_context_cleared"; reason?: string }
+  | { type: "browser_handoff_adopted" }
+  | {
+      type: "browser_tool_request";
+      requestId: string;
+      operation: "dom" | "screenshot";
+    }
   | { type: "at_mentioned"; filePath?: string; rangeText?: string };
+
+export interface BrowserSelectionRange {
+  text: string;
+}
+
+export interface BrowserPageContext {
+  url: string;
+  title: string;
+  faviconUrl?: string;
+  ranges: BrowserSelectionRange[];
+  documentId?: string;
+  restricted?: boolean;
+}
 
 export interface SelectionRange {
   text: string;

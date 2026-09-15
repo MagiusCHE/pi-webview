@@ -14,7 +14,7 @@
 // Disabled entirely with PI_WEBVIEW_AUTO_INSTALL=0 (checked here, so piw and
 // the pi extension behave the same).
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import {
   existsSync,
@@ -36,6 +36,10 @@ export const COMPANION_ID = "magiusche.pi-webview-ide";
 export const VSIX_ID = "PiWebview.Vs.4d433864-8ac9-420a-bc57-700940833fc6";
 export const VSCODE_VSIX_NAME = "pi-webview-ide.vsix";
 export const VS_VSIX_NAME = "pi-webview-visualstudio.vsix";
+export const CHROME_ZIP_NAME = "pi-webview-chrome.zip";
+export const CHROME_UNPACKED_DIR = "chrome";
+// Filled after the first Chrome Web Store draft upload assigns the permanent ID.
+export const CHROME_WEB_STORE_ID = "hcdjfkcgojomhpmcfgipginghhlncamn";
 export const AUTO_INSTALL_ENV = "PI_WEBVIEW_AUTO_INSTALL";
 
 // Reload signal for the IDE (multi-IDE contract, docs/concept/0004): when a
@@ -494,15 +498,119 @@ async function installedVsCompanionVersion(inst: VsInstance): Promise<string | n
   return pickHighestVersion(versions);
 }
 
+// --- Chrome companion guided installation ----------------------------------
+
+function chromeExecutableCandidates(): string[] {
+  if (process.platform === "win32") {
+    return [
+      join(
+        process.env.ProgramFiles ?? "",
+        "Google",
+        "Chrome",
+        "Application",
+        "chrome.exe",
+      ),
+      join(
+        process.env["ProgramFiles(x86)"] ?? "",
+        "Google",
+        "Chrome",
+        "Application",
+        "chrome.exe",
+      ),
+      join(
+        process.env.LOCALAPPDATA ?? "",
+        "Google",
+        "Chrome",
+        "Application",
+        "chrome.exe",
+      ),
+    ];
+  }
+  if (process.platform === "darwin") {
+    return ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"];
+  }
+  return [
+    "/usr/bin/google-chrome",
+    "/opt/google/chrome/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+  ];
+}
+
+export function resolveChromeExecutable(): string | null {
+  return chromeExecutableCandidates().find((path) => path && existsSync(path)) ?? null;
+}
+
+export function chromeStoreUrl(extensionId = CHROME_WEB_STORE_ID): string | null {
+  return extensionId ? `https://chromewebstore.google.com/detail/${extensionId}` : null;
+}
+
+function openChromeInstallPage(executable: string, url: string): void {
+  const child = spawn(executable, [url], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  child.on("error", () => {});
+  child.unref();
+}
+
 // --- unified entry point -----------------------------------------------------
 
 export interface CompanionNote {
-  target: "vscode" | "visualstudio";
-  kind: "installed" | "updated" | "error";
-  label?: string; // VS instance display name
-  version?: string; // target (vsix) version
+  target: "vscode" | "visualstudio" | "chrome";
+  kind: "installed" | "updated" | "action-required" | "error";
+  label?: string; // VS instance display name or an action target
+  version?: string; // target artifact version
   fromVersion?: string; // previous installed version
   error?: string;
+}
+
+export function openChromeExtensionsManager(): boolean {
+  const chrome = resolveChromeExecutable();
+  if (!chrome) return false;
+  openChromeInstallPage(chrome, "chrome://extensions/");
+  return true;
+}
+
+export function guideChromeCompanionInstall(
+  packageRoot: string,
+  onStep?: (step: string, action?: boolean) => void,
+): CompanionNote[] {
+  const step = (message: string, action = false) => onStep?.(message, action);
+  const chrome = resolveChromeExecutable();
+  if (!chrome) {
+    step("Chrome: browser not found (skip)");
+    return [];
+  }
+  const zip = join(packageRoot, "companion", CHROME_ZIP_NAME);
+  const unpacked = join(packageRoot, "companion", CHROME_UNPACKED_DIR);
+  if (!existsSync(zip) || !existsSync(join(unpacked, "manifest.json"))) {
+    step("Chrome: bundled companion unreadable or missing", true);
+    return [
+      {
+        target: "chrome",
+        kind: "error",
+        error: "bundled Chrome companion unreadable or missing",
+      },
+    ];
+  }
+  const storeUrl = chromeStoreUrl();
+  step(
+    storeUrl
+      ? "Chrome: opening the official Web Store install page…"
+      : "Chrome: opening extensions for guided local installation…",
+    true,
+  );
+  openChromeInstallPage(chrome, storeUrl ?? "chrome://extensions/");
+  return [
+    {
+      target: "chrome",
+      kind: "action-required",
+      label: storeUrl ?? unpacked,
+    },
+  ];
 }
 
 /**
@@ -528,6 +636,7 @@ export async function ensureCompanions(
     force?: boolean;
     onStep?: (step: string, action?: boolean) => void;
     ignoreAutoInstall?: boolean;
+    includeBrowser?: boolean;
   } = {},
 ): Promise<CompanionNote[]> {
   const force = opts.force === true;
@@ -750,6 +859,12 @@ export async function ensureCompanions(
     step("Visual Studio: companion vsix not bundled (skip)");
   }
 
+  // 3) Chrome companion. Normal desktop Chrome requires the user's consent;
+  // this branch is therefore used only by explicit install/reinstall commands.
+  if (opts.includeBrowser) {
+    notes.push(...guideChromeCompanionInstall(packageRoot, step));
+  }
+
   return notes;
 }
 
@@ -773,7 +888,22 @@ export function formatCompanionNotes(
     // add the context themselves, so strip it defensively here too
     const label = (n.label ?? "").replace(/^Visual Studio\s+/i, "");
     switch (n.kind) {
+      case "action-required":
+        return n.target === "chrome"
+          ? CHROME_WEB_STORE_ID
+            ? it
+              ? `${prefix}completa l'installazione del companion Chrome nella pagina Web Store aperta.`
+              : `${prefix}complete the Chrome companion installation in the opened Web Store page.`
+            : it
+              ? `${prefix}in chrome://extensions attiva “Modalità sviluppatore”, scegli “Carica estensione non pacchettizzata” e seleziona: ${n.label}`
+              : `${prefix}in chrome://extensions enable Developer mode, choose “Load unpacked”, and select: ${n.label}`
+          : `${prefix}${n.label ?? "companion"}: action required.`;
       case "installed":
+        if (n.target === "chrome") {
+          return it
+            ? `${prefix}companion Chrome installato (${n.version}).`
+            : `${prefix}Chrome companion installed (${n.version}).`;
+        }
         return n.target === "vscode"
           ? it
             ? `${prefix}companion VS Code installato (${n.version}).`
@@ -782,6 +912,11 @@ export function formatCompanionNotes(
             ? `${prefix}companion Visual Studio installato in ${label} (${n.version}).`
             : `${prefix}companion installed in Visual Studio (${label}, ${n.version}).`;
       case "updated":
+        if (n.target === "chrome") {
+          return it
+            ? `${prefix}companion Chrome aggiornato (${n.version}).`
+            : `${prefix}Chrome companion updated (${n.version}).`;
+        }
         // reinstalled (force): the from/to versions match — avoid the
         // confusing "0.2.3 → 0.2.3"
         if (n.fromVersion === n.version) {
@@ -801,6 +936,11 @@ export function formatCompanionNotes(
             ? `${prefix}companion Visual Studio aggiornato in ${label} (${n.fromVersion} → ${n.version}).`
             : `${prefix}companion updated in Visual Studio (${label}, ${n.fromVersion} → ${n.version}).`;
       case "error":
+        if (n.target === "chrome") {
+          return it
+            ? `${prefix}installazione companion Chrome fallita: ${n.error}`
+            : `${prefix}Chrome companion install failed: ${n.error}`;
+        }
         return n.target === "vscode"
           ? it
             ? `${prefix}installazione companion VS Code fallita: ${n.error}`

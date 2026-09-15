@@ -1,7 +1,7 @@
 {
   "name": "@magiusche/pi-webview",
-  "version": "0.3.2",
-  "description": "WebView UI for the pi coding agent, integrated into the IDE (VS Code first)",
+  "version": "0.4.0",
+  "description": "WebView UI for the pi coding agent: standalone, Chrome Side Panel and IDE companions",
   "type": "module",
   "license": "MIT",
   "author": "Magius(CHE)",
@@ -12,7 +12,9 @@
     "pi",
     "webview",
     "ide",
-    "vscode"
+    "vscode",
+    "chrome",
+    "side-panel"
   ],
   "repository": {
     "type": "git",
@@ -26,6 +28,8 @@
     "dist",
     "companion",
     "README.md",
+    "CHANGELOG.md",
+    "PRIVACY.md",
     "LICENSE"
   ],
   "pi": {

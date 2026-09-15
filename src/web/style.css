@@ -1592,10 +1592,26 @@ footer {
 
 .connect-panel {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
   max-width: var(--thread-max-width);
   margin-inline: auto;
+}
+.connect-title,
+.connect-error {
+  flex: 0 0 100%;
+}
+.connect-title {
+  color: var(--fg);
+  font-size: 13px;
+}
+.connect-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+.connect-error:empty {
+  display: none;
 }
 .connect-panel input {
   flex: 1;
@@ -1613,6 +1629,26 @@ footer {
 }
 .connect-panel input:focus {
   border-color: var(--accent);
+}
+.settings-browser-url {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 7px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--input-bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.settings-browser-url:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.settings-browser-actions {
+  justify-content: flex-start;
+  margin-top: 9px;
 }
 
 .input-box {
@@ -2260,6 +2296,20 @@ footer {
   box-sizing: border-box;
   cursor: default;
 }
+.browser-context-favicon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 7px;
+  border-radius: 3px;
+  vertical-align: -4px;
+}
+.browser-context-title {
+  color: var(--fg);
+}
+.browser-context-ranges {
+  margin-left: 5px;
+}
 .steer-head {
   display: flex;
   align-items: center;
@@ -2344,6 +2394,9 @@ footer {
   align-items: center;
   justify-content: center;
   z-index: 200;
+}
+.modal-backdrop.above-boot-loader {
+  z-index: 410;
 }
 .modal {
   max-width: 420px;

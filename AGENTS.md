@@ -10,6 +10,7 @@ webview è la UI.
 ## Stack
 
 - Extension host: TypeScript, VS Code Extension API
+- Browser companion: TypeScript, Chrome Manifest V3 + Side Panel API
 - Frontend webview: HTML/CSS/JS (TypeScript compilato), nessun framework
   deciso — da definire
 - Package manager: **pnpm**
@@ -25,13 +26,15 @@ webview è la UI.
 - `pnpm test` — test unitari (`node --test`, TS nativo, niente tsx)
 - `pnpm test:watch` — test in watch
 - `pnpm smoke` — smoke test del bridge contro pi reale (no LLM)
+- `pnpm smoke:chrome` — build/validazione pacchetto Chrome; prova anche il runtime Side Panel se la build Chrome locale consente `--load-extension`
 - `pnpm compile` — build UI + adapter VS Code (per F5)
 - `pnpm package:vscode` — vsix del companion VS Code (→ `dist/pi-webview-ide.vsix`)
 - `pnpm package:visualstudio` — build UI + vsix del companion Visual Studio (→ `dist/pi-webview-visualstudio.vsix`; su Linux richiede `node tools/setup-vs-wine.mjs` una tantum: prefix wine dedicato nel progetto + patch al VSSDK nel nuget cache)
-- `pnpm package:pi` — assembly del package pi (vsix VS Code + vsix Visual Studio + estensione pi-webview lato pi)
+- `pnpm package:chrome` — build companion Chrome Manifest V3 (→ `dist/pi-webview-chrome/` + ZIP)
+- `pnpm package:pi` — assembly del package pi (vsix VS Code + vsix Visual Studio + companion Chrome + estensione pi-webview lato pi)
 - `pnpm release -- --version 0.1.1 [--publish] [--tag <dist-tag>]` — prepara (bump versioni in entrambi i package.json, rebuild vsix+bundle+UI, `npm pack` di verifica); con `--publish` esegue anche `npm publish --access public` e crea in automatico il tag git `v<version>` + la GitHub release (idempotente: skip se già esistenti). Senza `--publish` non pubblica mai.
-- **Release — build completa obbligatoria**: quando l'utente chiede una nuova release, compilare sempre tutti gli artefatti sulla macchina corrente, incluso il VSIX Visual Studio tramite Wine quando si opera su Linux. Non riutilizzare artefatti preesistenti o obsoleti e non chiedere se si debba compilare tutto: la richiesta di release autorizza e richiede la build completa.
-- **Version bump — mai manuale**: cambiare la versione esclusivamente tramite `pnpm release -- --version <version> [--publish]`; non modificare mai a mano i campi `version` nei `package.json`.
+- **Release — build completa obbligatoria**: quando l'utente chiede una nuova release, compilare sempre tutti gli artefatti sulla macchina corrente, inclusi companion Chrome e VSIX Visual Studio tramite Wine quando si opera su Linux. Non riutilizzare artefatti preesistenti o obsoleti e non chiedere se si debba compilare tutto: la richiesta di release autorizza e richiede la build completa.
+- **Version bump — mai manuale**: cambiare la versione esclusivamente tramite `pnpm release -- --version <version> [--publish]`; non modificare mai a mano i campi `version` nei `package.json`. La preparazione sposta automaticamente le note bilingui da `CHANGELOG.md` / `[Unreleased]` alla nuova versione; una release senza note italiane e inglesi deve fallire.
 - `pnpm format` / `pnpm format:check` — prettier
 - `pnpm typecheck` — `tsc --noEmit`
 - Install: solo pnpm (bloccato da `preinstall` → `tools/check-package-manager.mjs`)
@@ -99,6 +102,7 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
 - `docs/plans/` + `docs/plans/done/` — piani (in corso / implementati)
 - `src/` — codice sorgente (committato): `ide/` (IDE bridge protocol),
   `bridge/` (standalone, con `pi-process.ts` condiviso), `web/` (UI),
+  `adapters/browser/` (core browser + companion Chrome Manifest V3),
   `adapters/vscode/` (companion VS Code), `adapters/visualstudio/`
   (companion Visual Studio, C# — build su Linux via wine,
   `tools/setup-vs-wine.mjs`)
@@ -139,6 +143,12 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   Quando serve aggiornare una sezione utente, aggiornare SOLO il README del
   pacchetto; cambi di design del packaging vanno riflessi in entrambi i punti
   dove necessario ma senza duplicare contenuto
+- **Reminder versione e changelog**: al primo avvio dopo install/update,
+  l'estensione mostra una sola volta per versione un warning localizzato con
+  tutte le modalità d'uso (Browser View, VS Code, Visual Studio, Chrome con URL
+  Web Store), seguito da un box con le note localizzate della stessa versione.
+  Lo stato globale vive in `~/.pi/pi-webview/release-reminder.json`, mai nella
+  sessione. `CHANGELOG.md` è bilingue e viene incluso nel package npm.
 - **README: matrice companion sempre aggiornata**. `README.md` (GitHub) e
   `packages/pi-webview/README.md` (npmjs) devono indicare chiaramente e in una
   lista dedicata tutti i companion IDE effettivamente implementati. Aggiornare
@@ -297,7 +307,7 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   refresh il bridge risolve l'id e riprende la sessione nel `cwd` salvato nel
   suo header
 - **Runtime**: `src/web/environment.ts` rileva la modalità all'avvio
-  (`standalone` | `vscode` | `ide`) per variare il comportamento in base
+  (`standalone` | `browser-extension` | `vscode` | `ide`) per variare il comportamento in base
   all'ambiente (es. trasporto, tema, futuri comportamenti IDE)
 
 ## Integrazione IDE (distribuzione)
@@ -337,6 +347,21 @@ companion** — modello pi-x-ide, ognuno solo se l'IDE è presente:
   della sidebar, spawna `pi --mode rpc` (env `PI_WEBVIEW_COMPANION=1`) e parla
   l'IDE bridge protocol via postMessage. Sviluppo dell'adapter: F5 con
   `launch.json` (Extension Development Host) dopo `pnpm compile`.
+- **Chrome**: companion Manifest V3 in `src/adapters/browser/chrome/`; la stessa
+  Web UI gira nel Side Panel e si collega a un `piw` già attivo tramite URL
+  HTTP(S) completo (default `http://127.0.0.1:7361`). Il contesto visibile
+  contiene favicon/titolo/URL e selezione. L'handoff viene proposto prima del
+  caricamento completo della standalone, riassocia il WebSocket allo stesso
+  channel/processo pi e chiude la tab sorgente subito dopo l'ack di adozione,
+  senza attendere il loader del pannello. Una connessione diretta avvia le nuove
+  sessioni nella home utente; resume e handoff conservano il workspace della
+  sessione.
+  I tool `browser_page_dom` e `browser_page_screenshot` usano un broker privato
+  per-channel solo loopback e chiedono consenso una volta per origine/sessione.
+  Chrome impone conferma utente per installazione e rimozione: `/piw install`
+  apre il Web Store quando `CHROME_WEB_STORE_ID` è valorizzato, altrimenti il
+  flusso Load unpacked. Firefox resta fuori dal perimetro fino al completamento
+  della pubblicazione Chrome.
 - **Visual Studio** (solo Windows): rilevamento istanze con `vswhere.exe`
   (`-products * -prerelease` — VS 2026/18.0 è preview e senza `-prerelease`
   l'istanza non viene listata; nessun filtro workload) + installazione

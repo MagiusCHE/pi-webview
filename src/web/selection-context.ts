@@ -1,7 +1,9 @@
-import type { SelectionRange } from "../ide/protocol.ts";
+import type { BrowserPageContext, SelectionRange } from "../ide/protocol.ts";
 
 const START = "<pi-webview-editor-selection>";
 const END = "</pi-webview-editor-selection>";
+const BROWSER_START = "<pi-webview-browser-context>";
+const BROWSER_END = "</pi-webview-browser-context>";
 
 export interface ActiveEditorSelection {
   filePath?: string;
@@ -45,11 +47,37 @@ export function attachEditorSelectionContext(
   return message ? `${message}\n\n${context}` : context;
 }
 
-/** Removes transport-only editor context before rendering or dequeuing text. */
+export function attachBrowserPageContext(
+  message: string,
+  context: BrowserPageContext | null,
+): string {
+  if (!context?.url) return message;
+  const payload = {
+    url: context.url,
+    title: context.title,
+    ...(context.ranges.length > 0
+      ? { ranges: context.ranges.map((range) => ({ text: range.text })) }
+      : {}),
+  };
+  const transportContext = [
+    BROWSER_START,
+    "The following browser page is currently active. Treat its URL, title, and optional selected text as context for the request:",
+    JSON.stringify(payload, null, 2),
+    BROWSER_END,
+  ].join("\n");
+  return message ? `${message}\n\n${transportContext}` : transportContext;
+}
+
+function stripBlock(message: string, start: string, end: string): string {
+  const escapedStart = start.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedEnd = end.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return message.replace(
+    new RegExp(`\\n*${escapedStart}\\n[\\s\\S]*?\\n${escapedEnd}`, "g"),
+    "",
+  );
+}
+
+/** Removes transport-only editor and browser context before rendering or dequeuing. */
 export function stripEditorSelectionContext(message: string): string {
-  const escapedStart = START.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const escapedEnd = END.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return message
-    .replace(new RegExp(`\\n*${escapedStart}\\n[\\s\\S]*?\\n${escapedEnd}`, "g"), "")
-    .trim();
+  return stripBlock(stripBlock(message, START, END), BROWSER_START, BROWSER_END).trim();
 }

@@ -25,3 +25,12 @@ export function pageUrlForSession(currentUrl: string, sessionId: string): string
   url.searchParams.set("s", sessionId);
   return url.toString();
 }
+
+export function pageUrlForNewSession(currentUrl: string): string {
+  const url = new URL(currentUrl);
+  url.searchParams.delete("s");
+  url.searchParams.delete("session");
+  url.searchParams.delete("launch");
+  url.searchParams.set("new", "1");
+  return url.toString();
+}

@@ -7,8 +7,12 @@ out/
 # Coverage
 coverage/
 
-# VS Code extension build
+# Companion extension builds
 *.vsix
+/packages/pi-webview/companion/*.zip
+/packages/pi-webview/companion/chrome/
+/packages/pi-webview/CHANGELOG.md
+/packages/pi-webview/PRIVACY.md
 
 # npm pack output (release.mjs allega e pulisce il .tgz)
 *.tgz

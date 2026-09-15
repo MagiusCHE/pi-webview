@@ -23,18 +23,20 @@ The terminal TUI of pi limits interaction: no rich markdown, no proper mouse/tex
 - **VS Code**
 - **Visual Studio 2022**
 - **Visual Studio 2026**
+- **Google Chrome** — Side Panel companion; Chrome Web Store publication pending
 
 ### What works today
 
 - **Shared chat UI**: streaming markdown, thinking with elapsed time, collapsible tool cards, copy actions and smart auto-scroll in the browser and supported IDEs
 - **Optional Agentic thinking view**: groups consecutive thoughts and tool calls, reports live `thought`, `read`, `write`, `bash` and `tools` counters, avoids empty assistant wrappers, and starts a fresh block after visible text, `ask_user`, compaction or an injected steering message
 - **Final tool outputs**: when an agent run ends on tool results without a later visible assistant response, the final tool batch becomes the chat response outside the Agentic block. Text, JSON, fenced code, images, files, audio/video and resource links use type-aware renderers, with the same result after resume
-- **IDE integration**: the same UI in **VS Code**, **Visual Studio 2022** and **Visual Studio 2026**, distributed as a pi package with companion auto-install. VS Code includes editor selection context and native dialogs; selection is intentionally limited to the sidebar view
+- **IDE and browser integration**: the same UI in **VS Code**, **Visual Studio 2022/2026** and a **Chrome Side Panel**. Chrome shows the active page’s favicon/title/URL and selection, can atomically move an existing standalone session into the panel, and exposes consent-gated DOM and viewport-screenshot tools to the agent
 - **Sessions**: folder filtering, switching, forking across workspaces, renaming, deletion and creation, with an immediate full-UI loading lock during transitions; resume summaries include activity, compactions and session-file size
 - **Browser-safe attachments**: paste, drag and drop, and a paperclip picker. Standalone selection happens on the browser device, then uploads the bytes to the bridge instead of browsing the bridge host filesystem
 - **Header operations**: host-level pi reload, an always-visible live update shield, session controls and connection state
 - **Extension UI**: `setStatus`/`setWidget` output rendered live; status placement, compactness and hidden sources are configurable
 - **Themes and localization**: light/dark/system themes and Italian/English UI
+- **Version reminders**: the first start after an install or update lists every available mode, includes the permanent Chrome Web Store URL and shows localized notes from the bundled changelog
 - **pi.dev controls**: staged settings and dynamic per-session CLI flags, applied through transparent pi restarts
 - **RPC safety**: supported built-in slash commands are handled by the client so terminal-only commands cannot leak into model prompts
 - **Extensibility base**: `pi --mode rpc` bridge and a transport-agnostic UI using WebSocket, VS Code `postMessage` or Visual Studio WebView2
@@ -45,7 +47,7 @@ The terminal TUI of pi limits interaction: no rich markdown, no proper mouse/tex
 - **Extension UI protocol — remaining**: editor dialogs, notifications parity, lazy header/footer for extension UI (some require a small patch to the pi core — concept `docs/concept/0003`)
 - **Code highlighting** in markdown blocks, better diffs
 - **CI / test matrix** on Linux/macOS/Windows (VSIX build and release pipeline already in place: `pnpm release`)
-- **More locales** and more IDE adapters (e.g. open the bridge in a browser from JetBrains)
+- **More locales**, the Firefox companion after Chrome Web Store publication, and more IDE adapters
 
 ## Architecture
 
@@ -57,7 +59,7 @@ The terminal TUI of pi limits interaction: no rich markdown, no proper mouse/tex
                │ WebSocket (standalone) / postMessage (IDE webview)
 ┌──────────────▼───────────────────────────────────┐
 │ Host adapter (one per environment)               │
-│ standalone · VS Code · Visual Studio 2022/2026   │
+│ standalone · Chrome · VS Code · Visual Studio    │
 └──────────────┬───────────────────────────────────┘
                │ JSONL stdio
 ┌──────────────▼───────────────────────────────────┐
@@ -106,15 +108,17 @@ pnpm dev          # then open http://localhost:5173/?demo=1&theme=dark&lang=en
 | `pnpm test`                                                      | Unit tests (`node --test`, native TS)                                                                                                                                                                                                                                                                                       |
 | `pnpm test:watch`                                                | Tests in watch mode                                                                                                                                                                                                                                                                                                         |
 | `pnpm smoke`                                                     | Bridge smoke test against a real pi (no LLM)                                                                                                                                                                                                                                                                                |
+| `pnpm smoke:chrome`                                              | Build and validate the Chrome package; also exercise the Side Panel when the installed Chrome build permits command-line extension loading                                                                                                                                                                                  |
 | `pnpm format` / `pnpm format:check`                              | Prettier                                                                                                                                                                                                                                                                                                                    |
 | `pnpm typecheck`                                                 | `tsc --noEmit`                                                                                                                                                                                                                                                                                                              |
 | `pnpm compile`                                                   | Build UI + VS Code adapter (for F5)                                                                                                                                                                                                                                                                                         |
 | `pnpm package:vscode`                                            | Build the VS Code companion → `dist/pi-webview-ide.vsix`                                                                                                                                                                                                                                                                    |
 | `pnpm package:visualstudio`                                      | Build the Visual Studio companion → `dist/pi-webview-visualstudio.vsix` (Linux: requires `node tools/setup-vs-wine.mjs` once — project-local wine prefix + VSSDK cache patches)                                                                                                                                             |
-| `pnpm package:pi`                                                | Assemble the pi package (`packages/pi-webview/`, both vsix included)                                                                                                                                                                                                                                                        |
+| `pnpm package:chrome`                                            | Build the Chrome companion → `dist/pi-webview-chrome/` and `dist/pi-webview-chrome.zip`                                                                                                                                                                                                                                     |
+| `pnpm package:pi`                                                | Assemble the pi package (`packages/pi-webview/`, VSIXes and Chrome companion included)                                                                                                                                                                                                                                      |
 | `pnpm release -- --version 0.1.1 [--publish] [--tag <dist-tag>]` | Release prep: bump versione in entrambi i package.json, rebuild vsix+bundle+UI, `npm pack` di verifica. Con `--publish` esegue anche `npm publish --access public` e crea automaticamente il tag git `v<version>` + la GitHub release (idempotente: skip se tag/release già esistenti). Senza `--publish` non pubblica mai. |
 
-## IDE integration (VS Code first, Visual Studio too)
+## Companion integration
 
 The IDE integration is distributed as a **pi package** (installed through pi's own
 extension system, not the VS Code marketplace). The companion extensions are
@@ -122,8 +126,11 @@ ensured **at every pi start**: the pi-side extension installs/updates the **VS
 Code companion** from the bundled VSIX if missing or outdated (idempotent,
 silent when `code` is not on `PATH`, disable with `PI_WEBVIEW_AUTO_INSTALL=0`),
 and the **Visual Studio companion** (Windows only) via vswhere + VSIXInstaller
-when VS is present; `piw` runs the **same centralized check** (one shared
-module, `src/bridge/companions.ts`) at its startup. The same
+when VS is present. The package also includes the **Chrome Side Panel** bundle;
+the explicit `/piw install` flow opens the Web Store listing when its permanent
+ID is configured, or Chrome’s guided Load unpacked flow during development.
+`piw` runs the same centralized companion check (one shared module,
+`src/bridge/companions.ts`) at its startup. The same
 pi-side extension creates the `piw` link on the PATH (the package has no install
 scripts).
 
@@ -158,6 +165,7 @@ It stores global presentation preferences: theme, locale, history limit, notific
 
 ```
 src/
+  adapters/   # VS Code, Visual Studio and browser companions
   ide/        # shared protocol: IDE bridge, RPC helpers, events mapping
   bridge/     # standalone Node bridge (pi spawn, WS, sessions, trust, attachments)
   web/        # the UI (vanilla TS): chat, markdown, i18n, theme, icons

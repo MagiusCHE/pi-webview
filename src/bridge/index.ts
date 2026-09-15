@@ -22,7 +22,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, extname, join, normalize } from "node:path";
 import { randomBytes } from "node:crypto";
-import { WebSocketServer, WebSocket } from "ws";
+import { WebSocketServer, WebSocket, type RawData } from "ws";
 import type {
   CliFlags,
   Frame,
@@ -57,6 +57,14 @@ import { fetchProviderBalance } from "./balance.ts";
 import { revealFileInSystemManager } from "./open-file.ts";
 import { clearLock } from "./lock.ts";
 import { normalizeLaunchCwd } from "./launch-context.ts";
+import { BrowserHandoffRegistry } from "./browser-handoff.ts";
+import { browserDefaultWorkspace } from "./browser-workspace.ts";
+import { redactDebugFrame } from "./debug-log.ts";
+import {
+  BrowserToolBroker,
+  type BrowserToolOperation,
+  type BrowserToolPayload,
+} from "./browser-control.ts";
 import {
   LOOPBACK_IP,
   bindHosts,
@@ -91,7 +99,7 @@ let notifySeq = 0;
 // pi-webview package version (the "piw"): climbs from dist/ (bridge.cjs)
 // to the nearest package.json (in dev: src/bridge → repo root)
 function packageVersion(): string | null {
-  let dir = __dirname;
+  let dir = dirname(process.argv[1] ?? process.cwd());
   for (let i = 0; i < 4; i++) {
     try {
       const json = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8")) as {
@@ -206,7 +214,7 @@ function serveStatic(root: string, req: IncomingMessage, res: ServerResponse): v
 
 // intent declared by the client in the WebSocket query
 type Intent =
-  | { kind: "default" }
+  | { kind: "default"; workspaceDir?: string }
   | { kind: "new"; workspaceDir?: string }
   | { kind: "session"; sessionPath: string }
   | { kind: "invalid-session"; sessionId: string };
@@ -234,7 +242,8 @@ function parseIntent(url: URL, launchIntents: Map<string, LaunchIntent>): Intent
     }
     return { kind: "new" };
   }
-  return { kind: "default" };
+  const workspaceDir = browserDefaultWorkspace(url.searchParams.get("client"), homedir());
+  return workspaceDir ? { kind: "default", workspaceDir } : { kind: "default" };
 }
 
 function main(): void {
@@ -258,6 +267,7 @@ function main(): void {
   const launchIntents = new Map<string, LaunchIntent>();
   const mockIde = opts.mockIde ? createMockIde((m) => console.error(m)) : null;
   const configStore = new ConfigStore();
+  const browserControls = new Map<string, Channel>();
   let availableCliFlagsPromise: ReturnType<typeof fetchAvailableCliFlags> | null = null;
   const availableCliFlags = () => {
     if (!availableCliFlagsPromise) {
@@ -283,6 +293,55 @@ function main(): void {
   }
   const handleHttp = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? "/", "http://localhost");
+    if (url.pathname === "/internal/browser-tool" && req.method === "POST") {
+      if (!isLoopbackAddress(req.socket.remoteAddress)) {
+        res.writeHead(403).end("forbidden");
+        return;
+      }
+      const capability = req.headers["x-pi-webview-browser-capability"];
+      const channel =
+        typeof capability === "string" ? browserControls.get(capability) : undefined;
+      if (!channel) {
+        res.writeHead(401).end("unauthorized");
+        return;
+      }
+      try {
+        let body = "";
+        for await (const chunk of req) {
+          body += chunk.toString();
+          if (body.length > 1024) throw new Error("request too large");
+        }
+        const data = JSON.parse(body) as { operation?: unknown };
+        if (data.operation !== "dom" && data.operation !== "screenshot") {
+          res.writeHead(400).end("invalid browser operation");
+          return;
+        }
+        const controller = new AbortController();
+        req.once("aborted", () => controller.abort());
+        res.once("close", () => {
+          if (!res.writableEnded) controller.abort();
+        });
+        const result = await channel.requestBrowserTool(
+          data.operation,
+          controller.signal,
+        );
+        if (res.destroyed) return;
+        res.writeHead(result.ok ? 200 : 502, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        res.end(JSON.stringify(result));
+      } catch (error) {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+      return;
+    }
     if (url.pathname === "/health") {
       // used by `piw` to validate the lock (single-instance)
       if (url.searchParams.get("token") === token) {
@@ -339,7 +398,13 @@ function main(): void {
         req.headers["x-forwarded-proto"],
       );
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ wsUrl: `${wsProtocol}://${authority}?token=${token}` }));
+      res.end(
+        JSON.stringify({
+          product: "pi-webview",
+          protocolVersion: 1,
+          wsUrl: `${wsProtocol}://${authority}?token=${token}`,
+        }),
+      );
       return;
     }
     if (opts.serve) {
@@ -352,6 +417,7 @@ function main(): void {
   // --- WebSocket with token authentication ---------------------------------
   const wss = new WebSocketServer({ noServer: true });
   const channels = new Set<Channel>();
+  const browserHandoffs = new BrowserHandoffRegistry<Channel>();
 
   const createHttpServer = (): Server => {
     const server = createServer((req, res) => void handleHttp(req, res));
@@ -374,6 +440,12 @@ function main(): void {
     ws: WebSocket;
     workspaceDir: string;
     pi: PiProcess;
+    controlCapability: string;
+    requestBrowserTool: (
+      operation: BrowserToolOperation,
+      signal?: AbortSignal,
+    ) => Promise<BrowserToolPayload>;
+    attach: (ws: WebSocket) => void;
     dispose: () => void;
   }
 
@@ -381,10 +453,36 @@ function main(): void {
     ws: WebSocket,
     intent: Exclude<Intent, { kind: "invalid-session" }>,
   ): Channel => {
+    let activeWs = ws;
+    const controlCapability = randomBytes(24).toString("hex");
+    const browserToolBroker = new BrowserToolBroker();
+    const extensionUiState = new Map<string, Frame>();
+    const cacheExtensionUiState = (frame: Frame): void => {
+      if (frame.channel !== "rpc") return;
+      const payload = frame.payload as {
+        type?: unknown;
+        method?: unknown;
+        statusKey?: unknown;
+        widgetKey?: unknown;
+      };
+      if (payload.type !== "extension_ui_request" || typeof payload.method !== "string") {
+        return;
+      }
+      const key =
+        payload.method === "setStatus" && typeof payload.statusKey === "string"
+          ? `status:${payload.statusKey}`
+          : payload.method === "setWidget" && typeof payload.widgetKey === "string"
+            ? `widget:${payload.widgetKey}`
+            : payload.method === "setTitle" || payload.method === "set_editor_text"
+              ? payload.method
+              : null;
+      if (key) extensionUiState.set(key, frame);
+    };
     const send = (frame: Frame) => {
+      cacheExtensionUiState(frame);
       const text = JSON.stringify(frame);
-      log(`→ ui ${text.slice(0, 200)}`);
-      if (ws.readyState === WebSocket.OPEN) ws.send(text);
+      log(`→ ui ${redactDebugFrame(frame).slice(0, 200)}`);
+      if (activeWs.readyState === WebSocket.OPEN) activeWs.send(text);
     };
 
     const respond = (id: string, payload: Omit<IdeResponse, "id">) =>
@@ -398,7 +496,7 @@ function main(): void {
     // the directory where the long-lived bridge happened to start.
     let workspaceDir = currentSessionPath
       ? (getSessionInfo(currentSessionPath).cwd ?? process.cwd())
-      : intent.kind === "new" && intent.workspaceDir
+      : "workspaceDir" in intent && intent.workspaceDir
         ? intent.workspaceDir
         : process.cwd();
     // Project trust of the running pi process: a change is applied by a
@@ -438,7 +536,12 @@ function main(): void {
         },
         {
           cwd,
-          env: { ...process.env, PI_WEBVIEW: "1" },
+          env: {
+            ...process.env,
+            PI_WEBVIEW: "1",
+            PI_WEBVIEW_BROWSER_CONTROL_URL: `http://${LOOPBACK_IP}:${port}/internal/browser-tool`,
+            PI_WEBVIEW_BROWSER_CONTROL_CAPABILITY: controlCapability,
+          },
           args: [
             ...(sessionPath ? ["--session", sessionPath] : []),
             ...(sessionPath ? sessionModelArgs(sessionPath) : []),
@@ -815,6 +918,21 @@ function main(): void {
         respond(req.id ?? "", { ok: true });
         return;
       }
+      if (req.type === "browserToolResponse") {
+        const accepted = browserToolBroker.resolve(req.requestId, req.result);
+        respond(req.id ?? "", {
+          ok: accepted,
+          ...(accepted ? {} : { error: "browser tool request is no longer pending" }),
+        });
+        return;
+      }
+      if (req.type === "createBrowserHandoff") {
+        respond(req.id ?? "", {
+          ok: true,
+          data: browserHandoffs.create(channel),
+        });
+        return;
+      }
       if (req.type === "forkSession") {
         try {
           const res = forkSession(req.sourcePath, workspaceDir);
@@ -831,7 +949,7 @@ function main(): void {
         mockIde.handle(req, (out) => {
           const text = JSON.stringify(out);
           log(`→ ui ${text.slice(0, 200)}`);
-          if (ws.readyState === WebSocket.OPEN) ws.send(text);
+          if (activeWs.readyState === WebSocket.OPEN) activeWs.send(text);
         });
       } else {
         respond(req.id ?? "", {
@@ -841,7 +959,7 @@ function main(): void {
       }
     };
 
-    ws.on("message", (data) => {
+    const handleSocketMessage = (data: RawData): void => {
       let frame: Frame;
       try {
         frame = JSON.parse(data.toString()) as Frame;
@@ -868,20 +986,72 @@ function main(): void {
         return;
       }
       log("unknown channel, ignored");
-    });
-
-    const dispose = (): void => {
-      pi.dispose();
-      channels.delete(channel);
     };
-    ws.on("close", () => {
-      log("channel closed (tab closed)");
-      dispose();
-    });
-    ws.on("error", dispose);
 
-    const channel: Channel = { ws, workspaceDir, pi, dispose };
+    let disposed = false;
+    let channel: Channel;
+    const dispose = (): void => {
+      if (disposed) return;
+      disposed = true;
+      pi.dispose();
+      browserToolBroker.dispose();
+      browserControls.delete(controlCapability);
+      channels.delete(channel);
+      browserHandoffs.removeChannel(channel);
+    };
+    const bindSocket = (socket: WebSocket): void => {
+      socket.on("message", handleSocketMessage);
+      socket.on("close", () => {
+        if (socket !== activeWs) return;
+        log("channel closed (active client closed)");
+        dispose();
+      });
+      socket.on("error", () => {
+        if (socket === activeWs) dispose();
+      });
+    };
+    const attach = (nextWs: WebSocket): void => {
+      if (disposed) {
+        nextWs.close(1011, "channel closed");
+        return;
+      }
+      const previous = activeWs;
+      activeWs = nextWs;
+      channel.ws = nextWs;
+      bindSocket(nextWs);
+      send({ channel: "ide", payload: { type: "browser_handoff_adopted" } });
+      for (const frame of extensionUiState.values()) send(frame);
+      if (previous.readyState === WebSocket.OPEN) previous.close(1000, "handoff");
+      log("channel adopted by browser companion");
+    };
+
+    const requestBrowserTool = (operation: BrowserToolOperation, signal?: AbortSignal) =>
+      browserToolBroker.request(
+        operation,
+        ({ requestId, operation: requested }) => {
+          send({
+            channel: "ide",
+            payload: {
+              type: "browser_tool_request",
+              requestId,
+              operation: requested,
+            },
+          });
+        },
+        signal,
+      );
+    channel = {
+      ws,
+      workspaceDir,
+      pi,
+      controlCapability,
+      requestBrowserTool,
+      attach,
+      dispose,
+    };
+    bindSocket(ws);
     channels.add(channel);
+    browserControls.set(controlCapability, channel);
     log(`client connected (total channels: ${channels.size})`);
     return channel;
   };
@@ -915,6 +1085,16 @@ function main(): void {
       activeConnections--;
       if (activeConnections === 0) startIdleTimer();
     });
+    const handoffTicket = url.searchParams.get("handoff");
+    if (handoffTicket) {
+      const handoffChannel = browserHandoffs.consume(handoffTicket);
+      if (!handoffChannel || !channels.has(handoffChannel)) {
+        ws.close(1008, "invalid or expired handoff");
+        return;
+      }
+      handoffChannel.attach(ws);
+      return;
+    }
     const intent = parseIntent(url, launchIntents);
     if (intent.kind === "invalid-session") {
       ws.send(

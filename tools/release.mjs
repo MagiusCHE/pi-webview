@@ -20,11 +20,13 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { releaseChangelog } from "./changelog.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pkgRoot = join(root, "package.json");
 const pkgPi = join(root, "packages", "pi-webview", "package.json");
 const piDir = join(root, "packages", "pi-webview");
+const changelogPath = join(root, "CHANGELOG.md");
 
 // --- arguments ---
 const argv = process.argv.slice(2);
@@ -55,12 +57,24 @@ if (!version && !publish) {
 
 // --- 1) version bump (if requested) ---
 if (version) {
+  const changelogBefore = readFileSync(changelogPath, "utf-8");
+  const releasedChangelog = releaseChangelog(
+    changelogBefore,
+    version,
+    new Date().toISOString().slice(0, 10),
+  );
   for (const file of [pkgRoot, pkgPi]) {
     const json = JSON.parse(readFileSync(file, "utf-8"));
     const before = json.version;
     json.version = version;
     writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
     console.log(`✓ ${relative(root, file)}: ${before} → ${version}`);
+  }
+  if (releasedChangelog !== changelogBefore) {
+    writeFileSync(changelogPath, releasedChangelog);
+    console.log(`✓ CHANGELOG.md: Unreleased → ${version}`);
+  } else {
+    console.log(`→ CHANGELOG.md already contains ${version}`);
   }
 } else {
   const cur = JSON.parse(readFileSync(pkgPi, "utf-8")).version;
@@ -74,7 +88,9 @@ execSync("node tools/build-ide-vsix.mjs", { cwd: root, stdio: "inherit" });
 // any Wine/VSSDK failure aborts the release instead of reusing a stale VSIX.
 console.log("\n→ build companion Visual Studio (vsix)…");
 execSync("node tools/build-vs-vsix.mjs", { cwd: root, stdio: "inherit" });
-console.log("→ build pacchetto pi (bundle + copia vsix)…");
+console.log("\n→ build companion Chrome (zip)…");
+execSync("node tools/build-chrome-extension.mjs", { cwd: root, stdio: "inherit" });
+console.log("→ build pacchetto pi (bundle + copia companion)…");
 execSync("node tools/build-addon.mjs", { cwd: root, stdio: "inherit" });
 
 // --- 3) tarball check ---

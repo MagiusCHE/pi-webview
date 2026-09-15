@@ -50,6 +50,13 @@ export class SteeringAttachmentTracker<T> {
     return this.snapshot();
   }
 
+  /** Remove a queue row when pi emits its authoritative delivered user message. */
+  delivered(message: string): QueuedAttachmentEntry<T>[] {
+    const index = this.current.findIndex((entry) => entry.message === message);
+    if (index >= 0) this.current.splice(index, 1);
+    return this.snapshot();
+  }
+
   snapshot(): QueuedAttachmentEntry<T>[] {
     return this.current.map((entry) => ({
       message: entry.message,

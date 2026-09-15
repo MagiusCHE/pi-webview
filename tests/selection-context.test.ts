@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  attachBrowserPageContext,
   attachEditorSelectionContext,
   stripEditorSelectionContext,
   type ActiveEditorSelection,
@@ -45,4 +46,27 @@ test("selection context: no active ranges leaves the prompt untouched", () => {
 
 test("selection context: stripping leaves ordinary user text unchanged", () => {
   assert.equal(stripEditorSelectionContext("ordinary text"), "ordinary text");
+});
+
+test("browser context: URL and title are attached even without a selection", () => {
+  const result = attachBrowserPageContext("Summarize this page", {
+    url: "https://example.test/article?private=no",
+    title: "Example article",
+    ranges: [],
+  });
+  assert.match(result, /<pi-webview-browser-context>/);
+  assert.match(result, /https:\/\/example\.test\/article\?private=no/);
+  assert.match(result, /Example article/);
+  assert.doesNotMatch(result, /"ranges"/);
+  assert.equal(stripEditorSelectionContext(result), "Summarize this page");
+});
+
+test("browser context: selected ranges retain their exact text", () => {
+  const result = attachBrowserPageContext("Explain", {
+    url: "https://example.test/",
+    title: "Example",
+    ranges: [{ text: "first exact range" }, { text: "second\nrange" }],
+  });
+  assert.match(result, /first exact range/);
+  assert.match(result, /second\\nrange/);
 });

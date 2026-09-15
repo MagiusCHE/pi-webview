@@ -207,6 +207,28 @@
             </div>
           </div>
         </div>
+        <div id="settings-browser-section" class="settings-section" hidden>
+          <div class="settings-section-title" id="settings-browser-title">
+            Connessione browser
+          </div>
+          <label id="settings-browser-url-label" for="settings-browser-url"
+            >URL completo del server piw</label
+          >
+          <input
+            id="settings-browser-url"
+            class="field-text settings-browser-url"
+            type="url"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <div class="settings-note" id="settings-browser-url-note"></div>
+          <div class="settings-row settings-browser-actions">
+            <button id="settings-browser-save" class="btn-primary" type="button">
+              Applica
+            </button>
+            <span id="settings-browser-status" class="settings-hint" role="status"></span>
+          </div>
+        </div>
         <!-- 3. pi.dev settings (via /settings, from pi.dev) → dynamic facade -->
         <div class="settings-section">
           <div class="settings-section-title" id="settings-pidev-title">pi.dev</div>
@@ -271,7 +293,15 @@
 
     <footer>
       <div id="connect-panel" class="connect-panel" hidden>
-        <input id="connect-url" type="text" placeholder="ws://127.0.0.1:PORT?token=…" />
+        <strong id="connect-title" class="connect-title">Connessione piw</strong>
+        <span id="connect-error" class="connect-error" role="alert"></span>
+        <input
+          id="connect-url"
+          type="url"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="http://127.0.0.1:7361"
+        />
         <button id="btn-connect">Connetti</button>
       </div>
       <!-- context/slot badge: bar ADJACENT to the inputbox (above, no gap),

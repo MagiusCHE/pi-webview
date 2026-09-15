@@ -40,6 +40,16 @@ test("queue reconciliation drops delivered head items and preserves duplicate or
   ]);
 });
 
+test("an authoritative delivered image-only message clears its visible queue row", () => {
+  const tracker = new SteeringAttachmentTracker<Attachment>();
+  const attachment = image("image-only.png");
+  tracker.stage("", [attachment]);
+  tracker.update([""]);
+
+  assert.deepEqual(tracker.delivered(""), []);
+  assert.deepEqual(tracker.snapshot(), []);
+});
+
 test("queue ordering associates attachments after pi transforms message text", () => {
   const tracker = new SteeringAttachmentTracker<Attachment>();
   const attachment = image("prompt.png");

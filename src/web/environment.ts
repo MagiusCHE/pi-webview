@@ -4,19 +4,26 @@
 // - "ide"        → other IDE (future: they inject a global or an ?ide=…)
 // Allows varying the behavior based on the environment (concept 0002 D2/D3).
 
-export type RuntimeMode = "standalone" | "vscode" | "ide";
+export type RuntimeMode = "standalone" | "browser-extension" | "vscode" | "ide";
 
 export interface RuntimeInfo {
   mode: RuntimeMode;
   isIDE: boolean;
   isVsCode: boolean;
+  isBrowserExtension: boolean;
 }
 
 function detectMode(): RuntimeMode {
   const win = window as unknown as {
     acquireVsCodeApi?: unknown;
-    chrome?: { webview?: unknown };
+    chrome?: { runtime?: { id?: string }; webview?: unknown };
   };
+  if (
+    location.protocol === "chrome-extension:" &&
+    typeof win.chrome?.runtime?.id === "string"
+  ) {
+    return "browser-extension";
+  }
   if (typeof win.acquireVsCodeApi === "function") return "vscode";
   // WebView2 (Visual Studio adapter, concept 0005): same "ide" channel
   if (win.chrome?.webview) return "ide";
@@ -30,8 +37,9 @@ export const runtime: RuntimeInfo = (() => {
   const mode = detectMode();
   return {
     mode,
-    isIDE: mode !== "standalone",
+    isIDE: mode === "vscode" || mode === "ide",
     isVsCode: mode === "vscode",
+    isBrowserExtension: mode === "browser-extension",
   };
 })();
 

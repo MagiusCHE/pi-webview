@@ -42,6 +42,7 @@ import {
   ensureCompanions,
   formatCompanionNotes,
   companionReloadHints,
+  openChromeExtensionsManager,
 } from "../../src/bridge/companions.ts";
 import { ConfigStore } from "../../src/bridge/config.ts";
 import { resolveDirectNode } from "../../src/bridge/spawn.ts";
@@ -51,6 +52,14 @@ import {
 } from "../../src/ide/update-errors.ts";
 import { checkPiUpdate, locatePi } from "./lib/update-check.ts";
 import type { UpdateAvailable } from "./lib/update-check.ts";
+import { registerBrowserTools, type BrowserToolPiApi } from "./lib/browser-tools.ts";
+import {
+  extractReleaseNotes,
+  formatChangelogReminder,
+  formatWaysReminder,
+  ReleaseReminderStore,
+  type ReminderLocale,
+} from "./lib/release-reminder.ts";
 import {
   shouldAllowRemoteNpmUpdates,
   shouldDangerouslyAllowAllNpmScripts,
@@ -123,7 +132,7 @@ type Notify = (message: string, kind: "info" | "warning" | "error") => void;
 
 // Minimal pi API used by the extension (typed locally to avoid depending on
 // @earendil-works/pi-coding-agent as a devDependency).
-interface PiApi {
+interface PiApi extends BrowserToolPiApi {
   on(
     event: string,
     handler: (event: unknown, ctx: unknown) => void | Promise<void>,
@@ -387,6 +396,21 @@ export default async function (pi: PiApi): Promise<void> {
   // package root: extension.js lives in dist/, the companions vsix at
   // package ROOT level (companion/…) → go up one level
   const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const reminderStore = new ReleaseReminderStore();
+  let reminderVersion: string | null = null;
+  let reminderChangelog = "";
+  try {
+    const packageJson = JSON.parse(
+      readFileSync(join(packageRoot, "package.json"), "utf8"),
+    ) as { version?: unknown };
+    if (typeof packageJson.version === "string" && packageJson.version) {
+      reminderVersion = packageJson.version;
+    }
+    reminderChangelog = readFileSync(join(packageRoot, "CHANGELOG.md"), "utf8");
+  } catch {
+    // A missing package metadata file must never block pi startup.
+  }
+  let reminderShownThisProcess = false;
 
   let pendingNotify: string | null = null;
   // last UI context seen: the auto-install may finish AFTER the first
@@ -524,6 +548,26 @@ export default async function (pi: PiApi): Promise<void> {
     if (ui && pendingNotify) {
       ui.notify(pendingNotify, "info");
       pendingNotify = null;
+    }
+    if (
+      !ui ||
+      !reminderVersion ||
+      reminderShownThisProcess ||
+      !reminderStore.shouldShow(reminderVersion)
+    ) {
+      return;
+    }
+    reminderShownThisProcess = true;
+    const configuredLocale = new ConfigStore().get().locale;
+    const locale: ReminderLocale = configuredLocale === "en" ? "en" : "it";
+    ui.notify(formatWaysReminder(reminderVersion, locale), "warning");
+    const notes = extractReleaseNotes(reminderChangelog, reminderVersion, locale);
+    const changelog = formatChangelogReminder(reminderVersion, notes, locale);
+    if (changelog) ui.notify(changelog, "info");
+    try {
+      reminderStore.markShown(reminderVersion);
+    } catch {
+      // The reminder was delivered; an unwritable state file must not break pi.
     }
   });
 
@@ -664,6 +708,7 @@ export default async function (pi: PiApi): Promise<void> {
             // reload hint per IDE.
             const notes = await ensureCompanions(packageRoot, {
               ignoreAutoInstall: true,
+              includeBrowser: true,
               onStep: (step) => notify(`pi-webview: ${step}`, "info"),
             });
             const piwLink = ensurePiwBin();
@@ -688,6 +733,7 @@ export default async function (pi: PiApi): Promise<void> {
             const notes = await ensureCompanions(packageRoot, {
               force: true,
               ignoreAutoInstall: true,
+              includeBrowser: true,
               onStep: (step) => notify(`pi-webview: ${step}`, "info"),
             });
             ensurePiwBin(true);
@@ -786,6 +832,13 @@ export default async function (pi: PiApi): Promise<void> {
             } catch (err) {
               lines.push(
                 `pi-webview: Visual Studio companion uninstall failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+            // 1c) Chrome requires user confirmation for removal as well.
+            // Open its extension manager and report the required action.
+            if (openChromeExtensionsManager()) {
+              lines.push(
+                "pi-webview: remove the pi-webview companion from Chrome in the opened extension manager.",
               );
             }
             // 2) piw launcher links from PATH (only when they are ours)
@@ -978,6 +1031,14 @@ export default async function (pi: PiApi): Promise<void> {
   };
 
   pi.on("session_start", () => {
+    if (process.env.PI_WEBVIEW_BROWSER_CONTROL_URL) {
+      const tools = pi.getAllTools();
+      const browserToolsAlreadyRegistered = tools.some(
+        (tool) =>
+          tool.name === "browser_page_dom" || tool.name.startsWith("browser_page_dom:"),
+      );
+      if (!browserToolsAlreadyRegistered) registerBrowserTools(pi);
+    }
     const already = pi
       .getCommands()
       .some((c) => c.name === "piw" || c.name.startsWith("piw:"));

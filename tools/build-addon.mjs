@@ -1,8 +1,8 @@
 // Assembles the pi package (installable with `pi install ./packages/pi-webview`):
 // 1) builds the pi-side extension → packages/pi-webview/dist/extension.js (ESM)
 // 2) builds bridge + standalone CLIs → bridge.cjs, piw.js, piw-public.js
-// 3) copies the built UI (dist/web) and the companion vsixes (VS Code + Visual
-//    Studio) into the package
+// 3) copies the changelog, built UI and companion artifacts (VS Code, Visual
+//    Studio and Chrome) into the package
 
 import { build } from "esbuild";
 import { chmodSync, cpSync, mkdirSync, existsSync, rmSync } from "node:fs";
@@ -13,6 +13,10 @@ if (!existsSync("dist/pi-webview-ide.vsix")) {
 }
 if (!existsSync("dist/web/index.html")) {
   console.error("built UI missing: run `pnpm package:vscode` first (vite build)");
+  process.exit(1);
+}
+if (!existsSync("dist/pi-webview-chrome.zip")) {
+  console.error("Chrome companion missing: run `pnpm package:chrome` first");
   process.exit(1);
 }
 // the Visual Studio companion vsix is optional at assembly time (it needs the
@@ -33,6 +37,8 @@ if (existsSync(vsVsix)) {
 rmSync("packages/pi-webview/dist", { recursive: true, force: true });
 mkdirSync("packages/pi-webview/dist", { recursive: true });
 mkdirSync("packages/pi-webview/companion", { recursive: true });
+cpSync("CHANGELOG.md", "packages/pi-webview/CHANGELOG.md");
+cpSync("PRIVACY.md", "packages/pi-webview/PRIVACY.md");
 
 await build({
   entryPoints: ["packages/pi-webview/extension.ts"],
@@ -81,6 +87,14 @@ chmodSync("packages/pi-webview/dist/piw-public.js", 0o755);
 rmSync("packages/pi-webview/dist/web", { recursive: true, force: true });
 cpSync("dist/web", "packages/pi-webview/dist/web", { recursive: true });
 cpSync("dist/pi-webview-ide.vsix", "packages/pi-webview/companion/pi-webview-ide.vsix");
+cpSync(
+  "dist/pi-webview-chrome.zip",
+  "packages/pi-webview/companion/pi-webview-chrome.zip",
+);
+rmSync("packages/pi-webview/companion/chrome", { recursive: true, force: true });
+cpSync("dist/pi-webview-chrome", "packages/pi-webview/companion/chrome", {
+  recursive: true,
+});
 const bundledVsVsix = "packages/pi-webview/companion/pi-webview-visualstudio.vsix";
 if (existsSync(vsVsix)) {
   cpSync(vsVsix, bundledVsVsix);

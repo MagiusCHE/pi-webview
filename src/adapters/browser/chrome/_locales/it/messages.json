@@ -1,0 +1,11 @@
+{
+  "extensionName": {
+    "message": "pi-webview"
+  },
+  "extensionDescription": {
+    "message": "Usa l’agente di coding pi accanto alla pagina che stai consultando."
+  },
+  "actionTitle": {
+    "message": "Apri pi-webview"
+  }
+}

@@ -14,6 +14,8 @@
 //                              detached from the terminal, and opens the browser;
 //                              with --no-open prints only the link
 //   piw -k | --kill          → stops the background bridge
+//   piw --install-chrome     → opens the browser-managed companion install
+//   piw --uninstall-chrome   → opens Chrome's extension manager
 //
 // Single-instance: ONE bridge listening per user. If a bridge is already
 // active (valid lock: live pid + /health with token), piw does NOT start a
@@ -39,6 +41,8 @@ import {
   ensureCompanions,
   formatCompanionNotes,
   companionReloadHints,
+  guideChromeCompanionInstall,
+  openChromeExtensionsManager,
 } from "./companions.ts";
 import { RESTART_TOKEN_ENV, restartTokenFromEnvironment } from "./restart-token.ts";
 
@@ -63,6 +67,28 @@ const piwVersion: string = (() => {
     return "?";
   }
 })();
+
+const chromeCompanionAction = process.argv.includes("--install-chrome")
+  ? "install"
+  : process.argv.includes("--uninstall-chrome")
+    ? "uninstall"
+    : null;
+
+if (chromeCompanionAction === "install") {
+  const notes = guideChromeCompanionInstall(root, (step) => console.log(`piw: ${step}`));
+  for (const line of formatCompanionNotes(notes, "it", "piw: ")) console.log(line);
+  process.exit(notes.some((note) => note.kind === "error") ? 1 : 0);
+}
+if (chromeCompanionAction === "uninstall") {
+  if (openChromeExtensionsManager()) {
+    console.log(
+      "piw: rimuovi il companion pi-webview dalla pagina delle estensioni Chrome aperta.",
+    );
+    process.exit(0);
+  }
+  console.error("piw: Google Chrome/Chromium non trovato.");
+  process.exit(1);
+}
 
 // Companion check (VS Code + Visual Studio), fire and forget: never block
 // startup. Same centralized module as the pi extension (ensureCompanions in

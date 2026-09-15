@@ -21,6 +21,7 @@ import type {
   TrustOptionId,
   TrustResult,
   ImageContent,
+  BrowserPageContext,
 } from "../ide/protocol.ts";
 import { rpc } from "../ide/protocol.ts";
 import { samePath } from "../ide/paths.ts";
@@ -56,6 +57,15 @@ import type {
 } from "../ide/protocol.ts";
 import { currentLocale, setLocale, t, tpl, isLocaleId, type LocaleId } from "./i18n.ts";
 import { runtime } from "./environment.ts";
+import { BrowserConnectionError } from "../adapters/browser/connection.ts";
+import {
+  connectBrowserPanel,
+  getBrowserServerUrl,
+  persistBrowserServerNewSessionIntent,
+  persistBrowserServerSession,
+  resolveBrowserExtensionBridgeUrl,
+  setBrowserServerUrl,
+} from "../adapters/browser/runtime.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { renderAnsiToHtml, stripAnsi } from "./ansi.ts";
 import {
@@ -82,6 +92,7 @@ import {
   type AgenticMetricProgress,
 } from "./agentic-thinking.ts";
 import {
+  attachBrowserPageContext,
   attachEditorSelectionContext,
   stripEditorSelectionContext,
   type ActiveEditorSelection,
@@ -97,7 +108,11 @@ import {
   normalizeHiddenStatusKeys,
   setStatusKeyHidden,
 } from "./status-preferences.ts";
-import { bridgeUrlWithPageIntent, pageUrlForSession } from "./session-url.ts";
+import {
+  bridgeUrlWithPageIntent,
+  pageUrlForNewSession,
+  pageUrlForSession,
+} from "./session-url.ts";
 import { ReconnectLoop, RECONNECT_INTERVAL_MS } from "./reconnect.ts";
 import {
   isBlockedNpmInstallScriptsUpdate,
@@ -174,6 +189,25 @@ const els = {
   settingsWebviewTitle: document.getElementById(
     "settings-webview-title",
   ) as HTMLDivElement,
+  settingsBrowserSection: document.getElementById(
+    "settings-browser-section",
+  ) as HTMLDivElement,
+  settingsBrowserTitle: document.getElementById(
+    "settings-browser-title",
+  ) as HTMLDivElement,
+  settingsBrowserUrlLabel: document.getElementById(
+    "settings-browser-url-label",
+  ) as HTMLLabelElement,
+  settingsBrowserUrl: document.getElementById("settings-browser-url") as HTMLInputElement,
+  settingsBrowserUrlNote: document.getElementById(
+    "settings-browser-url-note",
+  ) as HTMLDivElement,
+  settingsBrowserSave: document.getElementById(
+    "settings-browser-save",
+  ) as HTMLButtonElement,
+  settingsBrowserStatus: document.getElementById(
+    "settings-browser-status",
+  ) as HTMLSpanElement,
   settingsNotificationsTitle: document.getElementById(
     "settings-notifications-title",
   ) as HTMLDivElement,
@@ -295,10 +329,39 @@ const els = {
 };
 
 // --- transport bootstrap ---------------------------------------------------
-// Priority: VS Code webview (postMessage) → ?bridge= query → Vite env →
-// /bridge-config.json served by the bridge (same origin, only --serve).
+// Priority: VS Code webview (postMessage) → browser extension settings →
+// ?bridge= query → Vite env → /bridge-config.json served by the bridge.
+
+let browserConnectionError = "";
+
+const BROWSER_CONNECTION_ERROR_KEYS: Record<BrowserConnectionError["code"], string> = {
+  "invalid-url": "browserConnectionInvalidUrl",
+  "unsupported-scheme": "browserConnectionUnsupportedScheme",
+  unreachable: "browserConnectionUnreachable",
+  unauthorized: "browserConnectionUnauthorized",
+  "not-piw": "browserConnectionNotPiw",
+  "invalid-config": "browserConnectionInvalidConfig",
+  "permission-denied": "browserConnectionPermissionDenied",
+  "storage-unavailable": "browserConnectionStorageUnavailable",
+};
+
+function browserConnectionMessage(error: unknown): string {
+  return error instanceof BrowserConnectionError
+    ? t(BROWSER_CONNECTION_ERROR_KEYS[error.code])
+    : t("browserConnectionUnknown");
+}
 
 async function resolveBridgeUrl(): Promise<string | null> {
+  if (runtime.isBrowserExtension) {
+    try {
+      const connection = await resolveBrowserExtensionBridgeUrl();
+      browserConnectionError = "";
+      return connection.wsUrl;
+    } catch (error) {
+      browserConnectionError = browserConnectionMessage(error);
+      return null;
+    }
+  }
   const fromQuery = new URLSearchParams(location.search).get("bridge");
   if (fromQuery) return fromQuery;
   const fromEnv = (import.meta as unknown as { env?: Record<string, string> }).env
@@ -327,10 +390,13 @@ async function resolveBridgeUrl(): Promise<string | null> {
 }
 
 let transport: Transport | null = null;
+let browserPanelConnection: ReturnType<typeof connectBrowserPanel> = null;
 let statusState: "open" | "connecting" | "closed" = "connecting";
 /** standalone only: a lost bridge connection is retried every 5s while the
  *  window is ACTIVE (visible), without a page reload */
 let reconnecting = false;
+const usesWebSocketBridge =
+  runtime.mode === "standalone" || runtime.mode === "browser-extension";
 const demoMode = new URLSearchParams(location.search).has("demo");
 
 function updateStatus(): void {
@@ -460,6 +526,41 @@ async function connect(url: string): Promise<void> {
   setupTransport(transport);
 }
 
+let browserConnectionAlert: Promise<void> | null = null;
+
+function explainBrowserConnectionFailure(message: string): Promise<void> {
+  if (browserConnectionAlert) return browserConnectionAlert;
+  browserConnectionAlert = showAlert(
+    tpl(t("browserConnectionNeedsConfiguration"), { error: message }),
+  )
+    .then(() => {
+      openSettings();
+      els.settingsBrowserStatus.textContent = message;
+    })
+    .finally(() => {
+      browserConnectionAlert = null;
+    });
+  return browserConnectionAlert;
+}
+
+async function connectConfiguredBrowserServer(value: string): Promise<boolean> {
+  try {
+    const serverUrl = await setBrowserServerUrl(value);
+    const connection = await resolveBrowserExtensionBridgeUrl(serverUrl);
+    browserConnectionError = "";
+    els.connectUrl.value = serverUrl;
+    await connect(connection.wsUrl);
+    closeSettings();
+    return true;
+  } catch (error) {
+    browserConnectionError = browserConnectionMessage(error);
+    els.connectPanel.hidden = true;
+    hideBootLoader();
+    await explainBrowserConnectionFailure(browserConnectionError);
+    return false;
+  }
+}
+
 // --- standalone reconnect ----------------------------------------------------
 // A restarted bridge (piw -k + piw, artifact update, crash) must not require a
 // page reload: the page retries every RECONNECT_INTERVAL_MS while the window is
@@ -484,6 +585,103 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") reconnect.retryNow();
 });
 
+let browserCompanionOffered = false;
+let browserCompanionHandoffPending = false;
+let browserCompanionDiscovery: Promise<{
+  nonce: string;
+  capabilities: unknown[];
+} | null> | null = null;
+
+function waitForWindowMessage(
+  type: string,
+  nonce: string,
+  timeoutMs: number,
+): Promise<Record<string, unknown> | null> {
+  return new Promise((resolve) => {
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as Record<string, unknown> | null;
+      if (event.source !== window || data?.type !== type || data.nonce !== nonce) return;
+      cleanup();
+      resolve(data);
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timer);
+      window.removeEventListener("message", onMessage);
+    };
+    window.addEventListener("message", onMessage);
+  });
+}
+
+function startBrowserCompanionDiscovery(): void {
+  if (runtime.mode !== "standalone" || browserCompanionDiscovery) return;
+  const nonce = crypto.randomUUID();
+  const announce = () => {
+    window.postMessage(
+      { type: "pi-webview-browser-discovery", nonce, protocolVersion: 1 },
+      "*",
+    );
+  };
+  const response = waitForWindowMessage("pi-webview-browser-available", nonce, 1_500);
+  announce();
+  const retry = setInterval(announce, 250);
+  browserCompanionDiscovery = response
+    .then((message) => {
+      const capabilities = Array.isArray(message?.capabilities)
+        ? message.capabilities
+        : [];
+      return capabilities.includes("side-panel") ? { nonce, capabilities } : null;
+    })
+    .finally(() => clearInterval(retry));
+}
+
+async function offerBrowserCompanionHandoff(): Promise<boolean> {
+  if (browserCompanionOffered || runtime.mode !== "standalone") return false;
+  browserCompanionOffered = true;
+  startBrowserCompanionDiscovery();
+  const discovery = await browserCompanionDiscovery;
+  if (!discovery) return false;
+  const handoff = await ideRequest({ type: "createBrowserHandoff" });
+  const ticket = (handoff?.data as { ticket?: unknown } | undefined)?.ticket;
+  if (!handoff?.ok || typeof ticket !== "string") {
+    appendSystemBox("error", t("browserCompanionHandoffFailed"));
+    return false;
+  }
+  const pendingHandoff: {
+    result: Promise<Record<string, unknown> | null> | null;
+  } = { result: null };
+  const confirmed = await showConfirm(
+    t("browserCompanionMovePrompt"),
+    undefined,
+    () => {
+      browserCompanionHandoffPending = true;
+      pendingHandoff.result = waitForWindowMessage(
+        "pi-webview-browser-handoff-result",
+        discovery.nonce,
+        15_000,
+      );
+      window.postMessage(
+        { type: "pi-webview-browser-handoff", nonce: discovery.nonce, ticket },
+        "*",
+      );
+    },
+    true,
+  );
+  const handoffResult = pendingHandoff.result;
+  if (!confirmed || !handoffResult) return false;
+  const result = await handoffResult;
+  const value = result?.result as { ok?: unknown } | undefined;
+  if (value?.ok !== true) {
+    browserCompanionHandoffPending = false;
+    appendSystemBox("error", t("browserCompanionHandoffFailed"));
+    return false;
+  }
+  return true;
+}
+
 function setupTransport(tr: Transport): void {
   let connectionOpened = false;
   let disconnectReported = false;
@@ -501,7 +699,16 @@ function setupTransport(tr: Transport): void {
       connectionOpened = true;
       reconnect.stop();
       els.connectPanel.hidden = true;
+      if (runtime.isBrowserExtension) {
+        els.settingsBrowserStatus.textContent = t("browserServerSaved");
+      }
       void (async () => {
+        // Offer the browser handoff before the standalone performs its full
+        // config/session/history load. The adopted Side Panel initializes the
+        // same channel once, avoiding a redundant first loading pass.
+        if (runtime.mode === "standalone" && (await offerBrowserCompanionHandoff())) {
+          return;
+        }
         // Config must be known before history rendering: presentation-only
         // preferences such as agenticThinking apply to the complete reload.
         await requestConfig();
@@ -520,15 +727,28 @@ function setupTransport(tr: Transport): void {
     } else if (s.state === "closed") {
       endSessionLoading();
       hideBootLoader();
+      const expectedHandoffClose =
+        runtime.mode === "standalone" && browserCompanionHandoffPending;
       // A WebSocket error is normally followed by close: report an established
-      // bridge connection loss once, but not an initial connection failure.
-      if (runtime.mode === "standalone" && connectionOpened && !disconnectReported) {
+      // bridge connection loss once, but not an initial connection failure or
+      // the intentional source-channel close caused by a browser handoff.
+      if (
+        usesWebSocketBridge &&
+        connectionOpened &&
+        !disconnectReported &&
+        !expectedHandoffClose
+      ) {
         disconnectReported = true;
         appendSystemBox("error", t("bridgeDisconnected"));
       }
       // standalone: keep trying so a restarted bridge brings the dot back to
       // green (and the session back) without a manual reload
-      if (runtime.mode === "standalone") reconnect.start();
+      if (runtime.isBrowserExtension && !connectionOpened) {
+        els.connectPanel.hidden = true;
+        const connectionError = browserConnectionError || t("bridgeDisconnected");
+        void explainBrowserConnectionFailure(connectionError);
+      }
+      if (usesWebSocketBridge && !expectedHandoffClose) reconnect.start();
     }
   });
   tr.onFrame(handleFrame);
@@ -694,8 +914,16 @@ function setThemePref(pref: ThemePreference): void {
 function applyUiStrings(): void {
   els.input.placeholder = "";
   setStandardPlaceholder();
-  els.connectUrl.placeholder = t("bridgeUrlPlaceholder");
+  els.connectUrl.placeholder = runtime.isBrowserExtension
+    ? "http://127.0.0.1:7361"
+    : t("bridgeUrlPlaceholder");
+  const connectTitle = document.getElementById("connect-title");
+  if (connectTitle) connectTitle.textContent = t("browserConnectionTitle");
   els.connectBtn.textContent = t("connect");
+  els.settingsBrowserTitle.textContent = t("browserSettingsTitle");
+  els.settingsBrowserUrlLabel.textContent = t("browserServerUrlLabel");
+  els.settingsBrowserUrlNote.textContent = t("browserServerUrlNote");
+  els.settingsBrowserSave.textContent = t("browserSaveConnect");
   els.send.title = t("send");
   els.attachBtn.title = t("attachBtn");
   els.newChat.title = t("newChat");
@@ -1422,6 +1650,7 @@ async function applyPendingSettings(): Promise<void> {
   applyingPiSettings = true;
   els.pidevApply.disabled = true;
   els.pidevApplyHint.textContent = t("piSettingApplying");
+  let succeeded = true;
   try {
     const fileChanges: Array<{ key: string; value: unknown }> = [];
     for (const [key, value] of pending) {
@@ -1437,6 +1666,7 @@ async function applyPendingSettings(): Promise<void> {
     if (fileChanges.length > 0) {
       const res = await ideRequest({ type: "setSettings", settings: fileChanges });
       if (!res?.ok) {
+        succeeded = false;
         console.warn("[pi-webview] set_settings failed:", res?.error);
         addStatusLine(t("piSettingSetFailed"));
       } else {
@@ -1453,6 +1683,7 @@ async function applyPendingSettings(): Promise<void> {
     els.pidevApplyRow.hidden = true;
     els.pidevApplyHint.textContent = "";
     renderPiSettings();
+    if (succeeded) closeSettings();
   }
 }
 
@@ -1468,11 +1699,17 @@ els.cliApply.addEventListener("click", () => {
     const doApply = async (): Promise<void> => {
       els.cliApply.disabled = true;
       els.cliApplyHint.textContent = t("applyCliRestarting");
-      await ideRequest({
+      closeSettings();
+      const result = await ideRequest({
         type: "setCliFlags",
         ...(currentSessionPath ? { sessionPath: currentSessionPath } : {}),
         flags: currentCliValues(),
       });
+      if (!result?.ok) {
+        openSettings();
+        els.cliApply.disabled = false;
+        els.cliApplyHint.textContent = result?.error ?? t("piSettingSetFailed");
+      }
     };
     if (working) {
       const ok = await showConfirm(t("applyCliWarn"));
@@ -1486,6 +1723,13 @@ els.cliApply.addEventListener("click", () => {
 function openSettings(): void {
   els.settingsModal.hidden = false;
   els.settingsBtn.setAttribute("aria-expanded", "true");
+  els.settingsBrowserSection.hidden = !runtime.isBrowserExtension;
+  if (runtime.isBrowserExtension) {
+    els.settingsBrowserStatus.textContent = "";
+    void getBrowserServerUrl().then((url) => {
+      els.settingsBrowserUrl.value = url;
+    });
+  }
   refreshVersionInfo();
   refreshCliFlags();
   void fetchPiSettings();
@@ -1513,6 +1757,18 @@ els.settingsBtn.addEventListener("click", (e) => {
 els.settingsClose.addEventListener("click", closeSettings);
 els.settingsModal.addEventListener("click", (e) => {
   if (e.target === els.settingsModal) closeSettings();
+});
+
+els.settingsBrowserSave.addEventListener("click", () => {
+  if (!runtime.isBrowserExtension) return;
+  const value = els.settingsBrowserUrl.value;
+  els.settingsBrowserSave.disabled = true;
+  els.settingsBrowserStatus.textContent = t("connecting");
+  closeSettings();
+  void connectConfiguredBrowserServer(value).then((started) => {
+    els.settingsBrowserSave.disabled = false;
+    if (!started) els.settingsBrowserStatus.textContent = browserConnectionError;
+  });
 });
 
 // --- session dropdown -------------------------------------------------------
@@ -1992,6 +2248,12 @@ function sessionLabel(s: SessionInfo): string {
   return base || (s.path.split(/[\\/]/).pop() ?? s.path);
 }
 
+function sessionDisplayLabel(s: SessionInfo): string {
+  return isNewSession(s) && (!s.name || hasCjk(s.name))
+    ? t("newSession")
+    : sessionLabel(s);
+}
+
 // relative time like in the pi /resume selector ("now", "22m", "2h", "3d")
 function relativeTime(ms?: number): string {
   if (!ms) return "";
@@ -2105,7 +2367,9 @@ function populateSessionMenu(): void {
   newBtn.classList.toggle("active", currentIsNew);
   const newLabel = document.createElement("span");
   newLabel.className = "session-item-label";
-  newLabel.textContent = t("newSession");
+  const current = currentSession();
+  newLabel.textContent =
+    currentIsNew && current ? sessionDisplayLabel(current) : t("newSession");
   const newIcon = document.createElement("span");
   newIcon.className = "session-item-meta";
   newIcon.textContent = currentIsNew ? "(0)" : "＋";
@@ -2167,11 +2431,7 @@ function populateSessionMenu(): void {
       main.className = "session-item-main";
       const label = document.createElement("span");
       label.className = "session-item-label";
-      // new session (0 messages) → explicit title in the dropdown
-      label.textContent =
-        s.path === currentSessionPath && isNewSession(s)
-          ? t("newSession")
-          : sessionLabel(s);
+      label.textContent = sessionDisplayLabel(s);
       const meta = document.createElement("span");
       meta.className = "session-item-meta";
       const count = s.messageCount ?? 0;
@@ -2197,9 +2457,7 @@ function populateSessionMenu(): void {
   }
   const cur = currentSession();
   els.sessionBtn.textContent = cur
-    ? isNewSession(cur)
-      ? t("newSession")
-      : sessionLabel(cur)
+    ? sessionDisplayLabel(cur)
     : currentSessionPath
       ? t("newSession")
       : t("noSessions");
@@ -2209,7 +2467,7 @@ function populateSessionMenu(): void {
 // current label reused by box and browser title
 function currentSessionLabel(): string {
   const cur = currentSession();
-  if (cur) return isNewSession(cur) ? t("newSession") : sessionLabel(cur);
+  if (cur) return sessionDisplayLabel(cur);
   return currentSessionPath ? t("newSession") : t("noSessions");
 }
 
@@ -2232,8 +2490,13 @@ async function refreshSessionTitle(): Promise<void> {
     const name = (state.data as { sessionName?: string } | undefined)?.sessionName;
     if (name && currentSessionPath) {
       const s = sessions.find((x) => x.path === currentSessionPath);
-      if (s && s.name !== name) {
-        s.name = name;
+      if (s) {
+        if (s.name !== name) {
+          s.name = name;
+          named = true;
+        }
+      } else {
+        sessions.unshift({ path: currentSessionPath, name });
         named = true;
       }
     }
@@ -2249,6 +2512,7 @@ async function refreshSessionTitle(): Promise<void> {
     else sessions.unshift(info);
   }
   if (named || res?.ok) populateSessionMenu();
+  if (res?.ok) void persistBrowserSessionUrl();
 }
 
 // after a new session pi may assign the name late: short polling
@@ -2793,7 +3057,30 @@ async function persistBrowserSessionUrl(): Promise<void> {
     const res = await ideRequest({ type: "getSessionInfo", path: sessionPath });
     if (res?.ok) info = res.data as SessionInfo;
   }
-  if (!info?.id || currentSessionPath !== sessionPath) return;
+  if (currentSessionPath !== sessionPath) return;
+  if (!info?.id) {
+    if (runtime.isBrowserExtension) {
+      try {
+        await persistBrowserServerNewSessionIntent();
+      } catch {
+        // The in-page URL remains the fallback for this panel lifetime.
+      }
+    }
+    if (currentSessionPath !== sessionPath) return;
+    const next = pageUrlForNewSession(location.href);
+    if (next !== location.href) history.replaceState(null, "", next);
+    return;
+  }
+  if (runtime.isBrowserExtension) {
+    try {
+      if (currentSessionPath === sessionPath) {
+        await persistBrowserServerSession(info.id);
+      }
+    } catch {
+      // The in-page URL still preserves the session for this panel lifetime.
+    }
+  }
+  if (currentSessionPath !== sessionPath) return;
   const next = pageUrlForSession(location.href, info.id);
   if (next !== location.href) history.replaceState(null, "", next);
 }
@@ -4234,7 +4521,10 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       // the notification in chat is the feedback — nothing is being awaited
       disarmWaitingResponse();
       const msg = (evt.message as string | undefined) ?? (evt.title as string) ?? "";
-      if (msg) addStatusLine(msg);
+      const notifyType = evt.notifyType as string | undefined;
+      if (msg && notifyType === "warning") addSystemBox("warn", msg);
+      else if (msg && notifyType === "error") addSystemBox("error", msg);
+      else if (msg) addStatusLine(msg);
       if (msg && !allowRemoteNpmUpdates && isRemoteNpmDependencyDisabledUpdate(msg)) {
         addSystemBox("warn", t("updateAllowRemoteNpmSuggestion"));
       }
@@ -4781,8 +5071,9 @@ let lastAssistantText = "";
 
 function finalizeMessage(msg: FinalizedMessage): void {
   const hasVisibleText = msg.text.trim().length > 0;
-  if (hasVisibleText || msg.images.length > 0) trailingToolOutputs.assistantVisible();
-  else if (msg.toolCalls.length > 0) trailingToolOutputs.assistantToolCall();
+  if (hasVisibleText || msg.images.length > 0) {
+    trailingToolOutputs.assistantVisible(msg.text, msg.images.length > 0);
+  } else if (msg.toolCalls.length > 0) trailingToolOutputs.assistantToolCall();
   const hasFinalContent =
     hasVisibleText ||
     msg.thinking.trim().length > 0 ||
@@ -5770,6 +6061,7 @@ function renderRpcEvent(evt: RpcEvent): void {
     const followUp = Array.isArray(evt.followUp)
       ? evt.followUp.filter((message): message is string => typeof message === "string")
       : [];
+    nativeFollowUpQueue = followUp;
     // Preserve the exact arrays from pi, including repeated identical messages.
     renderNativeQueues(steeringAttachments.update(steering), followUp);
     return;
@@ -5788,6 +6080,11 @@ function renderRpcEvent(evt: RpcEvent): void {
     ).message;
     const role = msg?.role;
     if (role === "user") {
+      const queuedBefore = steeringAttachments.snapshot();
+      const queuedAfter = steeringAttachments.delivered(extractTextContent(msg?.content));
+      if (queuedAfter.length !== queuedBefore.length) {
+        renderNativeQueues(queuedAfter, nativeFollowUpQueue);
+      }
       // Every accepted user message is a visible boundary: close the current
       // thought/tool chain, render the message, then start a fresh provider
       // wait. pi emits the initial prompt after agent_start + turn_start and
@@ -5956,7 +6253,6 @@ function renderRpcEvent(evt: RpcEvent): void {
       if (!agenticThinking) openAssistantBubble();
       break;
     case "text_delta":
-      trailingToolOutputs.assistantVisible();
       // Visible model text is a hard boundary: close the current consecutive
       // thinking/tool chain before rendering the text itself.
       if (thinkingEl && !thinkingContentRendered) finishThinking();
@@ -6492,12 +6788,19 @@ let startupBannerCard: HTMLElement | null = null;
 
 type SelectionPanel = HTMLDivElement & {
   editorSelection?: ActiveEditorSelection;
+  browserContext?: BrowserPageContext;
 };
 
 function clearEditorSelectionPanel(): void {
   const panel = els.selectionPanel as SelectionPanel;
-  panel.hidden = true;
   delete panel.editorSelection;
+  if (!panel.browserContext) panel.hidden = true;
+}
+
+function clearBrowserContextPanel(): void {
+  const panel = els.selectionPanel as SelectionPanel;
+  delete panel.browserContext;
+  if (!panel.editorSelection) panel.hidden = true;
 }
 
 // The box is the source of truth: context exists only while this exact box is
@@ -6507,7 +6810,116 @@ function visibleEditorSelection(): ActiveEditorSelection | null {
   return panel.hidden ? null : (panel.editorSelection ?? null);
 }
 
+function visibleBrowserContext(): BrowserPageContext | null {
+  const panel = els.selectionPanel as SelectionPanel;
+  return panel.hidden ? null : (panel.browserContext ?? null);
+}
+
+function attachVisibleContext(message: string): string {
+  return attachBrowserPageContext(
+    attachEditorSelectionContext(message, visibleEditorSelection()),
+    visibleBrowserContext(),
+  );
+}
+
+const browserToolAllowedOrigins = new Set<string>();
+const browserToolPendingConsents = new Map<string, Promise<boolean>>();
+
+async function allowBrowserToolOrigin(origin: string): Promise<boolean> {
+  if (browserToolAllowedOrigins.has(origin)) return true;
+  const existing = browserToolPendingConsents.get(origin);
+  if (existing) return existing;
+  const pending = showConfirm(tpl(t("browserPageToolConsent"), { origin })).then(
+    (allowed) => {
+      browserToolPendingConsents.delete(origin);
+      if (allowed) browserToolAllowedOrigins.add(origin);
+      return allowed;
+    },
+  );
+  browserToolPendingConsents.set(origin, pending);
+  return pending;
+}
+
+async function handleBrowserToolRequest(
+  requestId: string,
+  operation: "dom" | "screenshot",
+): Promise<void> {
+  const context = visibleBrowserContext();
+  let origin = "";
+  try {
+    origin = context ? new URL(context.url).origin : "";
+  } catch {
+    origin = "";
+  }
+  if (!context || !origin || context.restricted || !browserPanelConnection) {
+    await ideRequest({
+      type: "browserToolResponse",
+      requestId,
+      result: { ok: false, operation, error: t("browserPageToolDenied") },
+    });
+    return;
+  }
+  if (!(await allowBrowserToolOrigin(origin))) {
+    await ideRequest({
+      type: "browserToolResponse",
+      requestId,
+      result: { ok: false, operation, error: t("browserPageToolDenied") },
+    });
+    return;
+  }
+  browserPanelConnection.send({
+    type: "browser_tool_execute",
+    requestId,
+    operation,
+    expectedOrigin: origin,
+    expectedDocumentId: context.documentId,
+  });
+}
+
+function renderBrowserContext(context: BrowserPageContext): void {
+  const panel = els.selectionPanel as SelectionPanel;
+  panel.replaceChildren();
+  panel.browserContext = context;
+  delete panel.editorSelection;
+  if (context.faviconUrl) {
+    const favicon = document.createElement("img");
+    favicon.className = "browser-context-favicon";
+    favicon.src = context.faviconUrl;
+    favicon.alt = "";
+    favicon.referrerPolicy = "no-referrer";
+    panel.appendChild(favicon);
+  }
+  const title = document.createElement("span");
+  title.className = "browser-context-title";
+  title.textContent = context.title || context.url;
+  panel.appendChild(title);
+  if (context.ranges.length > 0) {
+    const ranges = document.createElement("span");
+    ranges.className = "browser-context-ranges";
+    ranges.textContent = `(${context.ranges.length})`;
+    panel.appendChild(ranges);
+  }
+  panel.title = context.url;
+  panel.hidden = false;
+}
+
 function renderIdeEvent(evt: IdeEvent): void {
+  if (evt.type === "browser_handoff_adopted") {
+    browserPanelConnection?.send({ type: "handoff_adopted" });
+    return;
+  }
+  if (evt.type === "browser_context_changed") {
+    renderBrowserContext(evt.context);
+    return;
+  }
+  if (evt.type === "browser_context_cleared") {
+    clearBrowserContextPanel();
+    return;
+  }
+  if (evt.type === "browser_tool_request") {
+    void handleBrowserToolRequest(evt.requestId, evt.operation);
+    return;
+  }
   if (evt.type === "selection_changed" || evt.type === "selection_cleared") {
     // editor panel: selection context is disabled because panel focus clears
     // the active editor; never retain context that cannot be shown reliably
@@ -6522,6 +6934,7 @@ function renderIdeEvent(evt: IdeEvent): void {
         return;
       }
       const panel = els.selectionPanel as SelectionPanel;
+      panel.replaceChildren();
       panel.editorSelection = {
         filePath: evt.filePath,
         workspaceFolder: evt.workspaceFolder,
@@ -6529,6 +6942,7 @@ function renderIdeEvent(evt: IdeEvent): void {
       };
       // dedicated block (one row, like the steering): appears with the selection
       const base = evt.filePath?.split(/[\\/]/).pop() ?? evt.filePath ?? "?";
+      delete panel.browserContext;
       panel.textContent = `${t("selection")}: ${base} (${ranges.length})`;
       panel.title = `${t("selection")}: ${evt.filePath ?? "?"} — ${ranges.length} ${t("ranges")}`;
       const wasHidden = panel.hidden;
@@ -6708,8 +7122,9 @@ function renderHistory(messages: unknown[]): void {
       const text = textParts.join("\n").trim();
       const images = imageContentBlocks(msg.content);
       const toolCards = toolGroups.flatMap((group) => group.cards);
-      if (text || images.length > 0) historyTrailingOutputs.assistantVisible();
-      else if (toolCards.length > 0) historyTrailingOutputs.assistantToolCall();
+      if (text || images.length > 0) {
+        historyTrailingOutputs.assistantVisible(text, images.length > 0);
+      } else if (toolCards.length > 0) historyTrailingOutputs.assistantToolCall();
       if (
         !text &&
         images.length === 0 &&
@@ -7845,10 +8260,16 @@ function openImageLightbox(src: string, name: string, downloadName: string): voi
   document.body.appendChild(backdrop);
 }
 
-function showConfirm(message: string, ansiValue?: string): Promise<boolean> {
+function showConfirm(
+  message: string,
+  ansiValue?: string,
+  onConfirm?: () => void,
+  aboveBootLoader = false,
+): Promise<boolean> {
   return new Promise((resolve) => {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
+    backdrop.classList.toggle("above-boot-loader", aboveBootLoader);
     const card = document.createElement("div");
     card.className = "modal";
     const { row: lead, copy } = buildWarningModalLead(message);
@@ -7883,10 +8304,44 @@ function showConfirm(message: string, ansiValue?: string): Promise<boolean> {
       if (e.key === "Escape") close(false);
     };
     cancel.addEventListener("click", () => close(false));
-    ok.addEventListener("click", () => close(true));
+    ok.addEventListener("click", () => {
+      onConfirm?.();
+      close(true);
+    });
     backdrop.addEventListener("click", (e) => {
       if (e.target === backdrop) close(false);
     });
+    document.addEventListener("keydown", esc);
+    ok.focus();
+  });
+}
+
+function showAlert(message: string): Promise<void> {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    const card = document.createElement("div");
+    card.className = "modal";
+    const { row: lead } = buildWarningModalLead(message);
+    const actions = document.createElement("div");
+    actions.className = "modal-actions";
+    const ok = document.createElement("button");
+    ok.type = "button";
+    ok.className = "btn primary";
+    ok.textContent = t("ok");
+    actions.appendChild(ok);
+    card.append(lead, actions);
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+    const close = () => {
+      backdrop.remove();
+      document.removeEventListener("keydown", esc);
+      resolve();
+    };
+    const esc = (event: KeyboardEvent) => {
+      if (event.key === "Escape" || event.key === "Enter") close();
+    };
+    ok.addEventListener("click", close);
     document.addEventListener("keydown", esc);
     ok.focus();
   });
@@ -8079,7 +8534,7 @@ async function sendOrStop(): Promise<void> {
   // editor-selection transport block makes a valid command a normal model
   // prompt, so commands must be sent without implicit editor context.
   const message = shouldAttachImplicitEditorContext(extensionCommand)
-    ? attachEditorSelectionContext(visibleMessage, visibleEditorSelection())
+    ? attachVisibleContext(visibleMessage)
     : visibleMessage;
   // Direct prompts are rendered from pi's message_start event, not
   // optimistically. Extension commands do not emit a user message, so keep
@@ -8114,6 +8569,7 @@ async function sendOrStop(): Promise<void> {
 // Pi's queue protocol currently exposes text only. This sidecar retains attachment
 // bytes while queue_update remains the authority for membership and ordering.
 const steeringAttachments = new SteeringAttachmentTracker<PendingAttachment>();
+let nativeFollowUpQueue: string[] = [];
 
 function submitSteering(): void {
   const text = els.input.value.trim();
@@ -8125,7 +8581,7 @@ function submitSteering(): void {
     .filter(Boolean)
     .join("\n\n");
   if (!visibleMessage && imageAtts.length === 0) return;
-  const message = attachEditorSelectionContext(visibleMessage, visibleEditorSelection());
+  const message = attachVisibleContext(visibleMessage);
   const images = imageAtts.map((a) => ({
     type: "image" as const,
     data: a.dataBase64!,
@@ -9179,15 +9635,14 @@ els.reload.addEventListener("click", async () => {
   // confirmation only when an operation is in progress (model turn or
   // compaction); otherwise the reload goes straight ahead, no dialog
   if (working || compacting) {
-    const msg =
-      runtime.mode === "standalone"
-        ? t("reloadConfirmStandalone")
-        : t("reloadConfirmIde");
+    const msg = usesWebSocketBridge
+      ? t("reloadConfirmStandalone")
+      : t("reloadConfirmIde");
     if (!(await showConfirm(msg))) return;
   }
   reloadInProgress = true;
   els.reload.disabled = true;
-  if (runtime.mode === "standalone") {
+  if (usesWebSocketBridge) {
     // Restart is best-effort in the browser. Never await its response: when
     // the WebSocket is already closed (or dies after the click), ideRequest
     // would otherwise delay the local page reload until its 8s timeout.
@@ -9453,7 +9908,12 @@ function trackWorking(evt: RpcEvent): void {
 
 els.connectBtn.addEventListener("click", () => {
   const url = els.connectUrl.value.trim();
-  if (url) void connect(url);
+  if (!url) return;
+  if (runtime.isBrowserExtension) {
+    void connectConfiguredBrowserServer(url);
+  } else {
+    void connect(url);
+  }
 });
 
 // --- demo (dev): sample conversation, no connection ---------------------------
@@ -9519,6 +9979,41 @@ applyTheme(themePref);
 applyUiStrings();
 
 async function boot(): Promise<void> {
+  if (runtime.mode === "standalone") startBrowserCompanionDiscovery();
+  if (runtime.isBrowserExtension) {
+    document.documentElement.dataset.runtime = "browser-extension";
+    browserPanelConnection = connectBrowserPanel((message) => {
+      if (message.type === "browser_context_changed" && message.context) {
+        renderIdeEvent({ type: "browser_context_changed", context: message.context });
+      } else if (message.type === "browser_context_cleared") {
+        renderIdeEvent({ type: "browser_context_cleared", reason: message.error });
+      } else if (message.type === "browser_handoff_available") {
+        location.reload();
+      } else if (message.type === "browser_tool_result") {
+        const result = (message as unknown as { result?: Record<string, unknown> })
+          .result;
+        if (result && typeof result.requestId === "string") {
+          const requestId = result.requestId;
+          const { requestId: _requestId, ...payload } = result;
+          void ideRequest({
+            type: "browserToolResponse",
+            requestId,
+            result: payload as {
+              ok: boolean;
+              operation?: "dom" | "screenshot";
+              url?: string;
+              title?: string;
+              documentId?: string;
+              html?: string;
+              imageDataUrl?: string;
+              error?: string;
+            },
+          });
+        }
+      }
+    });
+    els.connectUrl.value = await getBrowserServerUrl();
+  }
   if (demoMode) {
     renderDemo();
     hideBootLoader();
@@ -9555,8 +10050,13 @@ async function boot(): Promise<void> {
   }
   statusState = "closed";
   updateStatus();
-  els.connectPanel.hidden = false;
+  els.connectPanel.hidden = runtime.isBrowserExtension;
+  const errorBox = document.getElementById("connect-error");
+  if (errorBox && runtime.isBrowserExtension) errorBox.textContent = "";
   hideBootLoader();
+  if (runtime.isBrowserExtension) {
+    await explainBrowserConnectionFailure(browserConnectionError);
+  }
 }
 
 void boot();

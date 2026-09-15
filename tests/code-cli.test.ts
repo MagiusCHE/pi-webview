@@ -16,6 +16,8 @@ import {
   ensureCompanions,
   formatCompanionNotes,
   companionReloadHints,
+  chromeStoreUrl,
+  CHROME_WEB_STORE_ID,
   type CompanionNote,
 } from "../src/bridge/companions.ts";
 
@@ -109,6 +111,14 @@ test("readVsCodeCompanionVersion: reads package.json version", () => {
   }
 });
 
+test("Chrome Web Store installer uses the permanent listing item id", () => {
+  assert.equal(CHROME_WEB_STORE_ID, "hcdjfkcgojomhpmcfgipginghhlncamn");
+  assert.equal(
+    chromeStoreUrl(),
+    "https://chromewebstore.google.com/detail/hcdjfkcgojomhpmcfgipginghhlncamn",
+  );
+});
+
 test("ensureCompanions: PI_WEBVIEW_AUTO_INSTALL=0 disables everything silently", async () => {
   const prev = process.env.PI_WEBVIEW_AUTO_INSTALL;
   try {
@@ -139,6 +149,7 @@ test("formatCompanionNotes: install/update/error notes in it and en", () => {
       label: "VS 2026",
     },
     { target: "visualstudio", kind: "error", error: "bang", label: "VS 2022" },
+    { target: "chrome", kind: "action-required", label: "/tmp/chrome" },
   ];
   const en = formatCompanionNotes(notes, "en", "pi-webview: ");
   const it = formatCompanionNotes(notes, "it", "piw: ");
@@ -161,6 +172,14 @@ test("formatCompanionNotes: install/update/error notes in it and en", () => {
   assert.equal(
     it[5],
     "piw: installazione companion Visual Studio fallita in VS 2022: bang",
+  );
+  assert.equal(
+    en[6],
+    "pi-webview: complete the Chrome companion installation in the opened Web Store page.",
+  );
+  assert.equal(
+    it[6],
+    "piw: completa l'installazione del companion Chrome nella pagina Web Store aperta.",
   );
 });
 

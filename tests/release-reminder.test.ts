@@ -14,25 +14,13 @@ import {
 } from "../packages/pi-webview/lib/release-reminder.ts";
 import { releaseChangelog } from "../tools/changelog.mjs";
 
-const bilingualChangelog = `# Changelog
+const englishChangelog = `# Changelog
 
 ## [Unreleased]
-
-### Italiano
-
-- Novità italiana.
-
-### English
 
 - English change.
 
 ## [0.3.2] - 2026-09-14
-
-### Italiano
-
-- Correzione italiana.
-
-### English
 
 - English fix.
 `;
@@ -52,14 +40,14 @@ test("the reminder lists every mode and the permanent Chrome Web Store URL", () 
   assert.match(english, new RegExp(CHROME_WEB_STORE_URL));
 });
 
-test("localized release notes become a separate changelog box", () => {
-  const italian = extractReleaseNotes(bilingualChangelog, "0.3.2", "it");
-  const english = extractReleaseNotes(bilingualChangelog, "0.3.2", "en");
-  assert.deepEqual(italian, ["Correzione italiana."]);
+test("English release notes become a separate localized changelog box", () => {
+  const italian = extractReleaseNotes(englishChangelog, "0.3.2", "it");
+  const english = extractReleaseNotes(englishChangelog, "0.3.2", "en");
+  assert.deepEqual(italian, ["English fix."]);
   assert.deepEqual(english, ["English fix."]);
   assert.equal(
     formatChangelogReminder("0.3.2", italian, "it"),
-    "Novità in pi-webview 0.3.2:\n• Correzione italiana.",
+    "Novità in pi-webview 0.3.2:\n• English fix.",
   );
   assert.equal(formatChangelogReminder("9.9.9", [], "en"), null);
 });
@@ -89,9 +77,9 @@ test("release reminder state persists outside session files", () => {
   }
 });
 
-test("release preparation moves bilingual Unreleased notes once", () => {
-  const released = releaseChangelog(bilingualChangelog, "0.4.0", "2026-09-15");
+test("release preparation moves English Unreleased notes once", () => {
+  const released = releaseChangelog(englishChangelog, "0.4.0", "2026-09-15");
   assert.match(released, /## \[Unreleased\]\s+## \[0\.4\.0\] - 2026-09-15/);
-  assert.deepEqual(extractReleaseNotes(released, "0.4.0", "it"), ["Novità italiana."]);
+  assert.deepEqual(extractReleaseNotes(released, "0.4.0", "it"), ["English change."]);
   assert.equal(releaseChangelog(released, "0.4.0", "2026-09-16"), released);
 });

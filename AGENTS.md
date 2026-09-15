@@ -32,9 +32,9 @@ webview è la UI.
 - `pnpm package:visualstudio` — build UI + vsix del companion Visual Studio (→ `dist/pi-webview-visualstudio.vsix`; su Linux richiede `node tools/setup-vs-wine.mjs` una tantum: prefix wine dedicato nel progetto + patch al VSSDK nel nuget cache)
 - `pnpm package:chrome` — build companion Chrome Manifest V3 (→ `dist/pi-webview-chrome/` + ZIP)
 - `pnpm package:pi` — assembly del package pi (vsix VS Code + vsix Visual Studio + companion Chrome + estensione pi-webview lato pi)
-- `pnpm release -- --version 0.1.1 [--publish] [--tag <dist-tag>]` — prepara (bump versioni in entrambi i package.json, rebuild vsix+bundle+UI, `npm pack` di verifica); con `--publish` esegue anche `npm publish --access public` e crea in automatico il tag git `v<version>` + la GitHub release (idempotente: skip se già esistenti). Senza `--publish` non pubblica mai.
+- `pnpm release -- --version 0.1.1 [--publish] [--tag <dist-tag>]` — prepara (bump versioni in entrambi i package.json, spostamento delle note inglesi da `CHANGELOG.md` / `[Unreleased]`, rebuild vsix+bundle+UI, `npm pack` di verifica); con `--publish` esegue anche `npm publish --access public` e crea in automatico il tag git `v<version>` + la GitHub release (idempotente: skip se già esistenti). Senza `--publish` non pubblica mai.
 - **Release — build completa obbligatoria**: quando l'utente chiede una nuova release, compilare sempre tutti gli artefatti sulla macchina corrente, inclusi companion Chrome e VSIX Visual Studio tramite Wine quando si opera su Linux. Non riutilizzare artefatti preesistenti o obsoleti e non chiedere se si debba compilare tutto: la richiesta di release autorizza e richiede la build completa.
-- **Version bump — mai manuale**: cambiare la versione esclusivamente tramite `pnpm release -- --version <version> [--publish]`; non modificare mai a mano i campi `version` nei `package.json`. La preparazione sposta automaticamente le note bilingui da `CHANGELOG.md` / `[Unreleased]` alla nuova versione; una release senza note italiane e inglesi deve fallire.
+- **Version bump — mai manuale**: cambiare la versione esclusivamente tramite `pnpm release -- --version <version> [--publish]`; non modificare mai a mano i campi `version` nei `package.json`. La preparazione sposta automaticamente le note inglesi da `CHANGELOG.md` / `[Unreleased]` alla nuova versione; una release senza note deve fallire.
 - `pnpm format` / `pnpm format:check` — prettier
 - `pnpm typecheck` — `tsc --noEmit`
 - Install: solo pnpm (bloccato da `preinstall` → `tools/check-package-manager.mjs`)
@@ -148,7 +148,7 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   tutte le modalità d'uso (Browser View, VS Code, Visual Studio, Chrome con URL
   Web Store), seguito da un box con le note localizzate della stessa versione.
   Lo stato globale vive in `~/.pi/pi-webview/release-reminder.json`, mai nella
-  sessione. `CHANGELOG.md` è bilingue e viene incluso nel package npm.
+  sessione. `CHANGELOG.md` è solo in inglese e viene incluso nel package npm; il titolo del box resta localizzato nella UI.
 - **README: matrice companion sempre aggiornata**. `README.md` (GitHub) e
   `packages/pi-webview/README.md` (npmjs) devono indicare chiaramente e in una
   lista dedicata tutti i companion IDE effettivamente implementati. Aggiornare

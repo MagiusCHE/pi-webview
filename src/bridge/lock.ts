@@ -42,8 +42,12 @@ export function writeLock(info: BridgeLock): void {
   writeFileSync(lockPath(), JSON.stringify(info, null, 2) + "\n");
 }
 
-export function clearLock(): void {
+export function clearLock(expectedPid?: number): void {
   try {
+    if (expectedPid !== undefined) {
+      const lock = readLock();
+      if (!lock || lock.pid !== expectedPid) return;
+    }
     rmSync(lockPath(), { force: true });
   } catch {
     // irrelevant: the lock will be validated anyway on the next start

@@ -1154,7 +1154,7 @@ function main(): void {
     for (const server of servers) {
       if (server.listening) server.close();
     }
-    clearLock();
+    clearLock(process.pid);
     process.exit(code);
   };
   process.on("SIGINT", () => shutdown(0));

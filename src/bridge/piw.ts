@@ -280,10 +280,10 @@ async function main(): Promise<void> {
         // process already terminated: continue with the cleanup
       }
       console.log(`piw: bridge (pid ${l.pid}) fermato.`);
-      clearLock();
+      clearLock(l.pid);
     } else if (l) {
       console.log("piw: lock stantio, nessun bridge attivo — lock rimosso.");
-      clearLock();
+      clearLock(l.pid);
     } else {
       console.log("piw: nessun bridge attivo.");
     }
@@ -432,6 +432,7 @@ async function main(): Promise<void> {
   if (!child.pid) {
     throw new Error("processo bridge senza pid");
   }
+  const bridgePid = child.pid;
   let intent: string;
   try {
     intent = detachedRun ? "new=1" : await createPageIntent(port, token);
@@ -440,7 +441,7 @@ async function main(): Promise<void> {
     throw error;
   }
   writeLock({
-    pid: child.pid,
+    pid: bridgePid,
     port,
     token,
     startedAt: new Date().toISOString(),
@@ -453,7 +454,7 @@ async function main(): Promise<void> {
 
   // 4) the launcher stays alive with the bridge; on exit it cleans the lock
   child.on("exit", (code) => {
-    clearLock();
+    clearLock(bridgePid);
     process.exit(code ?? 0);
   });
   for (const sig of ["SIGINT", "SIGTERM"] as const) {
@@ -463,6 +464,5 @@ async function main(): Promise<void> {
 
 void main().catch((err: unknown) => {
   console.error(`piw: ${err instanceof Error ? err.message : String(err)}`);
-  clearLock();
   process.exit(1);
 });

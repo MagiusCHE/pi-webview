@@ -1,6 +1,6 @@
 # pi-webview Chrome Companion Privacy Policy
 
-Last updated: September 15, 2026
+Last updated: September 16, 2026
 
 ## Summary
 
@@ -10,19 +10,22 @@ The pi-webview Chrome companion connects the browser side panel to a piw server 
 
 The extension may handle:
 
+- messages and attachments submitted by the user through the side-panel conversation;
 - the configured piw server URL, including an authentication token when the user supplies one;
 - the URL, title and favicon of the active browser tab;
 - text selected by the user on the active page;
 - the serialized DOM of the active page when the `browser_page_dom` tool is called;
 - an image of the visible page viewport when the `browser_page_screenshot` tool is called.
 
+For Chrome Web Store disclosure purposes, this corresponds to personal communications, authentication information, web history and website content. The extension does not intentionally collect personally identifiable, health, financial, payment, location or general user-activity data. Such information may nevertheless be present in content that the user chooses to send or explicitly authorizes the agent to access.
+
 DOM and screenshots are not captured merely because a page is opened. The first DOM or screenshot request for an origin during a side-panel session requires the user’s confirmation. The Chrome manifest declares `<all_urls>` because Chrome requires that host permission for screenshots requested asynchronously through `captureVisibleTab`; the implementation still limits page context and tools to HTTP and HTTPS pages.
 
 ## How data is used
 
-Page URL, title and selected text are shown in the side panel and may be included as context when the user sends a message to pi. DOM and screenshots are returned only in response to the corresponding agent tool call.
+Messages and attachments submitted through the side panel are sent to the piw server to perform the user’s request. Page URL, title and selected text are shown in the side panel and may be included as context when the user sends a message to pi. DOM and screenshots are returned only in response to the corresponding agent tool call.
 
-The companion sends this data to the piw server configured by the user. piw runs pi and may pass prompts, selected text, DOM extracts or screenshots to the AI provider configured by the user. The privacy terms of that provider apply to data sent to it.
+The companion sends this data to the piw server configured by the user. piw runs pi and may pass messages, attachments, selected text, DOM extracts or screenshots to the AI provider and other tools configured by the user. The privacy terms of those services apply to data sent to them.
 
 ## Storage
 

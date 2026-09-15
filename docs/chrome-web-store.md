@@ -74,8 +74,8 @@ Required because page context, selection and the opt-in DOM tool must work on th
 
 Answer according to the actual behavior rather than minimizing the declaration:
 
-- the extension handles website content and browsing activity needed for its single purpose;
-- selected text, requested DOM and requested screenshots may be sent to the user-configured piw server and AI provider;
+- the extension handles personal communications, authentication information, website content and browsing activity needed for its single purpose;
+- messages, attachments, selected text, requested DOM and requested screenshots may be sent to the user-configured piw server, AI provider and other user-configured tools;
 - the developer does not receive, sell or use this data for advertising, analytics, credit decisions or unrelated purposes;
 - authentication information can be present in the configured server URL and is stored only in `storage.local`;
 - remote code execution is not used; every executable asset is included in the extension package.

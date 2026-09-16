@@ -77,6 +77,10 @@ test("ConfigStore: persiste preferenze UI e sorgenti di stato nascoste", () => {
       agenticThinking: true,
       allowRemoteNpmUpdates: true,
       dangerouslyAllowAllNpmScripts: true,
+      browserToolPermissions: {
+        global: ["dom"],
+        sites: { "https://example.test": ["screenshot", "action"] },
+      },
       hiddenStatusKeys: ["mcp", "control"],
     });
     const reloaded = new ConfigStore(dir).get();
@@ -85,6 +89,10 @@ test("ConfigStore: persiste preferenze UI e sorgenti di stato nascoste", () => {
     assert.equal(reloaded.agenticThinking, true);
     assert.equal(reloaded.allowRemoteNpmUpdates, true);
     assert.equal(reloaded.dangerouslyAllowAllNpmScripts, true);
+    assert.deepEqual(reloaded.browserToolPermissions, {
+      global: ["dom"],
+      sites: { "https://example.test": ["screenshot", "action"] },
+    });
     assert.deepEqual(reloaded.hiddenStatusKeys, ["mcp", "control"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });

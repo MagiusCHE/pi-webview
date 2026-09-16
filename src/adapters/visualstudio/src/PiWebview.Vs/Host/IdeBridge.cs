@@ -64,12 +64,56 @@ public static class IdeBridge
                         PiSettingsStore.Get(workspace, trusted, req.Key)));
                     return;
                 }
+                case "applySettings":
+                {
+                    var changes = req.Settings is JsonElement settings &&
+                        settings.ValueKind == JsonValueKind.Array
+                        ? JsonSerializer.Deserialize<List<PiSettingChange>>(
+                            settings.GetRawText(), ProtocolJson.Options)
+                        : new List<PiSettingChange>();
+                    if (changes is null)
+                    {
+                        host.PostIdeResponse(Fail(req, "applySettings: invalid settings"));
+                        return;
+                    }
+                    if (changes.Count > 0)
+                    {
+                        var workspace = host.Workspace();
+                        var trusted = host.Trust.IsTrusted();
+                        var result = PiSettingsStore.Set(changes, workspace, trusted);
+                        if (!result.Ok)
+                        {
+                            host.PostIdeResponse(Fail(req, result.Error ?? "apply_settings failed"));
+                            return;
+                        }
+                    }
+                    host.PostIdeResponse(Ok(req,
+                        new Dictionary<string, object?> { ["needsRestart"] = true }));
+                    if (req.Flags is not null)
+                    {
+                        await host.ApplyCliFlagsAsync(req.SessionPath, req.Flags).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await host.RestartPiAsync().ConfigureAwait(false);
+                    }
+                    return;
+                }
                 case "setSetting":
                 case "setSettings":
                 {
-                    var changes = req.Type == "setSettings"
-                        ? req.Settings
-                        : req.Key is not null && req.Value.HasValue
+                    List<PiSettingChange>? changes;
+                    if (req.Type == "setSettings")
+                    {
+                        changes = req.Settings is JsonElement settings &&
+                            settings.ValueKind == JsonValueKind.Array
+                            ? JsonSerializer.Deserialize<List<PiSettingChange>>(
+                                settings.GetRawText(), ProtocolJson.Options)
+                            : null;
+                    }
+                    else
+                    {
+                        changes = req.Key is not null && req.Value.HasValue
                             ? new List<PiSettingChange>
                             {
                                 new()
@@ -80,6 +124,7 @@ public static class IdeBridge
                                 },
                             }
                             : null;
+                    }
                     if (changes is null)
                     {
                         host.PostIdeResponse(Fail(req, "set_settings: missing settings"));
@@ -119,6 +164,24 @@ public static class IdeBridge
                         ["version"] = VersionLabel(),
                     }));
                     return;
+                case "getSessionSettings":
+                    if (req.SessionPath is null) { host.PostIdeResponse(Fail(req, "getSessionSettings: missing sessionPath")); return; }
+                    host.PostIdeResponse(Ok(req, host.Sessions.ReadSessionSettings(req.SessionPath)));
+                    return;
+                case "setSessionSettings":
+                {
+                    if (req.SessionPath is null) { host.PostIdeResponse(Fail(req, "setSessionSettings: missing sessionPath")); return; }
+                    if (req.Settings is not JsonElement settings || settings.ValueKind != JsonValueKind.Object)
+                    {
+                        host.PostIdeResponse(Fail(req, "setSessionSettings: missing settings"));
+                        return;
+                    }
+                    var sessionSettings = JsonSerializer.Deserialize<SessionSettings>(
+                        settings.GetRawText(), ProtocolJson.Options) ?? new SessionSettings();
+                    host.Sessions.WriteSessionSettings(req.SessionPath, sessionSettings);
+                    host.PostIdeResponse(Ok(req, null));
+                    return;
+                }
                 case "getCliFlags":
                 {
                     var available = await host.AvailableFlagsAsync().ConfigureAwait(false);

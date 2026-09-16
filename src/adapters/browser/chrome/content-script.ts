@@ -5,21 +5,36 @@ interface ChromeRuntime {
 declare const chrome: { runtime: ChromeRuntime };
 
 const contentScope = globalThis as typeof globalThis & {
-  __piWebviewBrowserContentScriptLoaded?: boolean;
+  __piWebviewBrowserContentScriptCleanup?: () => void;
 };
 
-if (!contentScope.__piWebviewBrowserContentScriptLoaded) {
-  contentScope.__piWebviewBrowserContentScriptLoaded = true;
-  initializeContentScript();
+// A service-worker restart may inject this file again into an existing page.
+// Tear down the previous listeners before installing the current generation.
+try {
+  contentScope.__piWebviewBrowserContentScriptCleanup?.();
+} catch {
+  // A cleanup function retained from the previous unpacked-extension context
+  // is itself no longer callable after Chrome invalidates that context.
 }
+contentScope.__piWebviewBrowserContentScriptCleanup = initializeContentScript();
 
-function initializeContentScript(): void {
+function initializeContentScript(): () => void {
   const DISCOVERY_REQUEST = "pi-webview-browser-discovery";
   const DISCOVERY_RESPONSE = "pi-webview-browser-available";
   const HANDOFF_REQUEST = "pi-webview-browser-handoff";
   const HANDOFF_RESPONSE = "pi-webview-browser-handoff-result";
   const documentId = crypto.randomUUID();
   let selectionTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function sendRuntimeMessage(message: unknown): Promise<unknown> {
+    try {
+      return Promise.resolve(chrome.runtime.sendMessage(message)).catch(() => undefined);
+    } catch {
+      // Chrome throws synchronously when an old page context survives an
+      // unpacked-extension reload. The replacement context will be reinjected.
+      return Promise.resolve(undefined);
+    }
+  }
 
   function selectedRanges(): Array<{ text: string }> {
     const selection = window.getSelection();
@@ -33,13 +48,11 @@ function initializeContentScript(): void {
   }
 
   function publishSelection(): void {
-    void chrome.runtime
-      .sendMessage({
-        type: "page_selection",
-        documentId,
-        ranges: selectedRanges(),
-      })
-      .catch(() => {});
+    void sendRuntimeMessage({
+      type: "page_selection",
+      documentId,
+      ranges: selectedRanges(),
+    });
   }
 
   function scheduleSelection(): void {
@@ -47,11 +60,7 @@ function initializeContentScript(): void {
     selectionTimer = setTimeout(publishSelection, 80);
   }
 
-  document.addEventListener("selectionchange", scheduleSelection, { passive: true });
-  window.addEventListener("pageshow", publishSelection, { passive: true });
-  publishSelection();
-
-  window.addEventListener("message", (event) => {
+  function handleWindowMessage(event: MessageEvent): void {
     if (event.source !== window || !event.data || typeof event.data !== "object") return;
     const message = event.data as {
       type?: unknown;
@@ -83,21 +92,32 @@ function initializeContentScript(): void {
       typeof message.ticket === "string"
     ) {
       const nonce = message.nonce;
-      void chrome.runtime
-        .sendMessage({
-          type: "standalone_handoff",
-          pageUrl: location.href,
-          ticket: message.ticket,
-        })
-        .then((result) => {
-          window.postMessage({ type: HANDOFF_RESPONSE, nonce, result }, "*");
-        })
-        .catch(() => {
-          window.postMessage(
-            { type: HANDOFF_RESPONSE, nonce, result: { ok: false } },
-            "*",
-          );
-        });
+      void sendRuntimeMessage({
+        type: "standalone_handoff",
+        pageUrl: location.href,
+        ticket: message.ticket,
+      }).then((result) => {
+        window.postMessage(
+          {
+            type: HANDOFF_RESPONSE,
+            nonce,
+            result: result ?? { ok: false },
+          },
+          "*",
+        );
+      });
     }
-  });
+  }
+
+  document.addEventListener("selectionchange", scheduleSelection, { passive: true });
+  window.addEventListener("pageshow", publishSelection, { passive: true });
+  window.addEventListener("message", handleWindowMessage);
+  publishSelection();
+
+  return () => {
+    clearTimeout(selectionTimer);
+    document.removeEventListener("selectionchange", scheduleSelection);
+    window.removeEventListener("pageshow", publishSelection);
+    window.removeEventListener("message", handleWindowMessage);
+  };
 }

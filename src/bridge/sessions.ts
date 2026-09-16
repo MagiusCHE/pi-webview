@@ -16,7 +16,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
-import type { SessionInfo, CliFlags } from "../ide/protocol.ts";
+import type { SessionInfo, CliFlags, SessionSettings } from "../ide/protocol.ts";
 import { samePath, isWindowsPath } from "../ide/paths.ts";
 
 export function defaultSessionDir(): string {
@@ -316,12 +316,12 @@ export function forkSession(
     .split("\n")
     .map((line) => {
       try {
-        return JSON.parse(line) as { type?: string };
+        return JSON.parse(line) as Record<string, unknown>;
       } catch {
         return null;
       }
     })
-    .filter((e): e is { type?: string; version?: number } => e !== null);
+    .filter((e): e is Record<string, unknown> => e !== null);
   const header = entries.find((e) => e.type === "session");
   if (!header) throw new Error("invalid source session (no header)");
 
@@ -342,7 +342,19 @@ export function forkSession(
 
   writeFileSync(newPath, JSON.stringify(newHeader) + "\n", { flag: "wx" });
   for (const entry of entries) {
-    if (entry.type !== "session") appendFileSync(newPath, JSON.stringify(entry) + "\n");
+    if (entry.type === "session") continue;
+    let copiedEntry = entry;
+    if (
+      entry.type === "custom" &&
+      entry.customType === SESSION_SETTINGS_CUSTOM_TYPE &&
+      entry.data &&
+      typeof entry.data === "object"
+    ) {
+      const data = { ...(entry.data as Record<string, unknown>) };
+      delete data.browserToolPermissions;
+      copiedEntry = { ...entry, data };
+    }
+    appendFileSync(newPath, JSON.stringify(copiedEntry) + "\n");
   }
   return { path: newPath };
 }
@@ -450,14 +462,8 @@ export function writeSessionCliFlags(path: string, flags: CliFlags): void {
 
 // --- per-session webview settings (notifications override) -------------------
 
-/** per-session overrides saved INSIDE the session file (never in the global
- *  config, which would grow one key per session). Missing field → follow
- *  the global default. */
-export interface SessionSettings {
-  /** notifications mode for THIS session only */
-  notifications?: "desktop" | "vscode" | "off";
-}
-
+/** Per-session overrides are saved INSIDE the session file so deleting the
+ *  session also deletes its browser grants and notification override. */
 export function readSessionSettings(path: string): SessionSettings {
   return (
     readSessionCustomEntry<SessionSettings>(path, SESSION_SETTINGS_CUSTOM_TYPE) ?? {}

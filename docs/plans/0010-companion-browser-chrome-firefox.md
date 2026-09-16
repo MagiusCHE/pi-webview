@@ -360,7 +360,8 @@ Registrare nell'estensione pi del package, con schema TypeBox e nomi espliciti:
    - acquisisce `document.documentElement.outerHTML` della scheda associata al
      pannello;
    - default: documento top-level corrente;
-   - parametri opzionali futuri possono includere `selector` e frame;
+   - `browser_page_element_dom` acquisisce invece il solo `outerHTML`
+     dell'elemento identificato da un `selector`; il supporto frame resta futuro;
    - restituisce URL, titolo, timestamp e contenuto;
    - non promette contenuto di closed shadow roots o frame cross-origin.
 
@@ -625,6 +626,17 @@ Solo dopo Chrome completo:
 - [x] Il chip mostra favicon + titolo, hover URL e range eventuali.
 - [x] Senza selezione, URL e titolo restano contesto del prompt.
 - [x] `browser_page_dom` restituisce il DOM con limiti e fallback file.
+- [x] `browser_page_element_dom` restituisce il solo elemento identificato da
+      un selettore noto.
+- [x] `browser_page_class` e `browser_page_style` applicano mutazioni CSS
+      strutturate sotto il consenso azioni, senza JavaScript arbitrario.
+- [x] `browser_page_click` supporta selettore, hit-test visuale degli overlay e
+      coordinate viewport come fallback, usando soli eventi DOM sintetici e
+      senza permesso `debugger`/CDP.
+- [x] `browser_page_navigation` ricarica la pagina o naviga verso URL assoluti
+      HTTP(S) tramite Tabs API sotto il consenso azioni.
+- [x] `browser_page_scroll` scorre pagina/contenitore per delta o porta in vista
+      un elemento mirato sotto il consenso azioni.
 - [x] `browser_page_screenshot` restituisce un'immagine del viewport.
 - [x] Nessun token, ticket, URL autenticato, DOM o screenshot compare nei log.
 - [x] Build, typecheck, format, test unitari e smoke Chrome sono verdi.

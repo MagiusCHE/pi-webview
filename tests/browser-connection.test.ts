@@ -7,7 +7,10 @@ import {
   browserServerUrlWithPanelIntent,
   browserServerUrlWithSession,
   browserSessionIntentFromServerUrl,
+  browserWindowSessionIntent,
+  browserWindowSessionIntentKey,
   connectBrowserPanel,
+  isBrowserExtensionContextInvalidated,
   persistBrowserServerNewSessionIntent,
   persistBrowserServerSession,
 } from "../src/adapters/browser/runtime.ts";
@@ -18,7 +21,10 @@ import {
   parseBrowserServerUrl,
   redactBrowserServerUrl,
 } from "../src/adapters/browser/connection.ts";
-import { browserDefaultWorkspace } from "../src/bridge/browser-workspace.ts";
+import {
+  browserDefaultWorkspace,
+  browserNewSessionWorkspace,
+} from "../src/bridge/browser-workspace.ts";
 
 test("a direct browser client starts in the OS user home", () => {
   assert.equal(
@@ -27,6 +33,15 @@ test("a direct browser client starts in the OS user home", () => {
   );
   assert.equal(browserDefaultWorkspace("browser", "/home/test-user"), "/home/test-user");
   assert.equal(browserDefaultWorkspace(null, "/home/test-user"), undefined);
+  assert.equal(
+    browserNewSessionWorkspace("browser", "/home/test-user"),
+    "/home/test-user",
+  );
+  assert.equal(browserNewSessionWorkspace(null, "/home/test-user"), undefined);
+  assert.equal(
+    browserNewSessionWorkspace("browser", "/home/test-user", "/launch/workspace"),
+    "/launch/workspace",
+  );
 });
 
 test("browser server URL defaults to loopback port 7361", () => {
@@ -134,7 +149,22 @@ test("configured endpoint stays separate from private session intent", () => {
   );
 });
 
-test("browser session persistence does not mutate the configured endpoint", async () => {
+test("a new Chrome window starts a new session while existing windows resume", () => {
+  const values = {
+    [browserWindowSessionIntentKey(7)]: "s=window-seven",
+    [browserWindowSessionIntentKey(8)]: "new=1",
+  };
+  assert.equal(browserWindowSessionIntent(values, 7), "s=window-seven");
+  assert.equal(browserWindowSessionIntent(values, 8), "new=1");
+  assert.equal(browserWindowSessionIntent(values, 9), "new=1");
+  assert.equal(
+    browserWindowSessionIntent({ sessionIntent: "s=legacy-global" }, 9),
+    "new=1",
+  );
+  assert.equal(browserWindowSessionIntent(values, undefined), "new=1");
+});
+
+test("browser session persistence is isolated per Chrome window", async () => {
   assert.equal(
     browserServerUrlWithSession(
       "http://127.0.0.1:7362/?token=private&new=1&s=stale&launch=old",
@@ -143,31 +173,40 @@ test("browser session persistence does not mutate the configured endpoint", asyn
     "http://127.0.0.1:7362/?token=private&s=adopted-session",
   );
 
-  const values: Record<string, unknown> = {
+  const localValues: Record<string, unknown> = {
     serverUrl: "http://127.0.0.1:7362/?token=private&s=previous",
   };
+  const sessionValues: Record<string, unknown> = {};
+  const storageArea = (values: Record<string, unknown>) => ({
+    async get() {
+      return { ...values };
+    },
+    async set(next: Record<string, unknown>) {
+      Object.assign(values, next);
+    },
+    async remove(keys: string | string[]) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) delete values[key];
+    },
+  });
+  let windowId = 7;
   const api = {
     storage: {
-      local: {
-        async get() {
-          return { ...values };
-        },
-        async set(next: Record<string, unknown>) {
-          Object.assign(values, next);
-        },
-        async remove() {},
-      },
+      local: storageArea(localValues),
+      session: storageArea(sessionValues),
     },
+    windows: { getCurrent: async () => ({ id: windowId }) },
   };
   const persisted = await persistBrowserServerSession("adopted-session", api as never);
   assert.equal(persisted, "s=adopted-session");
-  assert.equal(values.serverUrl, "http://127.0.0.1:7362/?token=private&s=previous");
-  assert.equal(values.sessionIntent, persisted);
+  assert.equal(localValues.serverUrl, "http://127.0.0.1:7362/?token=private&s=previous");
+  assert.equal(sessionValues[browserWindowSessionIntentKey(7)], persisted);
 
+  windowId = 8;
   const reset = await persistBrowserServerNewSessionIntent(api as never);
   assert.equal(reset, "new=1");
-  assert.equal(values.serverUrl, "http://127.0.0.1:7362/?token=private&s=previous");
-  assert.equal(values.sessionIntent, reset);
+  assert.equal(localValues.serverUrl, "http://127.0.0.1:7362/?token=private&s=previous");
+  assert.equal(sessionValues[browserWindowSessionIntentKey(8)], reset);
+  assert.equal(sessionValues[browserWindowSessionIntentKey(7)], persisted);
   assert.equal(
     browserServerUrlWithNewSession(
       "http://127.0.0.1:7362/?token=private&s=previous&session=old",
@@ -236,6 +275,34 @@ test("browser panel reconnects its runtime port and flushes queued messages", as
     { type: "panel_ready", windowId: 7 },
     { type: "handoff_ready" },
   ]);
+  connection.dispose();
+});
+
+test("browser panel reloads a stale page after its extension context is invalidated", () => {
+  let reloads = 0;
+  const api = {
+    runtime: {
+      id: "test-extension",
+      connect() {
+        throw new Error("Extension context invalidated.");
+      },
+    },
+  };
+
+  assert.equal(
+    isBrowserExtensionContextInvalidated(new Error("Extension context invalidated.")),
+    true,
+  );
+  const connection = connectBrowserPanel(
+    () => {},
+    api as never,
+    0,
+    () => {
+      reloads += 1;
+    },
+  );
+  assert.ok(connection);
+  assert.equal(reloads, 1);
   connection.dispose();
 });
 

@@ -14,23 +14,28 @@ The extension may handle:
 - the configured piw server URL, including an authentication token when the user supplies one;
 - the URL, title and favicon of the active browser tab;
 - text selected by the user on the active page;
-- the serialized DOM of the active page when the `browser_page_dom` tool is called;
+- the complete serialized DOM when `browser_page_dom` is called, or the serialized outer HTML of one selected element when `browser_page_element_dom` is called;
 - an image of the visible page viewport when the `browser_page_screenshot` tool is called;
-- structured click, type, select, focus or scroll instructions when the `browser_page_action` tool is called.
+- structured selector, visual-hit-test or viewport-coordinate click instructions when `browser_page_click` or `browser_page_action` is called;
+- structured type, select, focus or scroll instructions when `browser_page_action` or `browser_page_scroll` is called;
+- structured reload or HTTP/HTTPS navigation instructions when `browser_page_navigation` is called;
+- structured CSS class additions/removals and inline-style changes when `browser_page_class` or `browser_page_style` is called.
 
 For Chrome Web Store disclosure purposes, this corresponds to personal communications, authentication information, web history and website content. The extension does not intentionally collect personally identifiable, health, financial, payment, location or general user-activity data. Such information may nevertheless be present in content that the user chooses to send or explicitly authorizes the agent to access.
 
-DOM and screenshots are not captured merely because a page is opened. DOM and screenshot access require separate confirmation on their first use for each origin during a side-panel session, so authorizing DOM access never implicitly authorizes a screenshot. Every structured page-action sequence also requires confirmation and displays its targets and value previews before it runs. Page actions are limited to click, type, select, focus and scroll; the extension does not evaluate arbitrary JavaScript. The Chrome manifest declares `<all_urls>` because Chrome requires that host permission for screenshots requested asynchronously through `captureVisibleTab`; the implementation still limits page context and tools to HTTP and HTTPS pages.
+DOM and screenshots are not captured merely because a page is opened. Complete and targeted DOM reads share one DOM authorization; screenshots have a separate authorization; selector/visual/coordinate clicks, type/select/focus/scroll actions, reload/navigation and CSS-class/inline-style mutations share the structured-action authorization. Granting one of these three operation groups never authorizes the others. For each operation, the user can grant access for the current pi session across visited sites, for the current website origin across sessions, or globally across websites and sessions. The first structured-action request displays its targets, coordinates and value previews and warns that future clicks, type, select, focus, scroll, reload/navigation, CSS-class and inline-style changes will run without additional prompts within the selected scope and may have external effects. Navigation accepts only absolute HTTP/HTTPS URLs. Pointer actions are synthetic DOM events. The extension does not request Chrome's `debugger` permission, use CDP, evaluate arbitrary JavaScript or accept stylesheet source code. These grants can be reset from the Chrome-only pi-webview settings. The Chrome manifest declares `<all_urls>` because Chrome requires that host permission for screenshots requested asynchronously through `captureVisibleTab`; the implementation still limits page context and tools to HTTP and HTTPS pages.
 
 ## How data is used
 
-Messages and attachments submitted through the side panel are sent to the piw server to perform the user’s request. Page URL, title and selected text are shown in the side panel and may be included as context when the user sends a message to pi. DOM and screenshots are returned only in response to the corresponding agent tool call. Structured page actions are sent to the Chrome companion only after the user confirms the displayed sequence.
+Messages and attachments submitted through the side panel are sent to the piw server to perform the user’s request. Page URL, title and selected text are shown in the side panel and may be included as context when the user sends a message to pi. Complete or targeted DOM and screenshots are returned only in response to the corresponding agent tool call and an applicable authorization grant. Structured page actions, including visual/coordinate clicks, navigation and CSS mutations are sent to the Chrome companion only when an applicable action grant exists; after the initial authorization, later sequences within that grant’s scope run without another prompt.
 
 The companion sends this data to the piw server configured by the user. piw runs pi and may pass messages, attachments, selected text, DOM extracts or screenshots to the AI provider and other tools configured by the user. The privacy terms of those services apply to data sent to them.
 
 ## Storage
 
 The configured piw server URL is stored locally in Chrome extension storage. It is not stored with Chrome Sync. The URL may contain a private authentication credential and is not written to pi-webview logs.
+
+Browser grants scoped to the current pi session are stored as custom metadata inside that session’s local JSONL file and disappear when the session is deleted. Per-origin and global grants are stored in the local piw user configuration. The Chrome-only settings can reset persistent grants and grants for the current session.
 
 Temporary DOM files may be created by piw on the server machine when a captured DOM is too large for an inline tool result. They use restrictive file permissions and are eligible for automatic cleanup after 24 hours.
 
@@ -46,9 +51,9 @@ The developer does not receive or sell browsing data. Data is shared only with:
 ## Permissions
 
 - **Side panel:** displays the pi-webview interface beside browser pages.
-- **Tabs:** reads the active tab’s title, URL and favicon and captures its visible viewport on request.
-- **Scripting and website access:** reads the current selection, acquires the DOM and performs user-confirmed structured page actions only for the documented browser-context and agent-tool features.
-- **Storage:** stores the piw connection URL and temporary session handoff state locally.
+- **Tabs:** reads the active tab’s title, URL and favicon, captures its visible viewport on request, and performs authorized reload or HTTP/HTTPS navigation.
+- **Scripting and website access:** reads the current selection, acquires complete or targeted DOM and performs authorized selector/visual/coordinate clicks, other structured page actions and CSS class/inline-style mutations only for the documented browser-context and agent-tool features. Pointer events remain synthetic; the extension does not request the `debugger` permission.
+- **Storage:** stores the piw connection URL and temporary session handoff state locally; piw stores the authorization scopes described above in the local session/config files.
 
 Chrome-protected pages and other pages where extension access is forbidden cannot be read, captured or controlled.
 

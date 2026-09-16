@@ -58,7 +58,10 @@ import { revealFileInSystemManager } from "./open-file.ts";
 import { clearLock } from "./lock.ts";
 import { normalizeLaunchCwd } from "./launch-context.ts";
 import { BrowserHandoffRegistry } from "./browser-handoff.ts";
-import { browserDefaultWorkspace } from "./browser-workspace.ts";
+import {
+  browserDefaultWorkspace,
+  browserNewSessionWorkspace,
+} from "./browser-workspace.ts";
 import { redactDebugFrame } from "./debug-log.ts";
 import {
   BrowserToolBroker,
@@ -66,6 +69,7 @@ import {
   type BrowserToolPayload,
 } from "./browser-control.ts";
 import {
+  normalizeBrowserElementSelector,
   normalizeBrowserPageActions,
   type BrowserPageAction,
 } from "../ide/browser-tools.ts";
@@ -237,14 +241,15 @@ function parseIntent(url: URL, launchIntents: Map<string, LaunchIntent>): Intent
   if (legacySessionPath) return { kind: "session", sessionPath: legacySessionPath };
   if (url.searchParams.get("new") === "1") {
     const launchId = url.searchParams.get("launchId");
-    if (launchId) {
-      const launch = launchIntents.get(launchId);
-      return {
-        kind: "new",
-        workspaceDir: launch?.cwd ?? normalizeLaunchCwd(undefined),
-      };
-    }
-    return { kind: "new" };
+    const launchWorkspace = launchId
+      ? (launchIntents.get(launchId)?.cwd ?? normalizeLaunchCwd(undefined))
+      : undefined;
+    const workspaceDir = browserNewSessionWorkspace(
+      url.searchParams.get("client"),
+      homedir(),
+      launchWorkspace,
+    );
+    return workspaceDir ? { kind: "new", workspaceDir } : { kind: "new" };
   }
   const workspaceDir = browserDefaultWorkspace(url.searchParams.get("client"), homedir());
   return workspaceDir ? { kind: "default", workspaceDir } : { kind: "default" };
@@ -315,7 +320,11 @@ function main(): void {
           body += chunk.toString();
           if (body.length > 256 * 1024) throw new Error("request too large");
         }
-        const data = JSON.parse(body) as { operation?: unknown; actions?: unknown };
+        const data = JSON.parse(body) as {
+          operation?: unknown;
+          actions?: unknown;
+          selector?: unknown;
+        };
         if (
           data.operation !== "dom" &&
           data.operation !== "screenshot" &&
@@ -328,6 +337,10 @@ function main(): void {
           data.operation === "action"
             ? normalizeBrowserPageActions(data.actions)
             : undefined;
+        const selector =
+          data.operation === "dom" && data.selector !== undefined
+            ? normalizeBrowserElementSelector(data.selector)
+            : undefined;
         const controller = new AbortController();
         req.once("aborted", () => controller.abort());
         res.once("close", () => {
@@ -337,6 +350,7 @@ function main(): void {
           data.operation,
           controller.signal,
           actions,
+          selector,
         );
         if (res.destroyed) return;
         res.writeHead(result.ok ? 200 : 502, {
@@ -458,6 +472,7 @@ function main(): void {
       operation: BrowserToolOperation,
       signal?: AbortSignal,
       actions?: BrowserPageAction[],
+      selector?: string,
     ) => Promise<BrowserToolPayload>;
     attach: (ws: WebSocket) => void;
     dispose: () => void;
@@ -609,6 +624,19 @@ function main(): void {
         resolve();
       });
 
+    const stageCliFlags = (
+      next: CliFlags,
+      requestedPath?: string,
+    ): string | undefined => {
+      const sessionPath = requestedPath ?? currentSessionPath;
+      if (sessionPath) writeSessionCliFlags(sessionPath, next);
+      activeCliFlags = { ...next };
+      currentSessionPath = sessionPath;
+      cliFlagsNeedSessionPersistence =
+        !sessionPath && Object.keys(activeCliFlags).length > 0;
+      return sessionPath;
+    };
+
     const handleIde = (req: IdeRequest): void => {
       if (req.type === "getConfig") {
         respond(req.id ?? "", { ok: true, data: configStore.get() });
@@ -678,12 +706,8 @@ function main(): void {
         return;
       }
       if (req.type === "setCliFlags") {
-        const sessionPath = req.sessionPath ?? currentSessionPath;
         const next = req.flags ?? {};
-        if (sessionPath) writeSessionCliFlags(sessionPath, next);
-        activeCliFlags = { ...next };
-        cliFlagsNeedSessionPersistence =
-          !sessionPath && Object.keys(activeCliFlags).length > 0;
+        const sessionPath = stageCliFlags(next, req.sessionPath);
         respond(req.id ?? "", { ok: true, data: { flags: next } });
         restartPi(sessionPath, next);
         return;
@@ -791,6 +815,30 @@ function main(): void {
             req.key,
           ),
         });
+        return;
+      }
+      if (req.type === "applySettings") {
+        const ctx = {
+          workspace: workspaceDir,
+          workspaceTrusted: trust.isTrusted(),
+        };
+        if (req.settings.length > 0) {
+          const result = setPiSettingsFile(req.settings, ctx);
+          if (!result.ok) {
+            respond(req.id ?? "", {
+              ok: false,
+              error: result.error ?? "apply_settings failed",
+            });
+            return;
+          }
+        }
+        const flagsProvided = req.flags !== undefined;
+        const nextFlags = flagsProvided ? req.flags! : activeCliFlags;
+        const sessionPath = flagsProvided
+          ? stageCliFlags(nextFlags, req.sessionPath)
+          : currentSessionPath;
+        respond(req.id ?? "", { ok: true, data: { needsRestart: true } });
+        restartPi(sessionPath, nextFlags);
         return;
       }
       if (req.type === "setSetting" || req.type === "setSettings") {
@@ -1043,10 +1091,16 @@ function main(): void {
       operation: BrowserToolOperation,
       signal?: AbortSignal,
       actions?: BrowserPageAction[],
+      selector?: string,
     ) =>
       browserToolBroker.request(
         operation,
-        ({ requestId, operation: requested, actions: requestedActions }) => {
+        ({
+          requestId,
+          operation: requested,
+          actions: requestedActions,
+          selector: requestedSelector,
+        }) => {
           send({
             channel: "ide",
             payload: {
@@ -1054,12 +1108,14 @@ function main(): void {
               requestId,
               operation: requested,
               ...(requestedActions ? { actions: requestedActions } : {}),
+              ...(requestedSelector ? { selector: requestedSelector } : {}),
             },
           });
         },
         signal,
         undefined,
         actions,
+        selector,
       );
     channel = {
       ws,

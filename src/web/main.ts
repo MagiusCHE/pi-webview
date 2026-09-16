@@ -22,11 +22,14 @@ import type {
   TrustResult,
   ImageContent,
   BrowserPageContext,
+  SessionSettings,
 } from "../ide/protocol.ts";
 import { rpc } from "../ide/protocol.ts";
 import {
+  normalizeBrowserElementSelector,
   normalizeBrowserPageActions,
   type BrowserPageAction,
+  type BrowserPersistentPermissions,
   type BrowserToolOperation,
   type BrowserToolPayload,
 } from "../ide/browser-tools.ts";
@@ -63,7 +66,15 @@ import type {
 } from "../ide/protocol.ts";
 import { currentLocale, setLocale, t, tpl, isLocaleId, type LocaleId } from "./i18n.ts";
 import { runtime } from "./environment.ts";
-import { BrowserReadConsentStore } from "./browser-tool-consent.ts";
+import { sessionPickStrategy } from "./session-routing.ts";
+import {
+  browserToolPermissionGranted,
+  grantBrowserPersistentPermission,
+  grantBrowserSessionPermission,
+  normalizeBrowserPermissionOperations,
+  normalizeBrowserPersistentPermissions,
+  type BrowserPermissionScope,
+} from "./browser-tool-consent.ts";
 import {
   formatAskUserQuestion,
   parseAskUserQuestions,
@@ -71,8 +82,14 @@ import {
 } from "./ask-user.ts";
 import { BrowserConnectionError } from "../adapters/browser/connection.ts";
 import {
+  browserServerSettingDirty,
+  settingRecordsEqual,
+  settingsApplyNeeded,
+} from "./settings-apply.ts";
+import {
   connectBrowserPanel,
   getBrowserServerUrl,
+  isBrowserExtensionContextInvalidated,
   persistBrowserServerNewSessionIntent,
   persistBrowserServerSession,
   resolveBrowserExtensionBridgeUrl,
@@ -214,11 +231,14 @@ const els = {
   settingsBrowserUrlNote: document.getElementById(
     "settings-browser-url-note",
   ) as HTMLDivElement,
-  settingsBrowserSave: document.getElementById(
-    "settings-browser-save",
-  ) as HTMLButtonElement,
   settingsBrowserStatus: document.getElementById(
     "settings-browser-status",
+  ) as HTMLSpanElement,
+  settingsBrowserResetPermissions: document.getElementById(
+    "settings-browser-reset-permissions",
+  ) as HTMLButtonElement,
+  settingsBrowserPermissionsStatus: document.getElementById(
+    "settings-browser-permissions-status",
   ) as HTMLSpanElement,
   settingsNotificationsTitle: document.getElementById(
     "settings-notifications-title",
@@ -288,13 +308,10 @@ const els = {
   pidevTitle: document.getElementById("settings-pidev-title") as HTMLDivElement,
   pidevNote: document.getElementById("settings-pidev-note") as HTMLDivElement,
   pidevBody: document.getElementById("settings-pidev-body") as HTMLDivElement,
-  pidevApplyRow: document.getElementById("pidev-apply-row") as HTMLDivElement,
-  pidevApply: document.getElementById("pidev-apply") as HTMLButtonElement,
-  pidevApplyHint: document.getElementById("pidev-apply-hint") as HTMLSpanElement,
   cliFlags: document.getElementById("cli-flags") as HTMLDivElement,
-  cliApplyRow: document.getElementById("cli-apply-row") as HTMLDivElement,
-  cliApply: document.getElementById("cli-apply") as HTMLButtonElement,
-  cliApplyHint: document.getElementById("cli-apply-hint") as HTMLSpanElement,
+  settingsApplyRow: document.getElementById("settings-apply-row") as HTMLDivElement,
+  settingsApply: document.getElementById("settings-apply") as HTMLButtonElement,
+  settingsApplyHint: document.getElementById("settings-apply-hint") as HTMLSpanElement,
   themeRow: document.querySelector(".theme-row") as HTMLDivElement,
   newChat: document.getElementById("btn-new-chat") as HTMLButtonElement,
   thinkingBlocks: document.getElementById("btn-thinking-blocks") as HTMLButtonElement,
@@ -464,15 +481,10 @@ function beginSessionLoading(): void {
   loadingMaxTimer = setTimeout(loadingMaxTick, LOADING_MAX_MS);
 }
 
-// safety net against endless loading: while the history is not rendered yet
-// pi is still booting (get_state retries ≈ 27s) → keep waiting
+// Hard safety net: startup retries fit inside this window, but a broken
+// request chain must never leave the whole interface covered indefinitely.
 function loadingMaxTick(): void {
-  if (!sessionLoading) return;
-  if (!loadingHistoryLoaded) {
-    loadingMaxTimer = setTimeout(loadingMaxTick, LOADING_MAX_MS);
-    return;
-  }
-  endSessionLoading();
+  if (sessionLoading) endSessionLoading();
 }
 
 function armLoadingQuiet(): void {
@@ -861,28 +873,70 @@ let dangerouslyAllowAllNpmScripts = false;
 /** RPC setStatus keys hidden by the user (the only stable source id RPC exposes) */
 let hiddenStatusKeys: string[] = [];
 let sessionNotificationsOverride: "desktop" | "vscode" | "off" | undefined;
+let currentSessionSettings: SessionSettings = {};
+let sessionSettingsNeedPersistence = false;
+let browserSessionPermissions: BrowserToolOperation[] = [];
+let browserPersistentPermissions: BrowserPersistentPermissions = {};
+let browserSessionSettingsReady: Promise<void> = Promise.resolve();
 
 function effectiveNotifications(): "desktop" | "vscode" | "off" {
   return sessionNotificationsOverride ?? notificationsDefault;
 }
 
-// reads the current session's settings (override) from the host/bridge
+// Reads settings embedded in the current session JSONL. Browser grants stored
+// here disappear naturally when the session is deleted.
 function refreshSessionNotificationOverride(): void {
   sessionNotificationsOverride = undefined;
+  currentSessionSettings = {};
+  browserSessionPermissions = [];
+  sessionSettingsNeedPersistence = false;
   updateNotificationsSessionUi();
-  if (!currentSessionPath) return;
-  void ideRequest({
+  const sessionPath = currentSessionPath;
+  if (!sessionPath) {
+    browserSessionSettingsReady = Promise.resolve();
+    return;
+  }
+  browserSessionSettingsReady = ideRequest({
     type: "getSessionSettings",
-    sessionPath: currentSessionPath,
+    sessionPath,
   }).then((res) => {
-    const v = res?.ok
-      ? (res.data as { notifications?: "desktop" | "vscode" | "off" } | null)
-          ?.notifications
-      : undefined;
+    if (currentSessionPath !== sessionPath) return;
+    const settings = res?.ok
+      ? ((res.data as SessionSettings | null) ?? {})
+      : ({} as SessionSettings);
+    const v = settings.notifications;
     if (v === "desktop" || v === "vscode" || v === "off") {
       sessionNotificationsOverride = v;
     }
+    browserSessionPermissions = normalizeBrowserPermissionOperations(
+      settings.browserToolPermissions,
+    );
+    currentSessionSettings = {
+      ...(sessionNotificationsOverride
+        ? { notifications: sessionNotificationsOverride }
+        : {}),
+      ...(browserSessionPermissions.length > 0
+        ? { browserToolPermissions: browserSessionPermissions }
+        : {}),
+    };
     updateNotificationsSessionUi();
+  });
+}
+
+function persistCurrentSessionSettings(): void {
+  if (!currentSessionPath) {
+    sessionSettingsNeedPersistence = true;
+    return;
+  }
+  sessionSettingsNeedPersistence = false;
+  transport?.send({
+    channel: "ide",
+    payload: {
+      type: "setSessionSettings",
+      sessionPath: currentSessionPath,
+      settings: currentSessionSettings,
+      id: `cfg-${++configId}`,
+    },
   });
 }
 
@@ -935,7 +989,8 @@ function applyUiStrings(): void {
   els.settingsBrowserTitle.textContent = t("browserSettingsTitle");
   els.settingsBrowserUrlLabel.textContent = t("browserServerUrlLabel");
   els.settingsBrowserUrlNote.textContent = t("browserServerUrlNote");
-  els.settingsBrowserSave.textContent = t("browserSaveConnect");
+  els.settingsBrowserResetPermissions.textContent = t("browserPermissionsResetAll");
+  els.settingsApply.textContent = t("apply");
   els.send.title = t("send");
   els.attachBtn.title = t("attachBtn");
   els.newChat.title = t("newChat");
@@ -976,7 +1031,6 @@ function applyUiStrings(): void {
   els.settingsInfoTitle.textContent = t("settingsSectionInfo");
   els.settingsWebviewTitle.textContent = t("settingsSectionWebview");
   els.settingsCliTitle.textContent = t("settingsSectionCli");
-  els.pidevApply.textContent = t("apply");
   // Notifications sub-group inside the Webview section
   els.settingsNotificationsTitle.textContent = t("settingsNotificationsGroup");
   els.themeLabel.textContent = t("theme");
@@ -1042,6 +1096,7 @@ function applyUiStrings(): void {
   updateThemeButtons();
   populateSessionMenu();
   refreshCollapseFooters();
+  updateSettingsApplyState();
   // theme: inside the VS Code webview the IDE manages it — no choice
   if (runtime.isVsCode) {
     const row = els.themeRow.closest(".settings-row") as HTMLElement | null;
@@ -1146,6 +1201,9 @@ async function requestConfig(): Promise<void> {
     els.allowRemoteNpmUpdates.checked = allowRemoteNpmUpdates;
     dangerouslyAllowAllNpmScripts = cfg.dangerouslyAllowAllNpmScripts === true;
     els.allowNpmInstallScripts.checked = dangerouslyAllowAllNpmScripts;
+    browserPersistentPermissions = normalizeBrowserPersistentPermissions(
+      cfg.browserToolPermissions,
+    );
     hiddenStatusKeys = normalizeHiddenStatusKeys(cfg.hiddenStatusKeys);
     renderStatusSlots();
     applyUiStrings();
@@ -1217,6 +1275,30 @@ function refreshVersionInfo(): void {
 
 let savedCliValues: CliFlags = {};
 let cliDirty = false;
+let savedBrowserServerUrl = "";
+let browserServerUrlReady = false;
+let applyingSettings = false;
+/** Staged pi.dev changes are applied by the single settings footer action. */
+const pendingPiSettings = new Map<string, unknown>();
+
+function browserServerUrlDirty(): boolean {
+  return browserServerSettingDirty(
+    els.settingsBrowserUrl.value,
+    savedBrowserServerUrl,
+    browserServerUrlReady,
+    runtime.isBrowserExtension,
+  );
+}
+
+function updateSettingsApplyState(): void {
+  const dirty = settingsApplyNeeded(
+    browserServerUrlDirty(),
+    cliDirty,
+    pendingPiSettings.size,
+  );
+  els.settingsApplyRow.hidden = !dirty;
+  els.settingsApplyHint.textContent = dirty ? t("settingsApplyHint") : "";
+}
 
 // current values in the form (flag → value): only the REALLY set ones
 // (checked checkboxes, non-empty strings) — the comparison with the saved
@@ -1238,9 +1320,8 @@ function currentCliValues(): CliFlags {
 }
 
 function setCliDirty(): void {
-  cliDirty = JSON.stringify(currentCliValues()) !== JSON.stringify(savedCliValues);
-  els.cliApplyRow.hidden = !cliDirty;
-  if (cliDirty) els.cliApplyHint.textContent = t("applyCliHint");
+  cliDirty = !settingRecordsEqual(currentCliValues(), savedCliValues);
+  updateSettingsApplyState();
 }
 
 // dynamic rows: ONLY the existing flags (if the extension is missing, the
@@ -1304,9 +1385,9 @@ function refreshCliFlags(): void {
 // local get_state state.
 //
 // The section is a STAGED FORM: editing a control only records the change in
-// pendingPiSettings and reveals the section "Applica" button — nothing is
-// sent to pi.dev before it. Closing the panel without "Applica" discards the
-// pending changes (they are lost, by design). "Applica" then:
+// pendingPiSettings and reveals the single settings-footer "Applica" button —
+// nothing is sent to pi.dev before it. Closing the panel without "Applica"
+// discards the pending changes (they are lost, by design). "Applica" then:
 //  - pi-rpc keys → the pi RPC is called directly (live session state);
 //  - pi-settings-file keys → confirm (propagation "restart", same warning as
 //    the CLI flags "Applica"), then set_setting → the host writes the file
@@ -1318,9 +1399,6 @@ let availablePiModels: Array<{
   id: string;
   name?: string;
 }> = [];
-/** staged changes in the pi.dev section (key → value), applied only by "Applica" */
-const pendingPiSettings = new Map<string, unknown>();
-let applyingPiSettings = false;
 let settingsModelPickerAbort = new AbortController();
 
 function sessionValueFor(key: string): unknown {
@@ -1342,8 +1420,7 @@ function sessionValueFor(key: string): unknown {
 
 async function fetchPiSettings(): Promise<void> {
   pendingPiSettings.clear();
-  els.pidevApplyRow.hidden = true;
-  els.pidevApplyHint.textContent = "";
+  updateSettingsApplyState();
   els.pidevBody.textContent = "";
   const res = await ideRequest({ type: "getSettings" });
   const data = res?.ok ? (res.data as PiSettingsResult | undefined) : undefined;
@@ -1398,9 +1475,7 @@ function stageSetting(setting: PiSetting, value: unknown): void {
   } else {
     pendingPiSettings.set(setting.key, value);
   }
-  const dirty = pendingPiSettings.size > 0;
-  els.pidevApplyRow.hidden = !dirty;
-  els.pidevApplyHint.textContent = dirty ? t("piSettingApplyHint") : "";
+  updateSettingsApplyState();
 }
 
 function renderPiSettings(): void {
@@ -1624,112 +1699,107 @@ function settingControl(setting: PiSetting): HTMLElement {
   return input;
 }
 
-/** live write of a session (pi-rpc) key — no restart, no confirm */
-function applyRpcSetting(setting: PiSetting, value: unknown): void {
+/** Live write of a session (pi-rpc) key — no restart. */
+async function applyRpcSetting(setting: PiSetting, value: unknown): Promise<void> {
   switch (setting.key) {
     case "steeringMode":
       if (value === "one-at-a-time" || value === "all") {
+        await rpcRequest(rpc.setSteeringMode(value));
         steeringMode = value;
-        void rpcRequest(rpc.setSteeringMode(value));
       }
       break;
     case "followUpMode":
       if (value === "one-at-a-time" || value === "all") {
+        await rpcRequest(rpc.setFollowUpMode(value));
         followUpMode = value;
-        void rpcRequest(rpc.setFollowUpMode(value));
       }
       break;
     case "autoCompaction":
+      await rpcRequest(rpc.setAutoCompaction(value === true));
       autoCompactionEnabled = value === true;
-      void rpcRequest(rpc.setAutoCompaction(autoCompactionEnabled));
       break;
   }
 }
 
-/** section "Applica": confirm once (restart keys) → apply RPC keys → write file keys */
-async function applyPendingSettings(): Promise<void> {
-  if (applyingPiSettings || pendingPiSettings.size === 0) return;
+/** Applies every staged settings section through one action and one host restart. */
+async function applyAllSettings(): Promise<void> {
+  if (applyingSettings) return;
   const pending = [...pendingPiSettings.entries()];
-  const needsRestart = pending.some(([key]) => {
-    const s = piSettings.find((p) => p.key === key);
-    return s?.source !== "pi-rpc" && s?.propagation === "restart";
-  });
-  if (needsRestart) {
-    const ok = await showConfirm(t("piSettingRestartWarn"));
-    if (!ok) return; // keep the staged values: the user can still apply or close (discard)
-    if (working) await stopWorking(); // clear pi queue + abort before restart
+  const browserChanged = browserServerUrlDirty();
+  const flagsChanged = cliDirty;
+  if (!browserChanged && !flagsChanged && pending.length === 0) return;
+
+  const rpcChanges: Array<{ setting: PiSetting; value: unknown }> = [];
+  const fileChanges: Array<{ key: string; value: unknown }> = [];
+  for (const [key, value] of pending) {
+    const setting = piSettings.find((candidate) => candidate.key === key);
+    if (!setting) continue;
+    if (setting.source === "pi-rpc") rpcChanges.push({ setting, value });
+    else fileChanges.push({ key, value });
   }
-  applyingPiSettings = true;
-  els.pidevApply.disabled = true;
-  els.pidevApplyHint.textContent = t("piSettingApplying");
-  let succeeded = true;
+  const needsRestart = browserChanged || flagsChanged || fileChanges.length > 0;
+  if (working && needsRestart) {
+    const ok = await showConfirm(t("settingsApplyRestartWarn"));
+    if (!ok) return;
+    await stopWorking();
+  }
+
+  applyingSettings = true;
+  els.settingsApply.disabled = true;
+  els.settingsApplyHint.textContent = t("settingsApplying");
   try {
-    const fileChanges: Array<{ key: string; value: unknown }> = [];
-    for (const [key, value] of pending) {
-      const setting = piSettings.find((candidate) => candidate.key === key);
-      if (!setting) continue;
-      if (setting.source === "pi-rpc") {
-        applyRpcSetting(setting, value);
-        setting.value = value;
-      } else {
-        fileChanges.push({ key, value });
+    for (const change of rpcChanges) {
+      await applyRpcSetting(change.setting, change.value);
+      change.setting.value = change.value;
+    }
+
+    if (fileChanges.length > 0 || flagsChanged) {
+      const result = await ideRequest({
+        type: "applySettings",
+        settings: fileChanges,
+        ...(flagsChanged ? { flags: currentCliValues() } : {}),
+        ...(currentSessionPath ? { sessionPath: currentSessionPath } : {}),
+      });
+      if (!result?.ok) {
+        els.settingsApplyHint.textContent = result?.error ?? t("piSettingSetFailed");
+        addStatusLine(t("piSettingSetFailed"));
+        return;
+      }
+      for (const change of fileChanges) {
+        const setting = piSettings.find((candidate) => candidate.key === change.key);
+        if (setting) setting.value = change.value;
+      }
+      if (flagsChanged) {
+        savedCliValues = currentCliValues();
+        cliDirty = false;
       }
     }
-    if (fileChanges.length > 0) {
-      const res = await ideRequest({ type: "setSettings", settings: fileChanges });
-      if (!res?.ok) {
-        succeeded = false;
-        console.warn("[pi-webview] set_settings failed:", res?.error);
-        addStatusLine(t("piSettingSetFailed"));
-      } else {
-        for (const change of fileChanges) {
-          const setting = piSettings.find((candidate) => candidate.key === change.key);
-          if (setting) setting.value = change.value;
-        }
+
+    pendingPiSettings.clear();
+    renderPiSettings();
+    updateSettingsApplyState();
+
+    if (browserChanged) {
+      els.settingsBrowserStatus.textContent = t("connecting");
+      const started = await connectConfiguredBrowserServer(els.settingsBrowserUrl.value);
+      if (!started) {
+        els.settingsBrowserStatus.textContent = browserConnectionError;
+        return;
       }
+      savedBrowserServerUrl = els.settingsBrowserUrl.value.trim();
+      browserServerUrlReady = true;
+    } else {
+      closeSettings();
     }
   } finally {
-    applyingPiSettings = false;
-    pendingPiSettings.clear();
-    els.pidevApply.disabled = false;
-    els.pidevApplyRow.hidden = true;
-    els.pidevApplyHint.textContent = "";
-    renderPiSettings();
-    if (succeeded) closeSettings();
+    applyingSettings = false;
+    els.settingsApply.disabled = false;
+    updateSettingsApplyState();
   }
 }
 
-els.pidevApply.addEventListener("click", () => {
-  void applyPendingSettings();
-});
-
-// Apply: with an in-flight run → confirm + dequeue+stop (like STOP),
-// then setCliFlags → the companion restarts pi transparently (connection_closed
-// reason restart + pi_restarted → re-init without reload)
-els.cliApply.addEventListener("click", () => {
-  void (async () => {
-    const doApply = async (): Promise<void> => {
-      els.cliApply.disabled = true;
-      els.cliApplyHint.textContent = t("applyCliRestarting");
-      closeSettings();
-      const result = await ideRequest({
-        type: "setCliFlags",
-        ...(currentSessionPath ? { sessionPath: currentSessionPath } : {}),
-        flags: currentCliValues(),
-      });
-      if (!result?.ok) {
-        openSettings();
-        els.cliApply.disabled = false;
-        els.cliApplyHint.textContent = result?.error ?? t("piSettingSetFailed");
-      }
-    };
-    if (working) {
-      const ok = await showConfirm(t("applyCliWarn"));
-      if (!ok) return;
-      await stopWorking(); // clear pi queue + abort before restart
-    }
-    await doApply();
-  })();
+els.settingsApply.addEventListener("click", () => {
+  void applyAllSettings();
 });
 
 function openSettings(): void {
@@ -1738,8 +1808,14 @@ function openSettings(): void {
   els.settingsBrowserSection.hidden = !runtime.isBrowserExtension;
   if (runtime.isBrowserExtension) {
     els.settingsBrowserStatus.textContent = "";
+    els.settingsBrowserPermissionsStatus.textContent = "";
+    browserServerUrlReady = false;
     void getBrowserServerUrl().then((url) => {
+      if (els.settingsModal.hidden) return;
+      savedBrowserServerUrl = url;
       els.settingsBrowserUrl.value = url;
+      browserServerUrlReady = true;
+      updateSettingsApplyState();
     });
   }
   refreshVersionInfo();
@@ -1750,14 +1826,13 @@ function openSettings(): void {
 function closeSettings(): void {
   els.settingsModal.hidden = true;
   els.settingsBtn.setAttribute("aria-expanded", "false");
-  // staged pi.dev changes are discarded: they apply only via the section
-  // "Applica" button (closing without it = changes lost, by design)
-  if (pendingPiSettings.size > 0) {
-    pendingPiSettings.clear();
-    els.pidevApplyRow.hidden = true;
-    els.pidevApplyHint.textContent = "";
-    renderPiSettings();
-  }
+  // Staged restart-sensitive changes are discarded when the dialog closes
+  // without using the single settings-footer Apply action.
+  pendingPiSettings.clear();
+  cliDirty = false;
+  browserServerUrlReady = false;
+  updateSettingsApplyState();
+  renderPiSettings();
 }
 
 els.settingsBtn.addEventListener("click", (e) => {
@@ -1766,21 +1841,31 @@ els.settingsBtn.addEventListener("click", (e) => {
   else closeSettings();
 });
 
-els.settingsClose.addEventListener("click", closeSettings);
+els.settingsClose.addEventListener("click", () => closeSettings());
 els.settingsModal.addEventListener("click", (e) => {
   if (e.target === els.settingsModal) closeSettings();
 });
 
-els.settingsBrowserSave.addEventListener("click", () => {
+els.settingsBrowserUrl.addEventListener("input", updateSettingsApplyState);
+
+els.settingsBrowserResetPermissions.addEventListener("click", () => {
   if (!runtime.isBrowserExtension) return;
-  const value = els.settingsBrowserUrl.value;
-  els.settingsBrowserSave.disabled = true;
-  els.settingsBrowserStatus.textContent = t("connecting");
-  closeSettings();
-  void connectConfiguredBrowserServer(value).then((started) => {
-    els.settingsBrowserSave.disabled = false;
-    if (!started) els.settingsBrowserStatus.textContent = browserConnectionError;
-  });
+  void (async () => {
+    els.settingsBrowserResetPermissions.disabled = true;
+    try {
+      await browserSessionSettingsReady;
+      browserSessionPermissions = [];
+      browserPersistentPermissions = {};
+      currentSessionSettings = { ...currentSessionSettings };
+      delete currentSessionSettings.browserToolPermissions;
+      if (currentSessionPath) persistCurrentSessionSettings();
+      else sessionSettingsNeedPersistence = false;
+      persistWebviewConfig({ browserToolPermissions: {} });
+      els.settingsBrowserPermissionsStatus.textContent = t("browserPermissionsResetDone");
+    } finally {
+      els.settingsBrowserResetPermissions.disabled = false;
+    }
+  })();
 });
 
 // --- session dropdown -------------------------------------------------------
@@ -1958,6 +2043,7 @@ async function deleteSessionFlow(path: string): Promise<void> {
         const response = await rpcRequest({ type: "new_session" });
         if (response.success) {
           currentSessionPath = null;
+          refreshSessionNotificationOverride();
           renderNativeQueues([], []);
         }
       } catch {
@@ -1985,6 +2071,7 @@ async function startNewSession(): Promise<void> {
     const res = await rpcRequest({ type: "new_session" });
     if (!res.success) return;
     currentSessionPath = null;
+    refreshSessionNotificationOverride();
     renderNativeQueues([], []);
     els.thread.textContent = "";
     sessionHasMessages = false;
@@ -2014,21 +2101,29 @@ async function forkSessionIntoCurrentWorkspace(path: string): Promise<void> {
   }
 }
 
-// Session pick: same folder → switch. For a session in another folder the IDE
-// keeps pi's fork-only behavior; standalone also lets the user move the bridge
-// cwd to the session workspace and resume the ORIGINAL session there.
+// Session pick: Chrome can move its bridge channel to the selected session's
+// original workspace, so it must never fork merely because All shows another
+// path. Standalone keeps its explicit resume/fork/new chooser, while IDEs have
+// a fixed host workspace and therefore retain their fork confirmation.
 async function pickSession(path: string): Promise<void> {
   if (switchingSession) return;
-  const s = sessions.find((x) => x.path === path);
-  const crossFolder = s?.cwd && workspacePath && !samePath(s.cwd, workspacePath);
-  if (!crossFolder) {
+  const session = sessions.find((candidate) => candidate.path === path);
+  const crossWorkspace = Boolean(
+    session?.cwd && workspacePath && !samePath(session.cwd, workspacePath),
+  );
+  const strategy = sessionPickStrategy(runtime.mode, crossWorkspace);
+  if (strategy === "switch") {
     switchSession(path);
     return;
   }
-  if (runtime.mode === "standalone" && s?.cwd) {
-    const action = await askCrossWorkspaceSessionAction(s.cwd);
+  if (strategy === "reload-original") {
+    await reloadBrowserSession(path);
+    return;
+  }
+  if (strategy === "choose-standalone-action" && session?.cwd) {
+    const action = await askCrossWorkspaceSessionAction(session.cwd);
     if (action === "resume") {
-      await resumeSessionInWorkspace(path, s.cwd);
+      await resumeSessionInWorkspace(path, session.cwd);
     } else if (action === "fork") {
       await forkSessionIntoCurrentWorkspace(path);
     } else if (action === "new") {
@@ -2195,19 +2290,14 @@ els.notificationsSession.addEventListener("change", () => {
   } else {
     return;
   }
-  // the override lives INSIDE the session jsonl (custom entry), never in the
-  // global config: one key per session would grow it forever
-  transport?.send({
-    channel: "ide",
-    payload: {
-      type: "setSessionSettings",
-      sessionPath: currentSessionPath,
-      settings: sessionNotificationsOverride
-        ? { notifications: sessionNotificationsOverride }
-        : {},
-      id: `cfg-${++configId}`,
-    },
-  });
+  currentSessionSettings = {
+    ...currentSessionSettings,
+    ...(sessionNotificationsOverride
+      ? { notifications: sessionNotificationsOverride }
+      : {}),
+  };
+  if (!sessionNotificationsOverride) delete currentSessionSettings.notifications;
+  persistCurrentSessionSettings();
 });
 
 watchThemeChanges(() => applyTheme(themePref));
@@ -2948,6 +3038,22 @@ function askCrossWorkspaceSessionAction(
   });
 }
 
+async function reloadBrowserSession(path: string): Promise<void> {
+  if (!beginSessionTransition()) return;
+  let reloading = false;
+  try {
+    // A fresh Chrome channel resolves the session id to its original workspace
+    // from the JSONL header. Avoid restarting pi inside the old channel: that
+    // transition can race outstanding startup requests and strand the loader.
+    currentSessionPath = path;
+    await persistBrowserSessionUrl();
+    reloading = true;
+    location.reload();
+  } finally {
+    if (!reloading) finishSessionTransition(false);
+  }
+}
+
 async function resumeSessionInWorkspace(path: string, folder: string): Promise<void> {
   if (!beginSessionTransition()) return;
   let historyLoaded = false;
@@ -3048,6 +3154,7 @@ async function changeWorkspace(): Promise<void> {
       historyLoaded = await performSwitchSession(forkPath);
     } else {
       currentSessionPath = null;
+      refreshSessionNotificationOverride();
       els.thread.textContent = "";
       sessionHasMessages = false;
       await refreshSessions();
@@ -3103,6 +3210,7 @@ async function persistBrowserSessionUrl(): Promise<void> {
 function persistSessionPath(): void {
   if (!currentSessionPath) return;
   void ideRequest({ type: "storeSession", path: currentSessionPath });
+  if (sessionSettingsNeedPersistence) persistCurrentSessionSettings();
 }
 
 async function performSwitchSession(path: string): Promise<boolean> {
@@ -6162,11 +6270,13 @@ function renderRpcEvent(evt: RpcEvent): void {
     // the status it was launched with and the pending "!" disappears
     void refreshTrust();
     updateSendButton();
-    // reset UI Applica: i valori applicati sono ora quelli salvati
-    els.cliApply.disabled = false;
-    els.cliApplyRow.hidden = true;
-    els.cliApplyHint.textContent = "";
-    savedCliValues = currentCliValues();
+    // A unified Apply may have changed launch flags; keep its single dirty
+    // state aligned while preserving edits staged during unrelated restarts.
+    if (applyingSettings && cliDirty) {
+      savedCliValues = currentCliValues();
+      cliDirty = false;
+      updateSettingsApplyState();
+    }
     if (compacting) finishCompaction(true, "restart");
     void (async () => {
       await requestConfig();
@@ -6814,10 +6924,9 @@ function attachVisibleContext(message: string): string {
   );
 }
 
-const browserReadConsents = new BrowserReadConsentStore();
 let browserToolConfirmTail: Promise<void> = Promise.resolve();
 
-function queueBrowserToolConfirm(confirm: () => Promise<boolean>): Promise<boolean> {
+function queueBrowserToolConfirm<T>(confirm: () => Promise<T>): Promise<T> {
   const pending = browserToolConfirmTail.then(confirm);
   browserToolConfirmTail = pending.then(
     () => undefined,
@@ -6826,21 +6935,16 @@ function queueBrowserToolConfirm(confirm: () => Promise<boolean>): Promise<boole
   return pending;
 }
 
-function allowBrowserReadOperation(
-  origin: string,
-  operation: "dom" | "screenshot",
-): Promise<boolean> {
-  const messageKey =
-    operation === "dom" ? "browserDomConsent" : "browserScreenshotConsent";
-  return browserReadConsents.allow(origin, operation, () =>
-    queueBrowserToolConfirm(() => showConfirm(tpl(t(messageKey), { origin }))),
-  );
-}
-
 function browserActionSummary(actions: BrowserPageAction[]): string {
   return actions
     .map((action, index) => {
-      const selector = action.selector ?? t("browserActionPage");
+      const selector =
+        "selector" in action && action.selector
+          ? action.selector
+          : t("browserActionPage");
+      if (action.type === "click_at") {
+        return `${index + 1}. ${t("browserActionClickAt")} (${action.x}, ${action.y})`;
+      }
       if (action.type === "type") {
         const text =
           action.text.length > 500 ? `${action.text.slice(0, 500)}…` : action.text;
@@ -6850,31 +6954,115 @@ function browserActionSummary(actions: BrowserPageAction[]): string {
         return `${index + 1}. ${t("browserActionSelect")} ${selector}\n   ${JSON.stringify(action.value)}`;
       }
       if (action.type === "scroll") {
+        if (action.deltaX === undefined && action.deltaY === undefined) {
+          return `${index + 1}. ${t("browserActionReveal")} ${selector} (${action.block ?? "center"}, ${action.inline ?? "nearest"})`;
+        }
         return `${index + 1}. ${t("browserActionScroll")} ${selector} (${action.deltaX ?? 0}, ${action.deltaY ?? 0})`;
       }
+      if (action.type === "reload") {
+        return `${index + 1}. ${t("browserActionReload")}`;
+      }
+      if (action.type === "navigate") {
+        const url = action.url.length > 500 ? `${action.url.slice(0, 500)}…` : action.url;
+        return `${index + 1}. ${t("browserActionNavigate")}\n   ${url}`;
+      }
+      if (action.type === "class") {
+        const changes = [
+          ...(action.add ?? []).map((token) => `+${token}`),
+          ...(action.remove ?? []).map((token) => `-${token}`),
+        ];
+        return `${index + 1}. ${t("browserActionClass")} ${selector}\n   ${changes.join(" ")}`;
+      }
+      if (action.type === "style") {
+        const changes = [
+          ...(action.set ?? []).map((value) => {
+            const preview =
+              value.value.length > 300 ? `${value.value.slice(0, 300)}…` : value.value;
+            return `${value.property}: ${preview}${value.priority ? " !important" : ""}`;
+          }),
+          ...(action.remove ?? []).map((property) => `${property}: ${t("remove")}`),
+        ];
+        return `${index + 1}. ${t("browserActionStyle")} ${selector}\n   ${changes.join("; ")}`;
+      }
       const label =
-        action.type === "click" ? t("browserActionClick") : t("browserActionFocus");
+        action.type === "click"
+          ? action.target === "visual"
+            ? t("browserActionVisualClick")
+            : t("browserActionClick")
+          : t("browserActionFocus");
       return `${index + 1}. ${label} ${selector}`;
     })
     .join("\n");
 }
 
-async function allowBrowserActions(
+function browserPermissionMessageKey(operation: BrowserToolOperation): string {
+  if (operation === "dom") return "browserPermissionDomConsent";
+  if (operation === "screenshot") return "browserPermissionScreenshotConsent";
+  return "browserPermissionActionConsent";
+}
+
+async function allowBrowserToolOperation(
   origin: string,
-  actions: BrowserPageAction[],
+  operation: BrowserToolOperation,
+  actions?: BrowserPageAction[],
 ): Promise<boolean> {
-  return queueBrowserToolConfirm(() =>
-    showConfirm(
-      tpl(t("browserActionConsent"), { origin }),
-      browserActionSummary(actions),
-    ),
-  );
+  await browserSessionSettingsReady;
+  if (
+    browserToolPermissionGranted(
+      operation,
+      origin,
+      browserSessionPermissions,
+      browserPersistentPermissions,
+    )
+  ) {
+    return true;
+  }
+  return queueBrowserToolConfirm(async () => {
+    if (
+      browserToolPermissionGranted(
+        operation,
+        origin,
+        browserSessionPermissions,
+        browserPersistentPermissions,
+      )
+    ) {
+      return true;
+    }
+    const scope = await showBrowserPermissionDialog(
+      `${tpl(t(browserPermissionMessageKey(operation)), { origin })}\n\n${t("browserPermissionScopeHelp")}`,
+      operation === "action" && actions ? browserActionSummary(actions) : undefined,
+    );
+    if (!scope) return false;
+    if (scope === "session") {
+      browserSessionPermissions = grantBrowserSessionPermission(
+        browserSessionPermissions,
+        operation,
+      );
+      currentSessionSettings = {
+        ...currentSessionSettings,
+        browserToolPermissions: browserSessionPermissions,
+      };
+      persistCurrentSessionSettings();
+    } else {
+      browserPersistentPermissions = grantBrowserPersistentPermission(
+        browserPersistentPermissions,
+        operation,
+        origin,
+        scope,
+      );
+      persistWebviewConfig({
+        browserToolPermissions: browserPersistentPermissions,
+      });
+    }
+    return true;
+  });
 }
 
 async function handleBrowserToolRequest(
   requestId: string,
   operation: BrowserToolOperation,
   requestedActions?: BrowserPageAction[],
+  requestedSelector?: string,
 ): Promise<void> {
   const context = visibleBrowserContext();
   let origin = "";
@@ -6892,9 +7080,14 @@ async function handleBrowserToolRequest(
     return;
   }
   let actions: BrowserPageAction[] | undefined;
+  let selector: string | undefined;
   try {
     actions =
       operation === "action" ? normalizeBrowserPageActions(requestedActions) : undefined;
+    selector =
+      operation === "dom" && requestedSelector !== undefined
+        ? normalizeBrowserElementSelector(requestedSelector)
+        : undefined;
   } catch {
     await ideRequest({
       type: "browserToolResponse",
@@ -6903,10 +7096,7 @@ async function handleBrowserToolRequest(
     });
     return;
   }
-  const allowed =
-    operation === "action"
-      ? await allowBrowserActions(origin, actions!)
-      : await allowBrowserReadOperation(origin, operation);
+  const allowed = await allowBrowserToolOperation(origin, operation, actions);
   if (!allowed) {
     await ideRequest({
       type: "browserToolResponse",
@@ -6920,6 +7110,7 @@ async function handleBrowserToolRequest(
     requestId,
     operation,
     ...(actions ? { actions } : {}),
+    ...(selector ? { selector } : {}),
     expectedOrigin: origin,
     expectedDocumentId: context.documentId,
   });
@@ -6966,7 +7157,12 @@ function renderIdeEvent(evt: IdeEvent): void {
     return;
   }
   if (evt.type === "browser_tool_request") {
-    void handleBrowserToolRequest(evt.requestId, evt.operation, evt.actions);
+    void handleBrowserToolRequest(
+      evt.requestId,
+      evt.operation,
+      evt.actions,
+      evt.selector,
+    );
     return;
   }
   if (evt.type === "selection_changed" || evt.type === "selection_cleared") {
@@ -8362,6 +8558,65 @@ function showConfirm(
     });
     document.addEventListener("keydown", esc);
     ok.focus();
+  });
+}
+
+function showBrowserPermissionDialog(
+  message: string,
+  preview?: string,
+): Promise<BrowserPermissionScope | null> {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    const card = document.createElement("div");
+    card.className = "modal browser-permission-modal";
+    const { row: lead, copy } = buildWarningModalLead(message);
+    if (preview) {
+      const value = document.createElement("div");
+      value.className = "browser-permission-preview";
+      value.textContent = preview;
+      copy.appendChild(value);
+    }
+    const actions = document.createElement("div");
+    actions.className = "modal-actions browser-permission-actions";
+    const session = document.createElement("button");
+    session.type = "button";
+    session.className = "btn accent";
+    session.textContent = t("browserPermissionAllowSession");
+    const site = document.createElement("button");
+    site.type = "button";
+    site.className = "btn";
+    site.textContent = t("browserPermissionAllowSite");
+    const global = document.createElement("button");
+    global.type = "button";
+    global.className = "btn danger";
+    global.textContent = t("browserPermissionAllowGlobal");
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn";
+    cancel.textContent = t("cancel");
+    actions.append(session, site, global, cancel);
+    card.append(lead, actions);
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+
+    const close = (scope: BrowserPermissionScope | null) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", esc);
+      resolve(scope);
+    };
+    const esc = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close(null);
+    };
+    session.addEventListener("click", () => close("session"));
+    site.addEventListener("click", () => close("site"));
+    global.addEventListener("click", () => close("global"));
+    cancel.addEventListener("click", () => close(null));
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) close(null);
+    });
+    document.addEventListener("keydown", esc);
+    session.focus();
   });
 }
 
@@ -10099,4 +10354,15 @@ async function boot(): Promise<void> {
   }
 }
 
-void boot();
+void boot().catch((error: unknown) => {
+  if (runtime.isBrowserExtension && isBrowserExtensionContextInvalidated(error)) {
+    location.reload();
+    return;
+  }
+  statusState = "closed";
+  updateStatus();
+  hideBootLoader();
+  if (runtime.isBrowserExtension) {
+    void explainBrowserConnectionFailure(browserConnectionMessage(error));
+  }
+});

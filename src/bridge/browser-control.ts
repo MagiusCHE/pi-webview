@@ -23,6 +23,7 @@ export class BrowserToolBroker {
     signal?: AbortSignal,
     timeoutMs = 120_000,
     actions?: BrowserPageAction[],
+    selector?: string,
   ): Promise<BrowserToolPayload> {
     return new Promise((resolve) => {
       const requestId = randomUUID();
@@ -50,7 +51,12 @@ export class BrowserToolBroker {
         finish({ ok: false, operation, error: "Browser tool was aborted." });
         return;
       }
-      emit({ requestId, operation, ...(actions ? { actions } : {}) });
+      emit({
+        requestId,
+        operation,
+        ...(actions ? { actions } : {}),
+        ...(selector ? { selector } : {}),
+      });
     });
   }
 

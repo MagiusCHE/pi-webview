@@ -7,7 +7,8 @@ import {
 } from "./connection.ts";
 
 const SERVER_URL_KEY = "serverUrl";
-const SESSION_INTENT_KEY = "sessionIntent";
+const LEGACY_SESSION_INTENT_KEY = "sessionIntent";
+const WINDOW_SESSION_INTENT_PREFIX = "sessionIntent:";
 const PANEL_PORT = "pi-webview-side-panel";
 const SESSION_INTENT_KEYS = ["s", "session", "new", "launch"] as const;
 
@@ -36,7 +37,7 @@ interface ChromePermissions {
 
 interface ChromeApi {
   runtime?: ChromeRuntime;
-  storage?: { local?: ChromeStorageArea };
+  storage?: { local?: ChromeStorageArea; session?: ChromeStorageArea };
   permissions?: ChromePermissions;
   windows?: { getCurrent(): Promise<{ id?: number }> };
 }
@@ -81,32 +82,62 @@ function normalizeBrowserSessionIntent(value: unknown): string {
   return output.toString();
 }
 
-async function getBrowserConnectionStorage(): Promise<{
+export function browserWindowSessionIntentKey(windowId: number): string {
+  return `${WINDOW_SESSION_INTENT_PREFIX}${windowId}`;
+}
+
+export function browserWindowSessionIntent(
+  values: Record<string, unknown>,
+  windowId: number | undefined,
+): string {
+  if (windowId === undefined) return "new=1";
+  return (
+    normalizeBrowserSessionIntent(values[browserWindowSessionIntentKey(windowId)]) ||
+    "new=1"
+  );
+}
+
+async function currentBrowserWindowId(
+  api: ChromeApi | null,
+): Promise<number | undefined> {
+  try {
+    return (await api?.windows?.getCurrent())?.id;
+  } catch {
+    return undefined;
+  }
+}
+
+async function getBrowserConnectionStorage(
+  api: ChromeApi | null = browserApi(),
+): Promise<{
   serverUrl: string;
   sessionIntent: string;
 }> {
-  const storage = browserApi()?.storage?.local;
-  if (!storage) {
-    return { serverUrl: DEFAULT_BROWSER_SERVER_URL, sessionIntent: "" };
+  const localStorage = api?.storage?.local;
+  if (!localStorage) {
+    return { serverUrl: DEFAULT_BROWSER_SERVER_URL, sessionIntent: "new=1" };
   }
-  const values = await storage.get([SERVER_URL_KEY, SESSION_INTENT_KEY]);
+  const windowId = await currentBrowserWindowId(api);
+  const sessionStorage = api?.storage?.session;
+  const sessionKey =
+    windowId === undefined ? undefined : browserWindowSessionIntentKey(windowId);
+  const [values, sessionValues] = await Promise.all([
+    localStorage.get([SERVER_URL_KEY, LEGACY_SESSION_INTENT_KEY]),
+    sessionStorage && sessionKey ? sessionStorage.get(sessionKey) : {},
+  ]);
   const raw =
     typeof values[SERVER_URL_KEY] === "string" && values[SERVER_URL_KEY].trim()
       ? values[SERVER_URL_KEY]
       : DEFAULT_BROWSER_SERVER_URL;
   const serverUrl = browserConfiguredServerUrl(raw);
-  const migratedIntent = browserSessionIntentFromServerUrl(raw);
-  const hasStoredIntent = typeof values[SESSION_INTENT_KEY] === "string";
-  const sessionIntent = hasStoredIntent
-    ? normalizeBrowserSessionIntent(values[SESSION_INTENT_KEY])
-    : migratedIntent;
-  if (serverUrl !== raw || (!hasStoredIntent && migratedIntent)) {
-    await storage.set({
-      [SERVER_URL_KEY]: serverUrl,
-      [SESSION_INTENT_KEY]: sessionIntent,
-    });
+  if (serverUrl !== raw) await localStorage.set({ [SERVER_URL_KEY]: serverUrl });
+  if (values[LEGACY_SESSION_INTENT_KEY] !== undefined) {
+    await localStorage.remove(LEGACY_SESSION_INTENT_KEY);
   }
-  return { serverUrl, sessionIntent };
+  return {
+    serverUrl,
+    sessionIntent: browserWindowSessionIntent(sessionValues, windowId),
+  };
 }
 
 export async function getBrowserServerUrl(): Promise<string> {
@@ -147,20 +178,36 @@ export function browserServerUrlWithNewSession(serverUrl: string): string {
   return url.toString();
 }
 
+export async function persistBrowserWindowSessionIntent(
+  sessionIntent: string,
+  windowId: number,
+  storage: ChromeStorageArea,
+): Promise<string> {
+  const normalized = normalizeBrowserSessionIntent(sessionIntent) || "new=1";
+  await storage.set({ [browserWindowSessionIntentKey(windowId)]: normalized });
+  return normalized;
+}
+
+export async function removeBrowserWindowSessionIntent(
+  windowId: number,
+  storage: ChromeStorageArea,
+): Promise<void> {
+  await storage.remove(browserWindowSessionIntentKey(windowId));
+}
+
 async function persistBrowserSessionIntent(
   sessionIntent: string,
   api: ChromeApi | null,
 ): Promise<string> {
-  const storage = api?.storage?.local;
-  if (!storage) {
+  const storage = api?.storage?.session;
+  const windowId = await currentBrowserWindowId(api);
+  if (!storage || windowId === undefined) {
     throw new BrowserConnectionError(
       "storage-unavailable",
-      "Browser extension storage is unavailable.",
+      "Browser window session storage is unavailable.",
     );
   }
-  const normalized = normalizeBrowserSessionIntent(sessionIntent);
-  await storage.set({ [SESSION_INTENT_KEY]: normalized });
-  return normalized;
+  return persistBrowserWindowSessionIntent(sessionIntent, windowId, storage);
 }
 
 export async function persistBrowserServerSession(
@@ -216,7 +263,8 @@ export function browserClientWebSocketUrl(value: string): string {
 export async function resolveBrowserExtensionBridgeUrl(
   value?: string,
 ): Promise<{ serverUrl: string; wsUrl: string }> {
-  const connectionStorage = await getBrowserConnectionStorage();
+  const api = browserApi();
+  const connectionStorage = await getBrowserConnectionStorage(api);
   const configuredUrl = value
     ? browserConfiguredServerUrl(value)
     : connectionStorage.serverUrl;
@@ -228,12 +276,12 @@ export async function resolveBrowserExtensionBridgeUrl(
   await ensureServerPermission(serverUrl);
   const connection = await discoverBrowserBridge(serverUrl);
   const browserWsUrl = browserClientWebSocketUrl(connection.wsUrl);
-  const storage = browserApi()?.storage?.local;
+  const storage = api?.storage?.local;
   const stored = storage ? await storage.get("pendingHandoff") : {};
   const pending = stored.pendingHandoff as
     { ticket?: unknown; createdAt?: unknown; windowId?: unknown } | undefined;
-  const currentWindow: { id?: number } | undefined = await browserApi()
-    ?.windows?.getCurrent()
+  const currentWindow: { id?: number } | undefined = await api?.windows
+    ?.getCurrent()
     .catch(() => undefined);
   const belongsToCurrentWindow =
     typeof pending?.windowId !== "number" ||
@@ -260,10 +308,15 @@ export async function resolveBrowserExtensionBridgeUrl(
   return { ...connection, wsUrl: browserWsUrl };
 }
 
+export function isBrowserExtensionContextInvalidated(error: unknown): boolean {
+  return error instanceof Error && /extension context invalidated/i.test(error.message);
+}
+
 export function connectBrowserPanel(
   onMessage: (message: BrowserPanelMessage) => void,
   api: ChromeApi | null = browserApi(),
   reconnectDelayMs = 250,
+  reloadPage: () => void = () => location.reload(),
 ): { send(message: unknown): void; dispose(): void } | null {
   const runtime = api?.runtime;
   if (!runtime) return null;
@@ -313,7 +366,12 @@ export function connectBrowserPanel(
     let candidate: ChromePort;
     try {
       candidate = panelRuntime.connect({ name: PANEL_PORT });
-    } catch {
+    } catch (error) {
+      if (isBrowserExtensionContextInvalidated(error)) {
+        disposed = true;
+        reloadPage();
+        return;
+      }
       scheduleReconnect();
       return;
     }

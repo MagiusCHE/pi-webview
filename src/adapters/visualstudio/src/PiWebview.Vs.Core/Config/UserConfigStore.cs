@@ -61,6 +61,7 @@ public sealed class UserConfigStore
                 AgenticThinking = parsed.AgenticThinking,
                 AllowRemoteNpmUpdates = parsed.AllowRemoteNpmUpdates,
                 DangerouslyAllowAllNpmScripts = parsed.DangerouslyAllowAllNpmScripts,
+                BrowserToolPermissions = CloneBrowserPermissions(parsed.BrowserToolPermissions),
                 HiddenStatusKeys = parsed.HiddenStatusKeys?
                     .Where(key => !string.IsNullOrWhiteSpace(key))
                     .Distinct(StringComparer.Ordinal)
@@ -123,6 +124,12 @@ public sealed class UserConfigStore
         {
             _config.DangerouslyAllowAllNpmScripts = allowAllNpmScripts.GetBoolean();
         }
+        if (patch.TryGetValue("browserToolPermissions", out var browserPermissions) &&
+            browserPermissions.ValueKind == JsonValueKind.Object)
+        {
+            _config.BrowserToolPermissions = JsonSerializer.Deserialize<BrowserPersistentPermissions>(
+                browserPermissions.GetRawText(), ProtocolJson.Options);
+        }
         if (patch.TryGetValue("hiddenStatusKeys", out var hidden) &&
             hidden.ValueKind == JsonValueKind.Array)
         {
@@ -158,8 +165,23 @@ public sealed class UserConfigStore
         AgenticThinking = c.AgenticThinking,
         AllowRemoteNpmUpdates = c.AllowRemoteNpmUpdates,
         DangerouslyAllowAllNpmScripts = c.DangerouslyAllowAllNpmScripts,
+        BrowserToolPermissions = CloneBrowserPermissions(c.BrowserToolPermissions),
         HiddenStatusKeys = c.HiddenStatusKeys is null ? null : new List<string>(c.HiddenStatusKeys),
     };
+
+    private static BrowserPersistentPermissions? CloneBrowserPermissions(
+        BrowserPersistentPermissions? permissions) => permissions is null
+        ? null
+        : new BrowserPersistentPermissions
+        {
+            Global = permissions.Global is null ? null : new List<string>(permissions.Global),
+            Sites = permissions.Sites?.ToDictionary(
+                entry => entry.Key,
+                entry => entry.Value is null
+                    ? new List<string>()
+                    : new List<string>(entry.Value),
+                StringComparer.Ordinal),
+        };
 }
 
 /// <summary>Mirrors pi's SettingsManager.getHideThinkingBlock(): global

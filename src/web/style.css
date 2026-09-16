@@ -1646,9 +1646,14 @@ footer {
   border-color: var(--accent);
   outline: none;
 }
-.settings-browser-actions {
+.settings-browser-status-row,
+.settings-browser-permissions {
   justify-content: flex-start;
   margin-top: 9px;
+}
+.settings-browser-permissions {
+  align-items: flex-start;
+  flex-direction: column;
 }
 
 .input-box {
@@ -2420,6 +2425,21 @@ footer {
   overflow-x: hidden;
   overflow-y: auto;
 }
+.settings-apply-footer[hidden] {
+  display: none;
+}
+.settings-apply-footer {
+  position: sticky;
+  bottom: -18px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 -20px -18px;
+  padding: 12px 20px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-elevated);
+}
 
 /* update review dialog (shield click): what will be installed */
 .update-modal-dialog {
@@ -2531,6 +2551,30 @@ footer {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
+}
+.browser-permission-modal {
+  width: min(680px, calc(100vw - 32px));
+}
+.browser-permission-preview {
+  max-height: min(260px, 35vh);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-secondary);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.browser-permission-actions {
+  align-items: stretch;
+  flex-direction: column;
+}
+.browser-permission-actions .btn {
+  text-align: left;
+  white-space: normal;
 }
 .session-workspace-actions {
   flex-direction: column;

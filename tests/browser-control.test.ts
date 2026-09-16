@@ -36,6 +36,29 @@ test("browser tool broker correlates a response with its pending request", async
   assert.equal(broker.resolve(requestId, { ok: true }), false);
 });
 
+test("browser tool broker forwards a targeted DOM selector", async () => {
+  const broker = new BrowserToolBroker();
+  let requestId = "";
+  const pending = broker.request(
+    "dom",
+    (request) => {
+      requestId = request.requestId;
+      assert.equal(request.selector, "main > form");
+    },
+    undefined,
+    1_000,
+    undefined,
+    "main > form",
+  );
+  broker.resolve(requestId, {
+    ok: true,
+    operation: "dom",
+    selector: "main > form",
+    html: "<form></form>",
+  });
+  assert.equal((await pending).selector, "main > form");
+});
+
 test("browser tool broker abort and disconnect settle pending requests", async () => {
   const aborted = new BrowserToolBroker();
   const controller = new AbortController();
@@ -66,6 +89,36 @@ test("browser control request is authenticated with the channel capability", asy
     });
   });
   assert.equal(result.html, "<html></html>");
+});
+
+test("targeted browser DOM request sends only its validated selector", async () => {
+  const env = {
+    [BROWSER_CONTROL_URL_ENV]: "http://127.0.0.1:7361/internal/browser-tool",
+    [BROWSER_CONTROL_CAPABILITY_ENV]: "private-capability",
+  };
+  const result = await requestBrowserTool(
+    "dom",
+    undefined,
+    env,
+    async (_input, init) => {
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        operation: "dom",
+        selector: "main > form",
+      });
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          operation: "dom",
+          selector: "main > form",
+          html: "<form></form>",
+        }),
+        { status: 200 },
+      );
+    },
+    undefined,
+    "main > form",
+  );
+  assert.equal(result.selector, "main > form");
 });
 
 test("browser action request sends only validated structured actions", async () => {
@@ -148,9 +201,26 @@ test("browser tools register structured page actions without JavaScript", () => 
   });
   assert.deepEqual(
     definitions.map((definition) => definition.name),
-    ["browser_page_dom", "browser_page_screenshot", "browser_page_action"],
+    [
+      "browser_page_dom",
+      "browser_page_element_dom",
+      "browser_page_screenshot",
+      "browser_page_class",
+      "browser_page_style",
+      "browser_page_click",
+      "browser_page_navigation",
+      "browser_page_scroll",
+      "browser_page_action",
+    ],
   );
-  const action = definitions[2]!;
+  assert.match(definitions[1]!.description, /one element/i);
+  assert.match(definitions[3]!.description, /CSS class/i);
+  assert.match(definitions[4]!.description, /inline CSS/i);
+  assert.match(definitions[5]!.description, /visual element/i);
+  assert.match(definitions[6]!.description, /Reload/i);
+  assert.match(definitions[7]!.description, /bring a selected element into view/i);
+  const action = definitions[8]!;
   assert.match(action.description, /click, type, select, focus and scroll/);
   assert.match(action.description, /does not execute arbitrary JavaScript/i);
+  assert.match(action.description, /Chrome debugger/i);
 });

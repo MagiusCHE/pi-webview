@@ -59,7 +59,6 @@
           id="btn-update-pi"
           class="icon-btn"
           title="Aggiorna pi e le estensioni"
-          hidden
         ></button>
         <button id="btn-reload" class="icon-btn" title="Ricarica"></button>
         <button
@@ -222,11 +221,18 @@
             spellcheck="false"
           />
           <div class="settings-note" id="settings-browser-url-note"></div>
-          <div class="settings-row settings-browser-actions">
-            <button id="settings-browser-save" class="btn-primary" type="button">
-              Applica
-            </button>
+          <div class="settings-row settings-browser-status-row">
             <span id="settings-browser-status" class="settings-hint" role="status"></span>
+          </div>
+          <div class="settings-row settings-browser-permissions">
+            <button id="settings-browser-reset-permissions" class="btn" type="button">
+              Resetta autorizzazioni per tutti i siti
+            </button>
+            <span
+              id="settings-browser-permissions-status"
+              class="settings-hint"
+              role="status"
+            ></span>
           </div>
         </div>
         <!-- 3. pi.dev settings (via /settings, from pi.dev) → dynamic facade -->
@@ -234,10 +240,6 @@
           <div class="settings-section-title" id="settings-pidev-title">pi.dev</div>
           <div class="settings-note" id="settings-pidev-note">…</div>
           <div id="settings-pidev-body" class="settings-pidev-body"></div>
-          <div class="settings-row" id="pidev-apply-row" hidden>
-            <button id="pidev-apply" class="btn-primary" type="button">Applica</button>
-            <span class="settings-hint" id="pidev-apply-hint">…</span>
-          </div>
         </div>
         <!-- 4. command-line switches (launch flags for this session) -->
         <div class="settings-section">
@@ -245,10 +247,10 @@
             Switch da riga di comando
           </div>
           <div id="cli-flags" class="settings-cli-flags"></div>
-          <div class="settings-row" id="cli-apply-row" hidden>
-            <button id="cli-apply" class="btn-primary" type="button">Applica</button>
-            <span class="settings-hint" id="cli-apply-hint">…</span>
-          </div>
+        </div>
+        <div class="settings-apply-footer" id="settings-apply-row" hidden>
+          <button id="settings-apply" class="btn-primary" type="button">Applica</button>
+          <span class="settings-hint" id="settings-apply-hint">…</span>
         </div>
       </div>
     </div>

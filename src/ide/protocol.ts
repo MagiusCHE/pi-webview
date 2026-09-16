@@ -1,5 +1,6 @@
 import type {
   BrowserPageAction,
+  BrowserPersistentPermissions,
   BrowserToolOperation,
   BrowserToolPayload,
 } from "./browser-tools.ts";
@@ -186,6 +187,13 @@ export type IdeRequest =
       id?: string;
     }
   | { type: "setSettings"; settings: PiSettingChange[]; id?: string }
+  | {
+      type: "applySettings";
+      settings: PiSettingChange[];
+      flags?: CliFlags;
+      sessionPath?: string;
+      id?: string;
+    }
   | { type: "renameSession"; path: string; name: string; id?: string }
   | { type: "deleteSession"; path: string; id?: string }
   | { type: "notifyDesktop"; title: string; body: string; id?: string }
@@ -332,6 +340,8 @@ export type CliFlags = Record<string, CliFlagValue>;
 export interface SessionSettings {
   /** notifications mode for THIS session only (absent → global default) */
   notifications?: "desktop" | "vscode" | "off";
+  /** Browser operations authorized for the complete lifetime of this session. */
+  browserToolPermissions?: BrowserToolOperation[];
 }
 
 /** one outdated npm package (pi core or an installed extension) */
@@ -434,6 +444,8 @@ export interface UserConfig {
   /** Dangerous Webview-only opt-in. When true, the update child receives
    *  npm_config_dangerously_allow_all_scripts=true. */
   dangerouslyAllowAllNpmScripts?: boolean;
+  /** Browser tool grants that outlive a session: exact origins and global. */
+  browserToolPermissions?: BrowserPersistentPermissions;
   /** setStatus keys hidden by the user. RPC exposes the key as the stable
    *  identifier of the status source. */
   hiddenStatusKeys?: string[];
@@ -455,6 +467,7 @@ export type IdeEvent =
       requestId: string;
       operation: BrowserToolOperation;
       actions?: BrowserPageAction[];
+      selector?: string;
     }
   | { type: "at_mentioned"; filePath?: string; rangeText?: string };
 

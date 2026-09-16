@@ -221,6 +221,12 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   usando direttamente i valori appena applicati, mantenerli in memoria finché
   la sessione non espone il nuovo path e persisterli al successivo
   `storeSession`; non rileggerli soltanto dal file appena eliminato
+- **Settings — Applica unico**: il dialog mostra un solo `Applica` globale,
+  visibile esclusivamente quando URL browser, impostazioni pi.dev staged o flag
+  CLI differiscono dai valori salvati. Le preferenze Webview applicabili live
+  restano immediate. Le modifiche pi.dev file-backed e i flag CLI vengono
+  inviate insieme ai 3 host e causano un solo riavvio della sessione; il cambio
+  URL Chrome usa la stessa azione e riconnette l'interfaccia
 - **Controllo aggiornamenti (scudo header)**: il check pi core + estensioni
   npm è **live, senza cache** (modulo `packages/pi-webview/lib/update-check.ts`):
   ogni avvio di pi lo esegue non bloccante a load dell'estensione e il
@@ -357,12 +363,35 @@ companion** — modello pi-x-ide, ognuno solo se l'IDE è presente:
   channel/processo pi e chiude la tab sorgente subito dopo l'ack di adozione,
   senza attendere il loader del pannello. Una connessione diretta avvia le nuove
   sessioni nella home utente; resume e handoff conservano il workspace della
-  sessione.
-  I tool `browser_page_dom`, `browser_page_screenshot` e `browser_page_action`
-  usano un broker privato per-channel solo loopback. DOM e screenshot chiedono
-  consensi distinti una volta per origine/sessione; ogni sequenza di azioni
-  strutturate (`click`, `type`, `select`, `focus`, `scroll`) mostra target e anteprime dei valori
-  e richiede conferma. Non viene mai eseguito JavaScript arbitrario.
+  sessione. Nel filtro `All`, scegliere una sessione di un altro workspace nel
+  companion Chrome riprende sempre l'originale nel suo path senza dialog di
+  fork e senza duplicarla; soltanto gli host IDE a workspace fisso mantengono
+  il flusso di fork cross-workspace.
+  I tool `browser_page_dom`, `browser_page_element_dom`,
+  `browser_page_screenshot`, `browser_page_class`, `browser_page_style`,
+  `browser_page_click`, `browser_page_navigation`, `browser_page_scroll` e
+  `browser_page_action`
+  usano un broker privato per-channel solo loopback. Il DOM completo e quello
+  mirato condividono il consenso DOM; mutazioni di classi CSS/stili inline,
+  click tramite selettore/hit-test visuale/coordinate, reload/navigazione
+  HTTP(S) e azioni strutturate (`click`, `type`, `select`, `focus`, `scroll`)
+  condividono il consenso azioni; screenshot resta indipendente. Il click
+  visuale usa `elementFromPoint` anche per overlay fratelli; le coordinate sono
+  pixel CSS del viewport e costituiscono solo un fallback. Lo scroll supporta
+  pagina/contenitore per delta e `scrollIntoView` mirato; la navigazione usa la
+  Tabs API, mai script pagina. Gli eventi puntatore restano sintetici: il
+  companion non richiede il permesso Chrome `debugger` e non usa CDP.
+  Ogni
+  consenso ha tre ambiti: sessione pi corrente (salvato nel JSONL della
+  sessione), origine in ogni sessione o globale (salvati nella config piw).
+  Dopo il consenso non vengono mostrate altre conferme per la stessa operazione
+  nell'ambito scelto; la dialog delle azioni avverte degli effetti esterni e
+  mostra target e anteprime della prima sequenza. I settings Chrome consentono
+  di azzerare i grant persistenti e quelli della sessione corrente. Non viene
+  mai eseguito JavaScript arbitrario.
+  L'intento di sessione vive in `chrome.storage.session` per finestra: una
+  nuova finestra apre sempre una sessione nuova, mentre handoff, reload e
+  reconnect conservano la sessione della sola finestra interessata.
   Chrome impone conferma utente per installazione e rimozione: `/piw install`
   apre il Web Store quando `CHROME_WEB_STORE_ID` è valorizzato, altrimenti il
   flusso Load unpacked. Firefox resta fuori dal perimetro fino al completamento

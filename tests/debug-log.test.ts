@@ -12,13 +12,14 @@ test("bridge debug frames redact handoff tickets and credentials", () => {
       serverUrl: "http://127.0.0.1:7361/?token=private-token&s=session-id",
       content: "private page DOM or screenshot bytes",
       actions: [{ type: "type", selector: "#secret", text: "private draft" }],
+      selector: "#private-target",
       ordinary: "visible",
     },
   });
 
   assert.doesNotMatch(
     output,
-    /private-handoff-ticket|private-capability|private-token|private page DOM|private draft|#secret/,
+    /private-handoff-ticket|private-capability|private-token|private page DOM|private draft|#secret|#private-target/,
   );
   assert.match(output, /<redacted>/);
   assert.match(output, /visible/);

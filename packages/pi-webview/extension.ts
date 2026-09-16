@@ -660,14 +660,11 @@ export default async function (pi: PiApi): Promise<void> {
     // rendered only while the chat is empty, but the header update button
     // needs updateAvailable on resumed sessions too (window reload)
     const info = collectStartupInfo(c.cwd ?? process.cwd());
-    if (
-      info.contextFiles.length === 0 &&
-      info.skills.length === 0 &&
-      info.extensions.length === 0 &&
-      !info.updateAvailable
-    ) {
-      return;
-    }
+    // Always create the per-process file, including an initially empty
+    // snapshot. The non-blocking update check may finish after session_start;
+    // it can merge its result only when this file already exists. Without the
+    // empty initial write, slower hosts could leave the header shield without
+    // the completed check state even though the check completes later.
     writeStartupInfoFile(info);
   });
 

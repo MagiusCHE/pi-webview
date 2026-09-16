@@ -11,6 +11,7 @@ namespace PiWebview.Vs.Sessions;
 public sealed class SessionStore
 {
     public const string CliFlagsCustomType = "pi-webview-cli-flags";
+    public const string SessionSettingsCustomType = "pi-webview-session-settings";
 
     private readonly Dictionary<string, (long Mtime, SessionInfo Info)> _cache = new();
     private readonly object _cacheGate = new();
@@ -179,10 +180,30 @@ public sealed class SessionStore
             foreach (var entry in entries)
             {
                 if (entry.Type == "session") continue;
-                writer.Write(entry.Raw + "\n");
+                writer.Write(ForkEntryRaw(entry) + "\n");
             }
         }
         return new ForkResult(newPath);
+    }
+
+    private static string ForkEntryRaw(Entry entry)
+    {
+        if (entry.Type != "custom" ||
+            entry.CustomType != SessionSettingsCustomType ||
+            entry.Data is not JsonElement data ||
+            data.ValueKind != JsonValueKind.Object)
+        {
+            return entry.Raw;
+        }
+        var root = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            entry.Raw, ProtocolJson.Options) ?? new Dictionary<string, JsonElement>();
+        var sanitized = data.EnumerateObject()
+            .Where(property => property.Name != "browserToolPermissions")
+            .ToDictionary(property => property.Name, property => property.Value.Clone());
+        using var sanitizedDocument = JsonDocument.Parse(
+            JsonSerializer.Serialize(sanitized, ProtocolJson.Options));
+        root["data"] = sanitizedDocument.RootElement.Clone();
+        return JsonSerializer.Serialize(root, ProtocolJson.Options);
     }
 
     // --- per-session CLI flags (settings block 3) ------------------------------
@@ -215,7 +236,41 @@ public sealed class SessionStore
         return flags;
     }
 
-    public void WriteSessionCliFlags(string path, Dictionary<string, JsonElement> flags)
+    public void WriteSessionCliFlags(string path, Dictionary<string, JsonElement> flags) =>
+        AppendSessionCustomEntry(path, CliFlagsCustomType, flags);
+
+    // --- per-session webview settings ------------------------------------------
+
+    public SessionSettings ReadSessionSettings(string path)
+    {
+        var settings = new SessionSettings();
+        if (path.Length == 0 || !File.Exists(path)) return settings;
+        try
+        {
+            foreach (var entry in ReadEntries(path))
+            {
+                if (entry?.Type != "custom" ||
+                    entry.CustomType != SessionSettingsCustomType ||
+                    entry.Data is not JsonElement data ||
+                    data.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+                settings = JsonSerializer.Deserialize<SessionSettings>(
+                    data.GetRawText(), ProtocolJson.Options) ?? new SessionSettings();
+            }
+        }
+        catch (Exception ex) when (ex is IOException or JsonException)
+        {
+            // best effort
+        }
+        return settings;
+    }
+
+    public void WriteSessionSettings(string path, SessionSettings settings) =>
+        AppendSessionCustomEntry(path, SessionSettingsCustomType, settings);
+
+    private static void AppendSessionCustomEntry(string path, string customType, object data)
     {
         if (path.Length == 0 || !File.Exists(path)) return;
         try
@@ -226,12 +281,13 @@ public sealed class SessionStore
             var lines = File.ReadAllText(path).TrimEnd().Split('\n');
             for (var i = lines.Length - 1; i >= 0; i--)
             {
-                var t = lines[i].Trim();
-                if (t.Length == 0) continue;
+                var text = lines[i].Trim();
+                if (text.Length == 0) continue;
                 try
                 {
-                    using var doc = JsonDocument.Parse(t);
-                    if (doc.RootElement.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+                    using var doc = JsonDocument.Parse(text);
+                    if (doc.RootElement.TryGetProperty("id", out var id) &&
+                        id.ValueKind == JsonValueKind.String)
                     {
                         parentId = id.GetString();
                     }
@@ -245,8 +301,8 @@ public sealed class SessionStore
             var entry = new Dictionary<string, object?>
             {
                 ["type"] = "custom",
-                ["customType"] = CliFlagsCustomType,
-                ["data"] = flags,
+                ["customType"] = customType,
+                ["data"] = data,
                 ["id"] = Guid.NewGuid().ToString().Substring(0, 8),
                 ["timestamp"] = DateTime.UtcNow.ToString("o"),
             };

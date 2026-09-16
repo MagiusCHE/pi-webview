@@ -156,6 +156,8 @@ public sealed class SessionStoreTests : IDisposable
     {
         var store = new SessionStore();
         var source = WriteSession(@"C:\src", "sess.jsonl");
+        File.AppendAllText(source,
+            "{\"type\":\"custom\",\"customType\":\"pi-webview-session-settings\",\"data\":{\"notifications\":\"desktop\",\"browserToolPermissions\":[\"dom\",\"action\"]}}\n");
         var forked = store.ForkSession(source, @"C:\dst", _dir);
         Assert.True(File.Exists(forked.Path));
         var content = File.ReadAllText(forked.Path);
@@ -163,6 +165,8 @@ public sealed class SessionStoreTests : IDisposable
         Assert.Contains("parentSession", content);
         // non-header entries copied
         Assert.Contains("\"role\":\"user\"", content);
+        Assert.Contains("\"notifications\":\"desktop\"", content);
+        Assert.DoesNotContain("browserToolPermissions", content);
         // only one header
         Assert.Single(content.Split('\n'), l => l.Contains("\"type\":\"session\""));
     }
@@ -209,6 +213,27 @@ public sealed class SessionStoreTests : IDisposable
         Assert.Equal(2, read.Count);
         Assert.True(read["sessionControl"].GetBoolean());
         Assert.Equal("fast", read["preset"].GetString());
+    }
+
+    [Fact]
+    public void SessionSettings_ultima_entry_vince()
+    {
+        var store = new SessionStore();
+        var path = WriteSession(@"C:\proj", "settings.jsonl");
+        store.WriteSessionSettings(path, new SessionSettings
+        {
+            Notifications = "desktop",
+            BrowserToolPermissions = new List<string> { "dom", "action" },
+        });
+        store.WriteSessionSettings(path, new SessionSettings
+        {
+            Notifications = "off",
+            BrowserToolPermissions = new List<string> { "screenshot" },
+        });
+
+        var settings = store.ReadSessionSettings(path);
+        Assert.Equal("off", settings.Notifications);
+        Assert.Equal(new[] { "screenshot" }, settings.BrowserToolPermissions);
     }
 
     [Fact]

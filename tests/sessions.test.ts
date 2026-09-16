@@ -8,6 +8,7 @@ import {
   utimesSync,
   readFileSync,
   statSync,
+  existsSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +22,9 @@ import {
   sessionModelArgs,
   sessionPathForId,
   renameSessionFile,
+  deleteSessionFile,
+  readSessionSettings,
+  writeSessionSettings,
 } from "../src/bridge/sessions.ts";
 
 const header = (id: string, cwd: string) =>
@@ -142,6 +146,16 @@ test("forkSession: copia la sessione nel workspace con header aggiornato", () =>
           id: "m1",
           message: { role: "user", content: "ciao" },
         }) +
+        "\n" +
+        JSON.stringify({
+          type: "custom",
+          customType: "pi-webview-session-settings",
+          id: "settings-1",
+          data: {
+            notifications: "desktop",
+            browserToolPermissions: ["dom", "action"],
+          },
+        }) +
         "\n",
     );
 
@@ -159,12 +173,34 @@ test("forkSession: copia la sessione nel workspace con header aggiornato", () =>
     assert.equal(headerLine.parentSession, source);
     assert.ok(headerLine.id && headerLine.id !== "id-2");
     // entries copied, original header excluded
-    assert.equal(lines.length, 3);
+    assert.equal(lines.length, 4);
     assert.equal(lines[1].type, "session_info");
     assert.equal(lines[1].name, "Sessione vecchia");
     assert.equal(lines[2].type, "message");
+    assert.deepEqual(lines[3].data, { notifications: "desktop" });
     // the original is not touched
     assert.ok(readFileSync(source, "utf-8").includes("id-2"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("browser grants live and disappear with their session file", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-webview-session-settings-"));
+  try {
+    const path = join(root, "session.jsonl");
+    writeFileSync(path, `${header("id-settings", "/work/project")}\n`);
+    writeSessionSettings(path, {
+      notifications: "desktop",
+      browserToolPermissions: ["dom", "action"],
+    });
+    assert.deepEqual(readSessionSettings(path), {
+      notifications: "desktop",
+      browserToolPermissions: ["dom", "action"],
+    });
+    deleteSessionFile(path);
+    assert.equal(existsSync(path), false);
+    assert.deepEqual(readSessionSettings(path), {});
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

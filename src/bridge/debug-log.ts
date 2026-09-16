@@ -1,6 +1,6 @@
 const SENSITIVE_KEY = /(?:token|ticket|capability|authorization|cookie|password|secret)/i;
 const PRIVATE_PAYLOAD_KEY =
-  /^(?:content|html|imageDataUrl|dataBase64|actions|actionResults)$/i;
+  /^(?:content|html|imageDataUrl|dataBase64|actions|actionResults|selector)$/i;
 const SENSITIVE_QUERY_VALUE =
   /([?&](?:token|handoff|ticket|capability|authorization|password|secret)=)[^&\s"']*/gi;
 

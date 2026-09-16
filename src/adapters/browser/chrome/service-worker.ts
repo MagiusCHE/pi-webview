@@ -10,6 +10,8 @@ import {
   BROWSER_PANEL_PORT,
   browserConfiguredServerUrl,
   browserSessionIntentFromServerUrl,
+  persistBrowserWindowSessionIntent,
+  removeBrowserWindowSessionIntent,
 } from "../runtime.ts";
 
 interface ChromePort {
@@ -31,6 +33,12 @@ interface ChromeTab {
 
 interface ChromeMessageSender {
   tab?: ChromeTab;
+}
+
+interface ChromeStorageArea {
+  get(keys: string | string[]): Promise<Record<string, unknown>>;
+  set(items: Record<string, unknown>): Promise<void>;
+  remove(keys: string | string[]): Promise<void>;
 }
 
 interface ChromeApi {
@@ -55,6 +63,8 @@ interface ChromeApi {
     }): Promise<ChromeTab[]>;
     create(createProperties: { active?: boolean; windowId?: number }): Promise<ChromeTab>;
     remove(tabId: number): Promise<void>;
+    reload(tabId: number): Promise<void>;
+    update(tabId: number, updateProperties: { url: string }): Promise<ChromeTab>;
     captureVisibleTab(
       windowId: number | undefined,
       options: { format: "png" },
@@ -81,6 +91,7 @@ interface ChromeApi {
   };
   windows: {
     onFocusChanged: { addListener(listener: (windowId: number) => void): void };
+    onRemoved: { addListener(listener: (windowId: number) => void): void };
   };
   scripting: {
     executeScript<T>(
@@ -88,8 +99,14 @@ interface ChromeApi {
         | { target: { tabId: number }; func: () => T }
         | {
             target: { tabId: number };
-            func: (actions: BrowserPageAction[]) => T;
+            world?: "ISOLATED" | "MAIN";
+            func: (actions: BrowserPageAction[]) => T | Promise<T>;
             args: [BrowserPageAction[]];
+          }
+        | {
+            target: { tabId: number };
+            func: (selector: string | undefined) => T;
+            args: [string | undefined];
           }
         | { target: { tabId: number }; files: string[] },
     ): Promise<Array<{ result?: T }>>;
@@ -99,11 +116,8 @@ interface ChromeApi {
     open(options: { tabId?: number; windowId?: number }): Promise<void>;
   };
   storage: {
-    local: {
-      get(keys: string | string[]): Promise<Record<string, unknown>>;
-      set(items: Record<string, unknown>): Promise<void>;
-      remove(keys: string | string[]): Promise<void>;
-    };
+    local: ChromeStorageArea;
+    session: ChromeStorageArea;
   };
 }
 
@@ -151,21 +165,55 @@ async function isPiwPage(pageUrl: string): Promise<boolean> {
   }
 }
 
-function executePageActions(actions: BrowserPageAction[]): BrowserPageActionResult[] {
+async function executePageActions(
+  actions: BrowserPageAction[],
+): Promise<BrowserPageActionResult[]> {
   const results: BrowserPageActionResult[] = [];
   const eventOptions = { bubbles: true, composed: true };
+  const settlePageFrames = () =>
+    new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+  const normalizedEditableText = (value: string) =>
+    value.replace(/[\u200b\u2060]/g, "").replace(/\u00a0/g, " ");
+  const dispatchPointerClick = (target: Element, clientX: number, clientY: number) => {
+    if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+    const pointer = {
+      ...eventOptions,
+      pointerId: 1,
+      pointerType: "mouse",
+      isPrimary: true,
+      clientX,
+      clientY,
+      button: 0,
+    };
+    const mouse = { ...eventOptions, clientX, clientY, button: 0 };
+    target.dispatchEvent(new PointerEvent("pointerover", pointer));
+    target.dispatchEvent(new MouseEvent("mouseover", mouse));
+    target.dispatchEvent(new PointerEvent("pointerenter", pointer));
+    target.dispatchEvent(new MouseEvent("mouseenter", mouse));
+    target.dispatchEvent(new PointerEvent("pointerdown", { ...pointer, buttons: 1 }));
+    target.dispatchEvent(new MouseEvent("mousedown", { ...mouse, buttons: 1 }));
+    target.dispatchEvent(new PointerEvent("pointerup", { ...pointer, buttons: 0 }));
+    target.dispatchEvent(new MouseEvent("mouseup", { ...mouse, buttons: 0 }));
+    target.dispatchEvent(new MouseEvent("click", { ...mouse, buttons: 0 }));
+  };
+
   for (let index = 0; index < actions.length; index += 1) {
     const action = actions[index]!;
     try {
-      const element = action.selector
-        ? document.querySelector(action.selector)
-        : undefined;
-      if (action.selector && !(element instanceof HTMLElement)) {
-        throw new Error(`No HTML element matches ${action.selector}`);
+      if (action.type === "reload" || action.type === "navigate") {
+        throw new Error("Navigation actions must be handled by the browser host.");
+      }
+      const selector = "selector" in action ? action.selector : undefined;
+      const element = selector ? document.querySelector(selector) : undefined;
+      if (selector && !(element instanceof HTMLElement)) {
+        throw new Error(`No HTML element matches ${selector}`);
       }
       if (action.type === "click") {
         const selected = element as HTMLElement;
         selected.scrollIntoView({ block: "center", inline: "center" });
+        await settlePageFrames();
         const rect = selected.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) {
           throw new Error("The target element is not visible.");
@@ -174,27 +222,19 @@ function executePageActions(actions: BrowserPageAction[]): BrowserPageActionResu
         const clientY = rect.top + rect.height / 2;
         const hit = document.elementFromPoint(clientX, clientY);
         const target =
-          hit instanceof HTMLElement && selected.contains(hit) ? hit : selected;
-        target.focus({ preventScroll: true });
-        const pointer = {
-          ...eventOptions,
-          pointerId: 1,
-          pointerType: "mouse",
-          isPrimary: true,
-          clientX,
-          clientY,
-          button: 0,
-        };
-        const mouse = { ...eventOptions, clientX, clientY, button: 0 };
-        target.dispatchEvent(new PointerEvent("pointerover", pointer));
-        target.dispatchEvent(new MouseEvent("mouseover", mouse));
-        target.dispatchEvent(new PointerEvent("pointerenter", pointer));
-        target.dispatchEvent(new MouseEvent("mouseenter", mouse));
-        target.dispatchEvent(new PointerEvent("pointerdown", { ...pointer, buttons: 1 }));
-        target.dispatchEvent(new MouseEvent("mousedown", { ...mouse, buttons: 1 }));
-        target.dispatchEvent(new PointerEvent("pointerup", { ...pointer, buttons: 0 }));
-        target.dispatchEvent(new MouseEvent("mouseup", { ...mouse, buttons: 0 }));
-        target.dispatchEvent(new MouseEvent("click", { ...mouse, buttons: 0 }));
+          hit instanceof Element && (action.target === "visual" || selected.contains(hit))
+            ? hit
+            : selected;
+        dispatchPointerClick(target, clientX, clientY);
+      } else if (action.type === "click_at") {
+        if (action.x >= window.innerWidth || action.y >= window.innerHeight) {
+          throw new Error("The click coordinates are outside the current viewport.");
+        }
+        const target = document.elementFromPoint(action.x, action.y);
+        if (!(target instanceof Element)) {
+          throw new Error("No page element exists at the requested coordinates.");
+        }
+        dispatchPointerClick(target, action.x, action.y);
       } else if (action.type === "focus") {
         (element as HTMLElement).focus();
       } else if (action.type === "type") {
@@ -215,25 +255,69 @@ function executePageActions(actions: BrowserPageAction[]): BrowserPageActionResu
           );
           target.dispatchEvent(new Event("change", eventOptions));
         } else if (target.isContentEditable) {
-          target.focus();
-          const selection = window.getSelection();
+          const editable = target.closest<HTMLElement>('[contenteditable="true"]');
+          if (!editable) throw new Error("The editable root cannot be found.");
+          const beforeText = normalizedEditableText(editable.textContent ?? "");
           const range = document.createRange();
-          range.selectNodeContents(target);
-          if (clear) range.deleteContents();
-          range.selectNodeContents(target);
-          range.collapse(false);
+          range.selectNodeContents(clear ? editable : target);
+          if (!clear) range.collapse(false);
+          editable.focus({ preventScroll: true });
+          const selection = window.getSelection();
           selection?.removeAllRanges();
           selection?.addRange(range);
-          const inserted = document.execCommand("insertText", false, action.text);
-          if (!inserted) {
-            target.textContent = `${clear ? "" : (target.textContent ?? "")}${action.text}`;
-            target.dispatchEvent(
-              new InputEvent("input", {
-                ...eventOptions,
-                data: action.text,
-                inputType: "insertText",
-              }),
-            );
+          document.dispatchEvent(new Event("selectionchange", eventOptions));
+
+          const beforeInput = new InputEvent("beforeinput", {
+            ...eventOptions,
+            cancelable: true,
+            data: action.text,
+            inputType: "insertText",
+          });
+          if (typeof StaticRange === "function") {
+            const targetRange = new StaticRange({
+              startContainer: range.startContainer,
+              startOffset: range.startOffset,
+              endContainer: range.endContainer,
+              endOffset: range.endOffset,
+            });
+            Object.defineProperty(beforeInput, "getTargetRanges", {
+              value: () => [targetRange],
+            });
+          }
+          editable.dispatchEvent(beforeInput);
+
+          if (!beforeInput.defaultPrevented) {
+            const inserted = document.execCommand("insertText", false, action.text);
+            if (!inserted) {
+              range.deleteContents();
+              const text = document.createTextNode(action.text);
+              range.insertNode(text);
+              range.setStartAfter(text);
+              range.collapse(true);
+              selection?.removeAllRanges();
+              selection?.addRange(range);
+              editable.dispatchEvent(
+                new InputEvent("input", {
+                  ...eventOptions,
+                  data: action.text,
+                  inputType: "insertText",
+                }),
+              );
+            }
+          }
+
+          await settlePageFrames();
+          const afterText = normalizedEditableText(editable.textContent ?? "");
+          const expectedText = normalizedEditableText(action.text);
+          const changed = afterText !== beforeText;
+          const retained = clear
+            ? expectedText.length === 0
+              ? afterText.trim().length === 0
+              : afterText.includes(expectedText)
+            : expectedText.length === 0 ||
+              (changed && afterText.length >= beforeText.length + expectedText.length);
+          if (!retained) {
+            throw new Error("The contenteditable editor rejected the text insertion.");
           }
         } else {
           throw new Error("The target is not an editable field.");
@@ -249,23 +333,55 @@ function executePageActions(actions: BrowserPageAction[]): BrowserPageActionResu
         element.value = action.value;
         element.dispatchEvent(new Event("input", eventOptions));
         element.dispatchEvent(new Event("change", eventOptions));
+      } else if (action.type === "class") {
+        const target = element as HTMLElement;
+        if (action.remove?.length) target.classList.remove(...action.remove);
+        if (action.add?.length) target.classList.add(...action.add);
+      } else if (action.type === "style") {
+        const target = element as HTMLElement;
+        for (const property of action.remove ?? []) {
+          target.style.removeProperty(property);
+        }
+        for (const value of action.set ?? []) {
+          target.style.setProperty(value.property, value.value, value.priority ?? "");
+        }
       } else {
-        const deltaX = action.deltaX ?? 0;
-        const deltaY = action.deltaY ?? 0;
-        if (element) element.scrollBy({ left: deltaX, top: deltaY, behavior: "auto" });
-        else window.scrollBy({ left: deltaX, top: deltaY, behavior: "auto" });
+        const deltaX = action.deltaX;
+        const deltaY = action.deltaY;
+        if (element && deltaX === undefined && deltaY === undefined) {
+          element.scrollIntoView({
+            behavior: "auto",
+            block: action.block ?? "center",
+            inline: action.inline ?? "nearest",
+          });
+        } else if (element) {
+          element.scrollBy({
+            left: deltaX ?? 0,
+            top: deltaY ?? 0,
+            behavior: "auto",
+          });
+        } else {
+          window.scrollBy({
+            left: deltaX ?? 0,
+            top: deltaY ?? 0,
+            behavior: "auto",
+          });
+        }
       }
       results.push({
         index,
         type: action.type,
-        ...(action.selector ? { selector: action.selector } : {}),
+        ...(selector ? { selector } : {}),
+        ...(action.type === "click_at" ? { x: action.x, y: action.y } : {}),
         ok: true,
       });
     } catch (error) {
+      const selector = "selector" in action ? action.selector : undefined;
       results.push({
         index,
         type: action.type,
-        ...(action.selector ? { selector: action.selector } : {}),
+        ...(selector ? { selector } : {}),
+        ...(action.type === "click_at" ? { x: action.x, y: action.y } : {}),
         ok: false,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -281,6 +397,7 @@ async function executeBrowserTool(
     requestId: string;
     operation: BrowserToolOperation;
     actions?: unknown;
+    selector?: string;
     expectedOrigin?: string;
     expectedDocumentId?: string;
   },
@@ -313,11 +430,19 @@ async function executeBrowserTool(
     if (request.operation === "dom") {
       const [execution] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: () => ({
-          html: document.documentElement.outerHTML,
-          url: location.href,
-          title: document.title,
-        }),
+        func: (selector: string | undefined) => {
+          const element = selector
+            ? document.querySelector(selector)
+            : document.documentElement;
+          if (!element) throw new Error(`No element matches ${selector}`);
+          return {
+            html: element.outerHTML,
+            url: location.href,
+            title: document.title,
+            selector,
+          };
+        },
+        args: [request.selector],
       });
       const result = execution?.result;
       if (!result || typeof result.html !== "string") {
@@ -337,14 +462,35 @@ async function executeBrowserTool(
           html: result.html,
           url: safeBrowserPageUrl(result.url),
           title: result.title,
+          ...(result.selector ? { selector: result.selector } : {}),
         },
       });
       return;
     }
     if (request.operation === "action") {
       const actions = normalizeBrowserPageActions(request.actions);
+      const navigation = actions.find(
+        (action) => action.type === "reload" || action.type === "navigate",
+      );
+      if (navigation) {
+        if (actions.length !== 1) {
+          throw new Error("Navigation must be the only action in its sequence.");
+        }
+        if (navigation.type === "reload") await chrome.tabs.reload(tab.id);
+        else await chrome.tabs.update(tab.id, { url: navigation.url });
+        port.postMessage({
+          type: "browser_tool_result",
+          result: {
+            ...base,
+            ok: true,
+            actionResults: [{ index: 0, type: navigation.type, ok: true }],
+          },
+        });
+        return;
+      }
       const [execution] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
+        world: "MAIN",
         func: executePageActions,
         args: [actions],
       });
@@ -501,6 +647,7 @@ chrome.runtime.onConnect.addListener((port) => {
       expectedOrigin?: unknown;
       expectedDocumentId?: unknown;
       actions?: unknown;
+      selector?: unknown;
     };
     if (data?.type === "panel_ready") {
       const windowId = typeof data.windowId === "number" ? data.windowId : undefined;
@@ -521,6 +668,9 @@ chrome.runtime.onConnect.addListener((port) => {
         requestId: data.requestId,
         operation: data.operation,
         ...(data.operation === "action" ? { actions: data.actions } : {}),
+        ...(data.operation === "dom" && typeof data.selector === "string"
+          ? { selector: data.selector }
+          : {}),
         ...(typeof data.expectedOrigin === "string"
           ? { expectedOrigin: data.expectedOrigin }
           : {}),
@@ -575,9 +725,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: false, error: "not-a-piw-server" });
           return;
         }
+        if (windowId !== undefined) {
+          await persistBrowserWindowSessionIntent(
+            browserSessionIntentFromServerUrl(pageUrl),
+            windowId,
+            chrome.storage.session,
+          );
+        }
         await chrome.storage.local.set({
           serverUrl: browserConfiguredServerUrl(pageUrl),
-          sessionIntent: browserSessionIntentFromServerUrl(pageUrl),
           pendingHandoff: {
             sourceTabId,
             windowId,
@@ -617,4 +773,7 @@ chrome.tabs.onRemoved.addListener((tabId, { windowId }) => {
 });
 chrome.windows.onFocusChanged.addListener((windowId) => {
   if (windowId >= 0) void publishActiveTab(windowId);
+});
+chrome.windows.onRemoved.addListener((windowId) => {
+  void removeBrowserWindowSessionIntent(windowId, chrome.storage.session);
 });

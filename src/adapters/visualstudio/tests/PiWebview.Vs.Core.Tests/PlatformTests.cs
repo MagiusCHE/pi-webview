@@ -186,6 +186,10 @@ public sealed class UserConfigStoreTests : IDisposable
               "agenticThinking": true,
               "allowRemoteNpmUpdates": true,
               "dangerouslyAllowAllNpmScripts": true,
+              "browserToolPermissions": {
+                "global": ["dom"],
+                "sites": { "https://example.test": ["screenshot", "action"] }
+              },
               "hiddenStatusKeys": ["mcp", "control", "mcp"]
             }
             """);
@@ -204,6 +208,10 @@ public sealed class UserConfigStoreTests : IDisposable
         Assert.True(reloaded.AgenticThinking);
         Assert.True(reloaded.AllowRemoteNpmUpdates);
         Assert.True(reloaded.DangerouslyAllowAllNpmScripts);
+        Assert.Equal(new[] { "dom" }, reloaded.BrowserToolPermissions?.Global);
+        Assert.Equal(
+            new[] { "screenshot", "action" },
+            reloaded.BrowserToolPermissions?.Sites?["https://example.test"]);
         Assert.Equal(new[] { "mcp", "control" }, reloaded.HiddenStatusKeys);
     }
 

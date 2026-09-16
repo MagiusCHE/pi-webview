@@ -253,6 +253,21 @@ export abstract class PiWebviewHost {
       : { ...this.activeCliFlags };
   }
 
+  private stageCliFlags(next: CliFlags, requestedPath?: string): string | undefined {
+    const sessionPath = requestedPath ?? this.currentSessionPath;
+    this.activeCliFlags = { ...next };
+    if (sessionPath) {
+      writeSessionCliFlags(sessionPath, next);
+      this.currentSessionPath = sessionPath;
+      this.cliFlagsNeedSessionPersistence = false;
+    } else {
+      this.currentSessionPath = undefined;
+      this.cliFlagsNeedSessionPersistence = Object.keys(next).length > 0;
+      this.cb.onSessionChange("");
+    }
+    return sessionPath;
+  }
+
   /** EFFECTIVE notifications mode for the CURRENT session: the per-session
    *  override first (saved inside the session jsonl), then the default
    *  (`notifications`, for NEW sessions) */
@@ -629,6 +644,24 @@ export abstract class PiWebviewHost {
         );
         return;
       }
+      case "applySettings": {
+        const ws = this.workspace();
+        const trusted = ws ? this.trustRuntime().isTrusted() : undefined;
+        if (req.settings.length > 0) {
+          const result = setPiSettingsFile(req.settings, {
+            workspace: ws,
+            workspaceTrusted: trusted,
+          });
+          if (!result.ok) {
+            this.respond(req.id, false, result.error ?? "apply_settings failed");
+            return;
+          }
+        }
+        if (req.flags !== undefined) this.stageCliFlags(req.flags, req.sessionPath);
+        this.respond(req.id, true, { needsRestart: true });
+        this.restartPi(req.flags ?? this.activeCliFlags);
+        return;
+      }
       case "setSetting":
       case "setSettings": {
         const ws = this.workspace();
@@ -685,17 +718,7 @@ export abstract class PiWebviewHost {
         // process flags in memory, restart with them immediately, and persist
         // them later when storeSession reports the materialized path.
         const next: CliFlags = req.flags ?? {};
-        const sessionPath = req.sessionPath ?? this.currentSessionPath;
-        this.activeCliFlags = { ...next };
-        if (sessionPath) {
-          writeSessionCliFlags(sessionPath, next);
-          this.currentSessionPath = sessionPath;
-          this.cliFlagsNeedSessionPersistence = false;
-        } else {
-          this.currentSessionPath = undefined;
-          this.cliFlagsNeedSessionPersistence = Object.keys(next).length > 0;
-          this.cb.onSessionChange("");
-        }
+        this.stageCliFlags(next, req.sessionPath);
         this.respond(req.id, true, { flags: next });
         this.restartPi(next);
         return;

@@ -86,8 +86,10 @@ public sealed class IdeRequest
     [System.Text.Json.Serialization.JsonPropertyName("scope")]
     public string? Scope { get; set; }
 
+    // Union on the wire: PiSettingChange[] for setSettings, SessionSettings
+    // object for setSessionSettings. The request type selects the decoder.
     [System.Text.Json.Serialization.JsonPropertyName("settings")]
-    public List<PiSettingChange>? Settings { get; set; }
+    public JsonElement? Settings { get; set; }
 
     [System.Text.Json.Serialization.JsonPropertyName("action")]
     public string? Action { get; set; }
@@ -210,6 +212,24 @@ public sealed class Position
     public int Character { get; set; }
 }
 
+public sealed class SessionSettings
+{
+    [System.Text.Json.Serialization.JsonPropertyName("notifications")]
+    public string? Notifications { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("browserToolPermissions")]
+    public List<string>? BrowserToolPermissions { get; set; }
+}
+
+public sealed class BrowserPersistentPermissions
+{
+    [System.Text.Json.Serialization.JsonPropertyName("global")]
+    public List<string>? Global { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("sites")]
+    public Dictionary<string, List<string>>? Sites { get; set; }
+}
+
 /// <summary>Shared user config (D7 of concept 0002).</summary>
 public sealed class UserConfig
 {
@@ -239,6 +259,9 @@ public sealed class UserConfig
 
     [System.Text.Json.Serialization.JsonPropertyName("dangerouslyAllowAllNpmScripts")]
     public bool DangerouslyAllowAllNpmScripts { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("browserToolPermissions")]
+    public BrowserPersistentPermissions? BrowserToolPermissions { get; set; }
 
     [System.Text.Json.Serialization.JsonPropertyName("hiddenStatusKeys")]
     public List<string>? HiddenStatusKeys { get; set; }

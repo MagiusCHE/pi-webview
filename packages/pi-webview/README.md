@@ -62,12 +62,13 @@ When the standalone UI detects the enabled companion, it asks whether to move th
 
 The composer shows the active page favicon and title, with the page URL on hover. URL and title remain prompt context even when no text is selected. A current selection is added to the same visible context chip.
 
-The agent gains two browser tools while running through `piw`:
+The agent gains three browser tools while running through `piw`:
 
 - `browser_page_dom` serializes the active page DOM. Large results are saved in a private temporary file on the piw machine;
-- `browser_page_screenshot` captures the visible viewport as an image result.
+- `browser_page_screenshot` captures the visible viewport as an image result;
+- `browser_page_action` performs a validated sequence of click, type, select, focus and scroll actions. It never evaluates arbitrary JavaScript.
 
-The first tool call for each website origin during a Side Panel session asks for confirmation. Chrome-protected pages cannot be read or captured.
+DOM and screenshot access have separate consent per website origin and Side Panel session, so the first screenshot always explains that the image may be sent to the configured AI model. Every page-action sequence shows its targets and value previews and requires confirmation. Chrome-protected pages cannot be read, captured or controlled.
 
 Once the Web Store listing is approved, install it with:
 
@@ -272,7 +273,7 @@ The companion spawns `pi --mode rpc` and bridges the UI via `postMessage` (same 
 - **Sessions** — switch, rename, delete, filter by folder, fork across workspaces and create new sessions. Confirmed session-changing operations immediately show the loading overlay and lock the complete UI until the refreshed history is ready. Resume summaries include relative activity, compaction count and session-file size. Browser refresh resumes the same session in its saved workspace
 - **Composer controls** — model picker, thinking level and project trust. The trust chip always shows the effective status of the running pi process (trusted / untrusted): pi never prompts in RPC mode, so with no saved decision the project-local resources are ignored. Clicking it opens the same choices as the pi terminal prompt (Trust / Trust parent folder / Trust this session only / Do not trust / Do not trust this session only); a session-only choice is not persisted and starts pi with `--approve` / `--no-approve` for that process only. A new decision is applied by restarting pi: the restart is automatic on an idle session, otherwise the dialog asks for _Restart now_ / _Restart later_, and a red `!` next to the icon marks the pending restart until it happens
 - **Attachments** — paperclip picker, paste and drag and drop, multiple files and inline image previews. Browser mode selects files on the browser device and uploads their bytes to the bridge
-- **Editor and browser context** — editor selection is available in the VS Code sidebar. The Chrome companion keeps active-page URL/title visible and attached to prompts, adds the current page selection, and offers consent-gated DOM and viewport-screenshot tools
+- **Editor and browser context** — editor selection is available in the VS Code sidebar. The Chrome companion keeps active-page URL/title visible and attached to prompts, adds the current page selection, and offers consent-gated DOM, viewport-screenshot and structured page-action tools
 - **Built-in commands** — `/compact`, `/new` and `/name` map to their webview actions. Terminal-only commands are blocked locally with an explanatory chat message instead of being sent to the model
 - **Header controls** — session picker, connection state, reload and live update shield
 - **Automatic reconnect (browser)** — if the bridge is restarted or disappears, the page retries every 5 seconds while the window/tab is active (and immediately when it becomes visible again). When the bridge is back the status dot turns green again and the same session resumes without a manual page reload
@@ -286,7 +287,7 @@ CLI flags are **per-session**: they are stored as a `pi-webview-cli-flags` custo
 
 Pi extensions run with your full system permissions and can execute arbitrary code. Review the source before installing — as you would with any third-party package.
 
-The Chrome companion declares `<all_urls>` host access because Chrome requires it for asynchronous `captureVisibleTab` screenshots. The implementation still limits page context and tools to HTTP and HTTPS pages. URL/title and selected text are visible in the composer; DOM and screenshots require consent once per origin and Side Panel session. Chrome-protected pages remain inaccessible. See the [privacy policy](https://github.com/MagiusCHE/pi-webview/blob/main/PRIVACY.md).
+The Chrome companion declares `<all_urls>` host access because Chrome requires it for asynchronous `captureVisibleTab` screenshots. The implementation still limits page context and tools to HTTP and HTTPS pages. URL/title and selected text are visible in the composer; DOM and screenshots require separate consent once per origin and Side Panel session, while every structured page-action sequence requires confirmation. Chrome-protected pages remain inaccessible. See the [privacy policy](https://github.com/MagiusCHE/pi-webview/blob/main/PRIVACY.md).
 
 ## License
 

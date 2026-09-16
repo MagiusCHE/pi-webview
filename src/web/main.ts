@@ -24,6 +24,12 @@ import type {
   BrowserPageContext,
 } from "../ide/protocol.ts";
 import { rpc } from "../ide/protocol.ts";
+import {
+  normalizeBrowserPageActions,
+  type BrowserPageAction,
+  type BrowserToolOperation,
+  type BrowserToolPayload,
+} from "../ide/browser-tools.ts";
 import { samePath } from "../ide/paths.ts";
 import {
   displayMessageContent,
@@ -57,6 +63,12 @@ import type {
 } from "../ide/protocol.ts";
 import { currentLocale, setLocale, t, tpl, isLocaleId, type LocaleId } from "./i18n.ts";
 import { runtime } from "./environment.ts";
+import { BrowserReadConsentStore } from "./browser-tool-consent.ts";
+import {
+  formatAskUserQuestion,
+  parseAskUserQuestions,
+  type AskUserQuestion,
+} from "./ask-user.ts";
 import { BrowserConnectionError } from "../adapters/browser/connection.ts";
 import {
   connectBrowserPanel,
@@ -5648,32 +5660,6 @@ const askUserInfoByTool = new Map<string, AskUserInfo>();
 let askUserQuestionCounter = 0; // current question (1-based) of the tool in progress
 let currentAskUserToolId = "";
 
-// parsing of the ask_user args: JSON { questions: [...] } (or a single object)
-function parseAskUserQuestions(
-  argsJson: string,
-): Array<{ question: string; options?: unknown[] }> | null {
-  try {
-    const parsed = JSON.parse(argsJson);
-    const raw = Array.isArray(parsed?.questions)
-      ? parsed.questions
-      : parsed && typeof parsed === "object"
-        ? [parsed]
-        : [];
-    if (raw.length === 0) return null;
-    return raw.map((q: unknown) => ({
-      question:
-        typeof (q as { question?: unknown })?.question === "string"
-          ? ((q as { question?: string }).question as string)
-          : JSON.stringify(q),
-      options: Array.isArray((q as { options?: unknown })?.options)
-        ? ((q as { options?: unknown[] }).options as unknown[])
-        : undefined,
-    }));
-  } catch {
-    return null;
-  }
-}
-
 // ask_user card header: name + text (question or answer) ellipsis + timer
 function setAskUserHeader(card: HTMLElement, text: string): void {
   const name = card.querySelector(".tool-name")!;
@@ -5690,27 +5676,33 @@ function setAskUserHeader(card: HTMLElement, text: string): void {
 function splitAskUserCard(
   firstCard: HTMLElement,
   toolId: string,
-  questions: Array<{ question: string; options?: unknown[] }>,
+  questions: AskUserQuestion[],
 ): HTMLElement[] {
   const cards: HTMLElement[] = [firstCard];
   firstCard.dataset.askUser = "true";
   const inheritedStatus = firstCard.dataset.toolStatus as ToolExecutionStatus | undefined;
-  setAskUserHeader(firstCard, questions[0]?.question ?? "");
+  const firstQuestion = questions[0];
+  setAskUserHeader(firstCard, firstQuestion?.question ?? "");
   const label = firstCard.querySelector(".code-label");
   if (label) label.textContent = "ask_user";
   const firstPre = firstCard.querySelector<HTMLPreElement>(".code-block pre");
-  if (firstPre) firstPre.textContent = questions[0]?.question ?? "";
+  if (firstPre && firstQuestion) {
+    firstPre.textContent = formatAskUserQuestion(firstQuestion, t("askUserOptions"));
+  }
   // no timer for the questions: not needed (also remove from the first card,
   // which had it from buildToolCard)
   firstCard.querySelector(".tool-timer")?.remove();
   let prev = firstCard;
   for (let i = 1; i < questions.length; i++) {
+    const question = questions[i]!;
     const card = buildToolCard({ id: "", name: "ask_user", args: "" });
     card.dataset.askUser = "true";
-    setAskUserHeader(card, questions[i]?.question ?? "");
+    setAskUserHeader(card, question.question);
     if (inheritedStatus) setToolExecutionStatus(card, inheritedStatus);
     const pre = card.querySelector<HTMLPreElement>(".code-block pre");
-    if (pre) pre.textContent = questions[i]?.question ?? "";
+    if (pre) {
+      pre.textContent = formatAskUserQuestion(question, t("askUserOptions"));
+    }
     card.querySelector(".tool-timer")?.remove();
     prev.insertAdjacentElement("afterend", card);
     cards.push(card);
@@ -6822,27 +6814,67 @@ function attachVisibleContext(message: string): string {
   );
 }
 
-const browserToolAllowedOrigins = new Set<string>();
-const browserToolPendingConsents = new Map<string, Promise<boolean>>();
+const browserReadConsents = new BrowserReadConsentStore();
+let browserToolConfirmTail: Promise<void> = Promise.resolve();
 
-async function allowBrowserToolOrigin(origin: string): Promise<boolean> {
-  if (browserToolAllowedOrigins.has(origin)) return true;
-  const existing = browserToolPendingConsents.get(origin);
-  if (existing) return existing;
-  const pending = showConfirm(tpl(t("browserPageToolConsent"), { origin })).then(
-    (allowed) => {
-      browserToolPendingConsents.delete(origin);
-      if (allowed) browserToolAllowedOrigins.add(origin);
-      return allowed;
-    },
+function queueBrowserToolConfirm(confirm: () => Promise<boolean>): Promise<boolean> {
+  const pending = browserToolConfirmTail.then(confirm);
+  browserToolConfirmTail = pending.then(
+    () => undefined,
+    () => undefined,
   );
-  browserToolPendingConsents.set(origin, pending);
   return pending;
+}
+
+function allowBrowserReadOperation(
+  origin: string,
+  operation: "dom" | "screenshot",
+): Promise<boolean> {
+  const messageKey =
+    operation === "dom" ? "browserDomConsent" : "browserScreenshotConsent";
+  return browserReadConsents.allow(origin, operation, () =>
+    queueBrowserToolConfirm(() => showConfirm(tpl(t(messageKey), { origin }))),
+  );
+}
+
+function browserActionSummary(actions: BrowserPageAction[]): string {
+  return actions
+    .map((action, index) => {
+      const selector = action.selector ?? t("browserActionPage");
+      if (action.type === "type") {
+        const text =
+          action.text.length > 500 ? `${action.text.slice(0, 500)}…` : action.text;
+        return `${index + 1}. ${t("browserActionType")} ${selector}\n   ${JSON.stringify(text)}`;
+      }
+      if (action.type === "select") {
+        return `${index + 1}. ${t("browserActionSelect")} ${selector}\n   ${JSON.stringify(action.value)}`;
+      }
+      if (action.type === "scroll") {
+        return `${index + 1}. ${t("browserActionScroll")} ${selector} (${action.deltaX ?? 0}, ${action.deltaY ?? 0})`;
+      }
+      const label =
+        action.type === "click" ? t("browserActionClick") : t("browserActionFocus");
+      return `${index + 1}. ${label} ${selector}`;
+    })
+    .join("\n");
+}
+
+async function allowBrowserActions(
+  origin: string,
+  actions: BrowserPageAction[],
+): Promise<boolean> {
+  return queueBrowserToolConfirm(() =>
+    showConfirm(
+      tpl(t("browserActionConsent"), { origin }),
+      browserActionSummary(actions),
+    ),
+  );
 }
 
 async function handleBrowserToolRequest(
   requestId: string,
-  operation: "dom" | "screenshot",
+  operation: BrowserToolOperation,
+  requestedActions?: BrowserPageAction[],
 ): Promise<void> {
   const context = visibleBrowserContext();
   let origin = "";
@@ -6859,7 +6891,23 @@ async function handleBrowserToolRequest(
     });
     return;
   }
-  if (!(await allowBrowserToolOrigin(origin))) {
+  let actions: BrowserPageAction[] | undefined;
+  try {
+    actions =
+      operation === "action" ? normalizeBrowserPageActions(requestedActions) : undefined;
+  } catch {
+    await ideRequest({
+      type: "browserToolResponse",
+      requestId,
+      result: { ok: false, operation, error: t("browserPageToolInvalid") },
+    });
+    return;
+  }
+  const allowed =
+    operation === "action"
+      ? await allowBrowserActions(origin, actions!)
+      : await allowBrowserReadOperation(origin, operation);
+  if (!allowed) {
     await ideRequest({
       type: "browserToolResponse",
       requestId,
@@ -6871,6 +6919,7 @@ async function handleBrowserToolRequest(
     type: "browser_tool_execute",
     requestId,
     operation,
+    ...(actions ? { actions } : {}),
     expectedOrigin: origin,
     expectedDocumentId: context.documentId,
   });
@@ -6917,7 +6966,7 @@ function renderIdeEvent(evt: IdeEvent): void {
     return;
   }
   if (evt.type === "browser_tool_request") {
-    void handleBrowserToolRequest(evt.requestId, evt.operation);
+    void handleBrowserToolRequest(evt.requestId, evt.operation, evt.actions);
     return;
   }
   if (evt.type === "selection_changed" || evt.type === "selection_cleared") {
@@ -9998,16 +10047,7 @@ async function boot(): Promise<void> {
           void ideRequest({
             type: "browserToolResponse",
             requestId,
-            result: payload as {
-              ok: boolean;
-              operation?: "dom" | "screenshot";
-              url?: string;
-              title?: string;
-              documentId?: string;
-              html?: string;
-              imageDataUrl?: string;
-              error?: string;
-            },
+            result: payload as unknown as BrowserToolPayload,
           });
         }
       }

@@ -55,7 +55,7 @@ Required to show the active page title, URL and favicon, track tab changes, repl
 **scripting**
 
 ```text
-Required to read the current text selection and serialize the active page DOM when the corresponding agent tool is explicitly called.
+Required to read the current text selection, serialize the active page DOM when explicitly requested, and perform only user-confirmed structured click, type, select, focus and scroll actions. The extension does not execute arbitrary JavaScript.
 ```
 
 **storage**
@@ -67,7 +67,7 @@ Required to store the user-configured piw server URL locally and retain short-li
 **Host access (`<all_urls>`)**
 
 ```text
-Required because page context, selection and the opt-in DOM tool must work on the arbitrary HTTP or HTTPS page selected by the user. Chrome's tabs.captureVisibleTab API specifically requires <all_urls> when a screenshot is requested asynchronously after the original user gesture. Host access is also required to connect to a user-configured piw server on loopback, LAN, Tailscale or HTTPS. The extension code still limits page context and tools to HTTP/HTTPS pages. Page DOM and screenshots are never collected in the background; the first tool request for each origin and panel session asks for confirmation.
+Required because page context, selection and the opt-in DOM and structured-action tools must work on the arbitrary HTTP or HTTPS page selected by the user. Chrome's tabs.captureVisibleTab API specifically requires <all_urls> when a screenshot is requested asynchronously after the original user gesture. Host access is also required to connect to a user-configured piw server on loopback, LAN, Tailscale or HTTPS. The extension code still limits page context and tools to HTTP/HTTPS pages. Page DOM and screenshots are never collected in the background and have separate first-use consent per origin and panel session. Every structured page-action sequence displays its targets and value previews and requires confirmation.
 ```
 
 ## Privacy questionnaire
@@ -75,7 +75,7 @@ Required because page context, selection and the opt-in DOM tool must work on th
 Answer according to the actual behavior rather than minimizing the declaration:
 
 - the extension handles personal communications, authentication information, website content and browsing activity needed for its single purpose;
-- messages, attachments, selected text, requested DOM and requested screenshots may be sent to the user-configured piw server, AI provider and other user-configured tools;
+- messages, attachments, selected text, requested DOM, requested screenshots and structured page-action instructions may be sent to the user-configured piw server, AI provider and other user-configured tools;
 - the developer does not receive, sell or use this data for advertising, analytics, credit decisions or unrelated purposes;
 - authentication information can be present in the configured server URL and is stored only in `storage.local`;
 - remote code execution is not used; every executable asset is included in the extension package.

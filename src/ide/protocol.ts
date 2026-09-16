@@ -1,3 +1,9 @@
+import type {
+  BrowserPageAction,
+  BrowserToolOperation,
+  BrowserToolPayload,
+} from "./browser-tools.ts";
+
 // IDE bridge protocol — shared contracts UI ↔ host (concept 0002 D3).
 // The wire format is identical both via WebSocket (standalone, bridge) and via
 // postMessage (VS Code webview): only the transport changes.
@@ -188,16 +194,7 @@ export type IdeRequest =
   | {
       type: "browserToolResponse";
       requestId: string;
-      result: {
-        ok: boolean;
-        operation?: "dom" | "screenshot";
-        url?: string;
-        title?: string;
-        documentId?: string;
-        html?: string;
-        imageDataUrl?: string;
-        error?: string;
-      };
+      result: BrowserToolPayload;
       id?: string;
     }
   /** restart the pi process (same path as applying CLI flags): the webview
@@ -456,7 +453,8 @@ export type IdeEvent =
   | {
       type: "browser_tool_request";
       requestId: string;
-      operation: "dom" | "screenshot";
+      operation: BrowserToolOperation;
+      actions?: BrowserPageAction[];
     }
   | { type: "at_mentioned"; filePath?: string; rangeText?: string };
 

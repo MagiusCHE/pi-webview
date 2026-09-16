@@ -4,6 +4,12 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-16
+
+- Added a consent-gated structured browser action tool for clicking, typing, selecting, focusing and scrolling without arbitrary JavaScript execution.
+- Separated DOM and screenshot consent so the first screenshot always explains that the image may be sent to the configured AI model.
+- Preserved `ask_user` option labels and descriptions in live and resumed conversation cards.
+
 ## [0.4.0] - 2026-09-16
 
 - Fixed direct VS Code companion installation on Remote SSH hosts by discovering VS Code Server extension directories and safely extracting the bundled VSIX without external archive tools.

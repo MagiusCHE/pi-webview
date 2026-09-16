@@ -1,4 +1,10 @@
 import type { BrowserPageContext } from "../../../ide/protocol.ts";
+import {
+  normalizeBrowserPageActions,
+  type BrowserPageAction,
+  type BrowserPageActionResult,
+  type BrowserToolOperation,
+} from "../../../ide/browser-tools.ts";
 import { safeBrowserPageUrl } from "../context.ts";
 import {
   BROWSER_PANEL_PORT,
@@ -80,6 +86,11 @@ interface ChromeApi {
     executeScript<T>(
       options:
         | { target: { tabId: number }; func: () => T }
+        | {
+            target: { tabId: number };
+            func: (actions: BrowserPageAction[]) => T;
+            args: [BrowserPageAction[]];
+          }
         | { target: { tabId: number }; files: string[] },
     ): Promise<Array<{ result?: T }>>;
   };
@@ -140,11 +151,136 @@ async function isPiwPage(pageUrl: string): Promise<boolean> {
   }
 }
 
+function executePageActions(actions: BrowserPageAction[]): BrowserPageActionResult[] {
+  const results: BrowserPageActionResult[] = [];
+  const eventOptions = { bubbles: true, composed: true };
+  for (let index = 0; index < actions.length; index += 1) {
+    const action = actions[index]!;
+    try {
+      const element = action.selector
+        ? document.querySelector(action.selector)
+        : undefined;
+      if (action.selector && !(element instanceof HTMLElement)) {
+        throw new Error(`No HTML element matches ${action.selector}`);
+      }
+      if (action.type === "click") {
+        const selected = element as HTMLElement;
+        selected.scrollIntoView({ block: "center", inline: "center" });
+        const rect = selected.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+          throw new Error("The target element is not visible.");
+        }
+        const clientX = rect.left + rect.width / 2;
+        const clientY = rect.top + rect.height / 2;
+        const hit = document.elementFromPoint(clientX, clientY);
+        const target =
+          hit instanceof HTMLElement && selected.contains(hit) ? hit : selected;
+        target.focus({ preventScroll: true });
+        const pointer = {
+          ...eventOptions,
+          pointerId: 1,
+          pointerType: "mouse",
+          isPrimary: true,
+          clientX,
+          clientY,
+          button: 0,
+        };
+        const mouse = { ...eventOptions, clientX, clientY, button: 0 };
+        target.dispatchEvent(new PointerEvent("pointerover", pointer));
+        target.dispatchEvent(new MouseEvent("mouseover", mouse));
+        target.dispatchEvent(new PointerEvent("pointerenter", pointer));
+        target.dispatchEvent(new MouseEvent("mouseenter", mouse));
+        target.dispatchEvent(new PointerEvent("pointerdown", { ...pointer, buttons: 1 }));
+        target.dispatchEvent(new MouseEvent("mousedown", { ...mouse, buttons: 1 }));
+        target.dispatchEvent(new PointerEvent("pointerup", { ...pointer, buttons: 0 }));
+        target.dispatchEvent(new MouseEvent("mouseup", { ...mouse, buttons: 0 }));
+        target.dispatchEvent(new MouseEvent("click", { ...mouse, buttons: 0 }));
+      } else if (action.type === "focus") {
+        (element as HTMLElement).focus();
+      } else if (action.type === "type") {
+        const target = element as HTMLElement;
+        const clear = action.clear !== false;
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+          const current = clear ? "" : target.value;
+          const prototype =
+            target instanceof HTMLTextAreaElement
+              ? HTMLTextAreaElement.prototype
+              : HTMLInputElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+          if (!setter) throw new Error("The field value cannot be changed.");
+          target.focus();
+          setter.call(target, current + action.text);
+          target.dispatchEvent(
+            new InputEvent("input", { ...eventOptions, data: action.text }),
+          );
+          target.dispatchEvent(new Event("change", eventOptions));
+        } else if (target.isContentEditable) {
+          target.focus();
+          const selection = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(target);
+          if (clear) range.deleteContents();
+          range.selectNodeContents(target);
+          range.collapse(false);
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+          const inserted = document.execCommand("insertText", false, action.text);
+          if (!inserted) {
+            target.textContent = `${clear ? "" : (target.textContent ?? "")}${action.text}`;
+            target.dispatchEvent(
+              new InputEvent("input", {
+                ...eventOptions,
+                data: action.text,
+                inputType: "insertText",
+              }),
+            );
+          }
+        } else {
+          throw new Error("The target is not an editable field.");
+        }
+      } else if (action.type === "select") {
+        if (!(element instanceof HTMLSelectElement)) {
+          throw new Error("The target is not a select element.");
+        }
+        if (![...element.options].some((option) => option.value === action.value)) {
+          throw new Error(`The select has no option with value ${action.value}`);
+        }
+        element.focus();
+        element.value = action.value;
+        element.dispatchEvent(new Event("input", eventOptions));
+        element.dispatchEvent(new Event("change", eventOptions));
+      } else {
+        const deltaX = action.deltaX ?? 0;
+        const deltaY = action.deltaY ?? 0;
+        if (element) element.scrollBy({ left: deltaX, top: deltaY, behavior: "auto" });
+        else window.scrollBy({ left: deltaX, top: deltaY, behavior: "auto" });
+      }
+      results.push({
+        index,
+        type: action.type,
+        ...(action.selector ? { selector: action.selector } : {}),
+        ok: true,
+      });
+    } catch (error) {
+      results.push({
+        index,
+        type: action.type,
+        ...(action.selector ? { selector: action.selector } : {}),
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      break;
+    }
+  }
+  return results;
+}
+
 async function executeBrowserTool(
   port: ChromePort,
   request: {
     requestId: string;
-    operation: "dom" | "screenshot";
+    operation: BrowserToolOperation;
+    actions?: unknown;
     expectedOrigin?: string;
     expectedDocumentId?: string;
   },
@@ -202,6 +338,22 @@ async function executeBrowserTool(
           url: safeBrowserPageUrl(result.url),
           title: result.title,
         },
+      });
+      return;
+    }
+    if (request.operation === "action") {
+      const actions = normalizeBrowserPageActions(request.actions);
+      const [execution] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: executePageActions,
+        args: [actions],
+      });
+      if (!Array.isArray(execution?.result)) {
+        throw new Error("The page did not return action results.");
+      }
+      port.postMessage({
+        type: "browser_tool_result",
+        result: { ...base, ok: true, actionResults: execution.result },
       });
       return;
     }
@@ -348,6 +500,7 @@ chrome.runtime.onConnect.addListener((port) => {
       windowId?: unknown;
       expectedOrigin?: unknown;
       expectedDocumentId?: unknown;
+      actions?: unknown;
     };
     if (data?.type === "panel_ready") {
       const windowId = typeof data.windowId === "number" ? data.windowId : undefined;
@@ -360,11 +513,14 @@ chrome.runtime.onConnect.addListener((port) => {
     if (
       data?.type === "browser_tool_execute" &&
       typeof data.requestId === "string" &&
-      (data.operation === "dom" || data.operation === "screenshot")
+      (data.operation === "dom" ||
+        data.operation === "screenshot" ||
+        data.operation === "action")
     ) {
       void executeBrowserTool(port, {
         requestId: data.requestId,
         operation: data.operation,
+        ...(data.operation === "action" ? { actions: data.actions } : {}),
         ...(typeof data.expectedOrigin === "string"
           ? { expectedOrigin: data.expectedOrigin }
           : {}),

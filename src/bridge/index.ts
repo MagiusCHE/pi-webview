@@ -66,6 +66,10 @@ import {
   type BrowserToolPayload,
 } from "./browser-control.ts";
 import {
+  normalizeBrowserPageActions,
+  type BrowserPageAction,
+} from "../ide/browser-tools.ts";
+import {
   LOOPBACK_IP,
   bindHosts,
   effectiveClientAddress,
@@ -309,13 +313,21 @@ function main(): void {
         let body = "";
         for await (const chunk of req) {
           body += chunk.toString();
-          if (body.length > 1024) throw new Error("request too large");
+          if (body.length > 256 * 1024) throw new Error("request too large");
         }
-        const data = JSON.parse(body) as { operation?: unknown };
-        if (data.operation !== "dom" && data.operation !== "screenshot") {
+        const data = JSON.parse(body) as { operation?: unknown; actions?: unknown };
+        if (
+          data.operation !== "dom" &&
+          data.operation !== "screenshot" &&
+          data.operation !== "action"
+        ) {
           res.writeHead(400).end("invalid browser operation");
           return;
         }
+        const actions =
+          data.operation === "action"
+            ? normalizeBrowserPageActions(data.actions)
+            : undefined;
         const controller = new AbortController();
         req.once("aborted", () => controller.abort());
         res.once("close", () => {
@@ -324,6 +336,7 @@ function main(): void {
         const result = await channel.requestBrowserTool(
           data.operation,
           controller.signal,
+          actions,
         );
         if (res.destroyed) return;
         res.writeHead(result.ok ? 200 : 502, {
@@ -444,6 +457,7 @@ function main(): void {
     requestBrowserTool: (
       operation: BrowserToolOperation,
       signal?: AbortSignal,
+      actions?: BrowserPageAction[],
     ) => Promise<BrowserToolPayload>;
     attach: (ws: WebSocket) => void;
     dispose: () => void;
@@ -1025,20 +1039,27 @@ function main(): void {
       log("channel adopted by browser companion");
     };
 
-    const requestBrowserTool = (operation: BrowserToolOperation, signal?: AbortSignal) =>
+    const requestBrowserTool = (
+      operation: BrowserToolOperation,
+      signal?: AbortSignal,
+      actions?: BrowserPageAction[],
+    ) =>
       browserToolBroker.request(
         operation,
-        ({ requestId, operation: requested }) => {
+        ({ requestId, operation: requested, actions: requestedActions }) => {
           send({
             channel: "ide",
             payload: {
               type: "browser_tool_request",
               requestId,
               operation: requested,
+              ...(requestedActions ? { actions: requestedActions } : {}),
             },
           });
         },
         signal,
+        undefined,
+        actions,
       );
     channel = {
       ws,

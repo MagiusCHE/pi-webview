@@ -1,17 +1,12 @@
 import { randomUUID } from "node:crypto";
+import type {
+  BrowserPageAction,
+  BrowserToolOperation,
+  BrowserToolPayload,
+  BrowserToolRequest,
+} from "../ide/browser-tools.ts";
 
-export type BrowserToolOperation = "dom" | "screenshot";
-
-export interface BrowserToolPayload {
-  ok: boolean;
-  operation?: BrowserToolOperation;
-  url?: string;
-  title?: string;
-  documentId?: string;
-  html?: string;
-  imageDataUrl?: string;
-  error?: string;
-}
+export type { BrowserToolOperation, BrowserToolPayload } from "../ide/browser-tools.ts";
 
 interface PendingRequest {
   resolve(value: BrowserToolPayload): void;
@@ -24,9 +19,10 @@ export class BrowserToolBroker {
 
   request(
     operation: BrowserToolOperation,
-    emit: (request: { requestId: string; operation: BrowserToolOperation }) => void,
+    emit: (request: BrowserToolRequest) => void,
     signal?: AbortSignal,
     timeoutMs = 120_000,
+    actions?: BrowserPageAction[],
   ): Promise<BrowserToolPayload> {
     return new Promise((resolve) => {
       const requestId = randomUUID();
@@ -54,7 +50,7 @@ export class BrowserToolBroker {
         finish({ ok: false, operation, error: "Browser tool was aborted." });
         return;
       }
-      emit({ requestId, operation });
+      emit({ requestId, operation, ...(actions ? { actions } : {}) });
     });
   }
 

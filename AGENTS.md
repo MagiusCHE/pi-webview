@@ -358,8 +358,11 @@ companion** — modello pi-x-ide, ognuno solo se l'IDE è presente:
   senza attendere il loader del pannello. Una connessione diretta avvia le nuove
   sessioni nella home utente; resume e handoff conservano il workspace della
   sessione.
-  I tool `browser_page_dom` e `browser_page_screenshot` usano un broker privato
-  per-channel solo loopback e chiedono consenso una volta per origine/sessione.
+  I tool `browser_page_dom`, `browser_page_screenshot` e `browser_page_action`
+  usano un broker privato per-channel solo loopback. DOM e screenshot chiedono
+  consensi distinti una volta per origine/sessione; ogni sequenza di azioni
+  strutturate (`click`, `type`, `select`, `focus`, `scroll`) mostra target e anteprime dei valori
+  e richiede conferma. Non viene mai eseguito JavaScript arbitrario.
   Chrome impone conferma utente per installazione e rimozione: `/piw install`
   apre il Web Store quando `CHROME_WEB_STORE_ID` è valorizzato, altrimenti il
   flusso Load unpacked. Firefox resta fuori dal perimetro fino al completamento

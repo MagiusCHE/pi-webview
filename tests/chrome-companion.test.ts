@@ -40,6 +40,25 @@ test("Chrome reinjects page tracking idempotently after an extension reload", ()
   assert.match(contentScript, /__piWebviewBrowserContentScriptLoaded/);
 });
 
+test("Chrome page actions are structured and do not evaluate remote code", () => {
+  const serviceWorker = readFileSync(
+    "src/adapters/browser/chrome/service-worker.ts",
+    "utf8",
+  );
+  const contentScript = readFileSync(
+    "src/adapters/browser/chrome/content-script.ts",
+    "utf8",
+  );
+  assert.match(serviceWorker, /function executePageActions/);
+  assert.match(serviceWorker, /action\.type === "click"/);
+  assert.match(serviceWorker, /new PointerEvent\("pointerdown"/);
+  assert.match(serviceWorker, /new MouseEvent\("click"/);
+  assert.match(serviceWorker, /action\.type === "type"/);
+  assert.match(serviceWorker, /execCommand\("insertText"/);
+  assert.doesNotMatch(serviceWorker, /\beval\s*\(|new Function\s*\(/);
+  assert.match(contentScript, /"page-action"/);
+});
+
 test("package scripts build Chrome before assembling the pi package", () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
     scripts?: Record<string, string>;

@@ -65,7 +65,13 @@ function initializeContentScript(): void {
           type: DISCOVERY_RESPONSE,
           nonce: message.nonce,
           protocolVersion: 1,
-          capabilities: ["side-panel", "page-context", "page-dom", "page-screenshot"],
+          capabilities: [
+            "side-panel",
+            "page-context",
+            "page-dom",
+            "page-screenshot",
+            "page-action",
+          ],
         },
         "*",
       );

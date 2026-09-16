@@ -144,11 +144,13 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   pacchetto; cambi di design del packaging vanno riflessi in entrambi i punti
   dove necessario ma senza duplicare contenuto
 - **Reminder versione e changelog**: al primo avvio dopo install/update,
-  l'estensione mostra una sola volta per versione un warning localizzato con
-  tutte le modalità d'uso (Browser View, VS Code, Visual Studio, Chrome con URL
-  Web Store), seguito da un box con le note localizzate della stessa versione.
-  Lo stato globale vive in `~/.pi/pi-webview/release-reminder.json`, mai nella
-  sessione. `CHANGELOG.md` è solo in inglese e viene incluso nel package npm; il titolo del box resta localizzato nella UI.
+  l'estensione mostra una sola volta per versione una card informativa nello
+  stesso formato del riepilogo Context/Skills/Extensions, con tutte le modalità
+  d'uso (Browser View, VS Code, Visual Studio, Chrome con URL Web Store) e le
+  note della stessa versione. Lo stato globale vive in
+  `~/.pi/pi-webview/release-reminder.json`, mai nella sessione.
+  `CHANGELOG.md` è solo in inglese e viene incluso nel package npm; il titolo
+  delle note resta localizzato nella UI.
 - **README: matrice companion sempre aggiornata**. `README.md` (GitHub) e
   `packages/pi-webview/README.md` (npmjs) devono indicare chiaramente e in una
   lista dedicata tutti i companion IDE effettivamente implementati. Aggiornare

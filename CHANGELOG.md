@@ -4,6 +4,8 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+- Presented the pi-webview version reminder as a single informational startup-style card instead of a warning.
+
 ## [0.4.2] - 2026-09-16
 
 - Fixed structured typing in model-driven `contenteditable` editors such as CKEditor by sending the `beforeinput` contract in the page world and verifying that the editor retained the text.

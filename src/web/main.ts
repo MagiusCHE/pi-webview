@@ -143,6 +143,7 @@ import {
   pageUrlForSession,
 } from "./session-url.ts";
 import { ReconnectLoop, RECONNECT_INTERVAL_MS } from "./reconnect.ts";
+import { isReleaseReminderMessage } from "./release-reminder.ts";
 import {
   isBlockedNpmInstallScriptsUpdate,
   isRemoteNpmDependencyDisabledUpdate,
@@ -460,6 +461,10 @@ let loadingAgentActive = false;
 // logs collected while loading: flushed into the chat (at the END of the
 // resumed history) when the loading ends — never lost, never at the top
 const loadingLogs: { level: "error" | "warn" | "info"; text: string }[] = [];
+// Release reminders use the startup-card presentation rather than a warning.
+// They can arrive before history replaces the thread, so retain them until the
+// active session history is ready.
+const pendingReleaseReminderCards: string[] = [];
 const LOADING_QUIET_MS = 1500; // logs silence that ends the loading
 const LOADING_MAX_MS = 30000; // never load longer than this
 const LOADING_LOG_CAP = 200; // lines kept in the box
@@ -506,6 +511,7 @@ function endSessionLoading(): void {
   els.bootLoaderLogs.hidden = true;
   els.bootLoaderLogs.textContent = "";
   els.bootLoader.hidden = true;
+  flushPendingReleaseReminderCards();
   updateSendButton();
 }
 
@@ -531,7 +537,6 @@ function pushLoadingLog(level: "error" | "warn" | "info", line: string): void {
  *  history (called by loadHistory AFTER the render: the boxes survive the
  *  thread reset and land at the bottom, never at the top) */
 function flushLoadingLogs(): void {
-  if (loadingLogs.length === 0) return;
   const lines = loadingLogs.splice(0, loadingLogs.length);
   for (const l of lines) {
     const wrapper = addMsg("status");
@@ -541,6 +546,7 @@ function flushLoadingLogs(): void {
     line.title = l.text;
     wrapper.appendChild(line);
   }
+  flushPendingReleaseReminderCards();
   scrollToBottom();
 }
 
@@ -4642,7 +4648,8 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       disarmWaitingResponse();
       const msg = (evt.message as string | undefined) ?? (evt.title as string) ?? "";
       const notifyType = evt.notifyType as string | undefined;
-      if (msg && notifyType === "warning") addSystemBox("warn", msg);
+      if (msg && isReleaseReminderMessage(msg)) addReleaseReminderCard(msg);
+      else if (msg && notifyType === "warning") addSystemBox("warn", msg);
       else if (msg && notifyType === "error") addSystemBox("error", msg);
       else if (msg) addStatusLine(msg);
       if (msg && !allowRemoteNpmUpdates && isRemoteNpmDependencyDisabledUpdate(msg)) {
@@ -6726,6 +6733,47 @@ function addStatusLine(text: string): void {
   // multiline content makes it grow after → re-scroll here, otherwise the
   // box stays cut under the visible bottom ("almost at the bottom but not quite")
   scrollToBottom();
+}
+
+// The one-time package-update notice uses the same card family as the
+// Context/Skills/Extensions startup information, not the warning treatment.
+function appendReleaseReminderCard(text: string): void {
+  const wrapper = addMsg("status");
+  const card = document.createElement("div");
+  card.className = "startup-card release-reminder-card";
+  const row = document.createElement("div");
+  row.className = "startup-section release-reminder-section";
+  const label = document.createElement("span");
+  label.className = "startup-label";
+  label.textContent = "pi-webview";
+  const content = document.createElement("span");
+  content.className = "startup-items release-reminder-items";
+  content.textContent = text;
+  row.append(label, content);
+  card.appendChild(row);
+  wrapper.appendChild(card);
+  scrollToBottom();
+}
+
+function addReleaseReminderCard(text: string): void {
+  const reminder = text.trim();
+  if (!reminder) return;
+  // Session history clears the thread while loading. Defer a startup-time
+  // notification so it is not lost before its card can be displayed.
+  if (sessionLoading || !loadingHistoryLoaded) {
+    pendingReleaseReminderCards.push(reminder);
+    return;
+  }
+  appendReleaseReminderCard(reminder);
+}
+
+function flushPendingReleaseReminderCards(): void {
+  if (!loadingHistoryLoaded || pendingReleaseReminderCards.length === 0) return;
+  const reminders = pendingReleaseReminderCards.splice(
+    0,
+    pendingReleaseReminderCards.length,
+  );
+  for (const reminder of reminders) appendReleaseReminderCard(reminder);
 }
 
 // card for messages INJECTED from another session (custom role, e.g.

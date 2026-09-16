@@ -133,3 +133,19 @@ export function formatChangelogReminder(
       : `What's new in pi-webview ${version}:`;
   return [title, ...notes.map((note) => `• ${note}`)].join("\n");
 }
+
+// One normal informational notice for the release. Keeping the changelog and
+// the available modes together lets every UI render the same complete update
+// message without using warning styling.
+export function formatReleaseReminder(
+  version: string,
+  markdown: string,
+  locale: ReminderLocale,
+): string {
+  const changelog = formatChangelogReminder(
+    version,
+    extractReleaseNotes(markdown, version, locale),
+    locale,
+  );
+  return [formatWaysReminder(version, locale), changelog].filter(Boolean).join("\n\n");
+}

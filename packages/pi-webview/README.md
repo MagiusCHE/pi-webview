@@ -161,7 +161,7 @@ The bridge shuts down by itself after **1 minute with no open session** (no conn
 pi install npm:@magiusche/pi-webview
 ```
 
-On the first start after an install or update, pi-webview shows a one-time reminder of every available mode: Browser View (`piw` / `piw-public`), the automatically managed VS Code and Visual Studio companions, and the [Google Chrome Side Panel companion](https://chromewebstore.google.com/detail/hcdjfkcgojomhpmcfgipginghhlncamn). A second box shows the English notes for that version from the bundled [`CHANGELOG.md`](https://github.com/MagiusCHE/pi-webview/blob/main/CHANGELOG.md), with a localized heading. The reminder is stored outside conversation sessions and is not repeated for the same version.
+On the first start after an install or update, pi-webview shows one informational card, styled like the Context / Skills / Extensions startup summary. It lists every available mode—Browser View (`piw` / `piw-public`), the automatically managed VS Code and Visual Studio companions, and the [Google Chrome Side Panel companion](https://chromewebstore.google.com/detail/hcdjfkcgojomhpmcfgipginghhlncamn)—followed by the English notes for that version from the bundled [`CHANGELOG.md`](https://github.com/MagiusCHE/pi-webview/blob/main/CHANGELOG.md), with a localized heading. The reminder is stored outside conversation sessions and is not repeated for the same version.
 
 > **⚠️ The companions are checked at every pi start** — the check **blocks
 > startup until it finishes** (pi.dev / the webview never start with a pending

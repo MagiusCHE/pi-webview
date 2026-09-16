@@ -8,10 +8,12 @@ import {
   CHROME_WEB_STORE_URL,
   extractReleaseNotes,
   formatChangelogReminder,
+  formatReleaseReminder,
   formatWaysReminder,
   ReleaseReminderStore,
   shouldShowReleaseReminder,
 } from "../packages/pi-webview/lib/release-reminder.ts";
+import { isReleaseReminderMessage } from "../src/web/release-reminder.ts";
 import { releaseChangelog } from "../tools/changelog.mjs";
 
 const englishChangelog = `# Changelog
@@ -40,7 +42,7 @@ test("the reminder lists every mode and the permanent Chrome Web Store URL", () 
   assert.match(english, new RegExp(CHROME_WEB_STORE_URL));
 });
 
-test("English release notes become a separate localized changelog box", () => {
+test("English release notes become a localized section of the release reminder", () => {
   const italian = extractReleaseNotes(englishChangelog, "0.3.2", "it");
   const english = extractReleaseNotes(englishChangelog, "0.3.2", "en");
   assert.deepEqual(italian, ["English fix."]);
@@ -50,6 +52,27 @@ test("English release notes become a separate localized changelog box", () => {
     "Novità in pi-webview 0.3.2:\n• English fix.",
   );
   assert.equal(formatChangelogReminder("9.9.9", [], "en"), null);
+
+  const reminder = formatReleaseReminder("0.3.2", englishChangelog, "it");
+  assert.match(reminder, /^pi-webview 0\.3\.2 è stato installato o aggiornato\./);
+  assert.match(reminder, /Novità in pi-webview 0\.3\.2:\n• English fix\./);
+  assert.equal(isReleaseReminderMessage(reminder), true);
+  assert.equal(
+    isReleaseReminderMessage("pi-webview: all companions are current."),
+    false,
+  );
+});
+
+test("the release reminder is emitted as informational UI, never a warning", () => {
+  const extension = readFileSync("packages/pi-webview/extension.ts", "utf8");
+  const web = readFileSync("src/web/main.ts", "utf8");
+  assert.match(extension, /ui\.notify\(releaseReminder, "info"\)/);
+  assert.doesNotMatch(
+    extension,
+    /formatWaysReminder\(reminderVersion, locale\), "warning"/,
+  );
+  assert.match(web, /isReleaseReminderMessage\(msg\)\) addReleaseReminderCard\(msg\)/);
+  assert.match(web, /card\.className = "startup-card release-reminder-card"/);
 });
 
 test("a reminder is shown only on first install or a newer version", () => {

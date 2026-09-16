@@ -53,9 +53,7 @@ import { checkPiUpdate, locatePi } from "./lib/update-check.ts";
 import type { UpdateAvailable } from "./lib/update-check.ts";
 import { registerBrowserTools, type BrowserToolPiApi } from "./lib/browser-tools.ts";
 import {
-  extractReleaseNotes,
-  formatChangelogReminder,
-  formatWaysReminder,
+  formatReleaseReminder,
   ReleaseReminderStore,
   type ReminderLocale,
 } from "./lib/release-reminder.ts";
@@ -559,10 +557,12 @@ export default async function (pi: PiApi): Promise<void> {
     reminderShownThisProcess = true;
     const configuredLocale = new ConfigStore().get().locale;
     const locale: ReminderLocale = configuredLocale === "en" ? "en" : "it";
-    ui.notify(formatWaysReminder(reminderVersion, locale), "warning");
-    const notes = extractReleaseNotes(reminderChangelog, reminderVersion, locale);
-    const changelog = formatChangelogReminder(reminderVersion, notes, locale);
-    if (changelog) ui.notify(changelog, "info");
+    const releaseReminder = formatReleaseReminder(
+      reminderVersion,
+      reminderChangelog,
+      locale,
+    );
+    ui.notify(releaseReminder, "info");
     try {
       reminderStore.markShown(reminderVersion);
     } catch {

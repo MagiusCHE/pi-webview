@@ -61,6 +61,17 @@ test("ConfigStore: default, patch e persistenza", () => {
       agenticThinking: false,
       allowRemoteNpmUpdates: false,
       dangerouslyAllowAllNpmScripts: false,
+      speechToText: {
+        mode: "push-to-talk",
+        language: "system",
+        allowCloudTranscription: false,
+        toggleSilenceMs: 1500,
+        shortcuts: {
+          pushToTalk: "Ctrl+Alt+Space",
+          toggleToTalk: "Ctrl+Alt+M",
+        },
+        inputByRuntime: {},
+      },
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -82,6 +93,17 @@ test("ConfigStore: persiste preferenze UI e sorgenti di stato nascoste", () => {
         sites: { "https://example.test": ["screenshot", "action"] },
       },
       hiddenStatusKeys: ["mcp", "control"],
+      speechToText: {
+        mode: "toggle-to-talk",
+        language: "it-IT",
+        allowCloudTranscription: true,
+        toggleSilenceMs: 2200,
+        shortcuts: {
+          pushToTalk: "Ctrl+Shift+Space",
+          toggleToTalk: "Ctrl+Shift+M",
+        },
+        inputByRuntime: { vscode: "opaque-device" },
+      },
     });
     const reloaded = new ConfigStore(dir).get();
     assert.equal(reloaded.statsBarPosition, "topbar");
@@ -94,6 +116,17 @@ test("ConfigStore: persiste preferenze UI e sorgenti di stato nascoste", () => {
       sites: { "https://example.test": ["screenshot", "action"] },
     });
     assert.deepEqual(reloaded.hiddenStatusKeys, ["mcp", "control"]);
+    assert.deepEqual(reloaded.speechToText, {
+      mode: "toggle-to-talk",
+      language: "it-IT",
+      allowCloudTranscription: true,
+      toggleSilenceMs: 2200,
+      shortcuts: {
+        pushToTalk: "Ctrl+Shift+Space",
+        toggleToTalk: "Ctrl+Shift+M",
+      },
+      inputByRuntime: { vscode: "opaque-device" },
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

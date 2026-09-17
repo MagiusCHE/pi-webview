@@ -29,6 +29,21 @@ public sealed class UserConfigStore
         AgenticThinking = false,
         AllowRemoteNpmUpdates = false,
         DangerouslyAllowAllNpmScripts = false,
+        SpeechToText = DefaultSpeechToText(),
+    };
+
+    private static SpeechToTextConfig DefaultSpeechToText() => new()
+    {
+        Mode = "push-to-talk",
+        Language = "system",
+        AllowCloudTranscription = false,
+        ToggleSilenceMs = 1500,
+        Shortcuts = new Dictionary<string, string>
+        {
+            ["pushToTalk"] = "Ctrl+Alt+Space",
+            ["toggleToTalk"] = "Ctrl+Alt+M",
+        },
+        InputByRuntime = new Dictionary<string, string>(),
     };
 
     private UserConfig _config;
@@ -66,6 +81,7 @@ public sealed class UserConfigStore
                     .Where(key => !string.IsNullOrWhiteSpace(key))
                     .Distinct(StringComparer.Ordinal)
                     .ToList(),
+                SpeechToText = CloneSpeechToText(parsed.SpeechToText),
             };
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
@@ -141,6 +157,19 @@ public sealed class UserConfigStore
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
         }
+        if (patch.TryGetValue("speechToText", out var speech) &&
+            speech.ValueKind == JsonValueKind.Object)
+        {
+            try
+            {
+                _config.SpeechToText = NormalizeSpeechToText(
+                    JsonSerializer.Deserialize<SpeechToTextConfig>(speech.GetRawText(), ProtocolJson.Options));
+            }
+            catch (JsonException)
+            {
+                // Keep the current valid preferences when an untyped bridge patch is malformed.
+            }
+        }
         Write();
         return Get();
     }
@@ -167,7 +196,88 @@ public sealed class UserConfigStore
         DangerouslyAllowAllNpmScripts = c.DangerouslyAllowAllNpmScripts,
         BrowserToolPermissions = CloneBrowserPermissions(c.BrowserToolPermissions),
         HiddenStatusKeys = c.HiddenStatusKeys is null ? null : new List<string>(c.HiddenStatusKeys),
+        SpeechToText = CloneSpeechToText(c.SpeechToText),
     };
+
+    private static SpeechToTextConfig CloneSpeechToText(SpeechToTextConfig? config) =>
+        NormalizeSpeechToText(config);
+
+    private static SpeechToTextConfig NormalizeSpeechToText(SpeechToTextConfig? config)
+    {
+        var defaults = DefaultSpeechToText();
+        if (config is null) return defaults;
+        var mode = config.Mode == "toggle-to-talk" ? "toggle-to-talk" : "push-to-talk";
+        var language = string.IsNullOrWhiteSpace(config.Language) ? "system" : config.Language.Trim();
+        var silence = Math.Max(500, Math.Min(10000, config.ToggleSilenceMs));
+        var shortcuts = new Dictionary<string, string>(defaults.Shortcuts!, StringComparer.Ordinal);
+        if (config.Shortcuts is not null)
+        {
+            foreach (var key in new[] { "pushToTalk", "toggleToTalk" })
+            {
+                if (config.Shortcuts.TryGetValue(key, out var value) &&
+                    TryNormalizeShortcut(value, out var shortcut))
+                {
+                    shortcuts[key] = shortcut;
+                }
+            }
+        }
+        var devices = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (config.InputByRuntime is not null)
+        {
+            foreach (var entry in config.InputByRuntime)
+            {
+                var deviceId = entry.Value;
+                if (entry.Key.Length == 0 || entry.Key.Length > 256 || deviceId is null ||
+                    string.IsNullOrWhiteSpace(deviceId) || deviceId.Length > 1024) continue;
+                devices[entry.Key] = deviceId;
+            }
+        }
+        return new SpeechToTextConfig
+        {
+            Mode = mode,
+            Language = language,
+            AllowCloudTranscription = config.AllowCloudTranscription,
+            ToggleSilenceMs = silence,
+            Shortcuts = shortcuts,
+            InputByRuntime = devices,
+        };
+    }
+
+    private static bool TryNormalizeShortcut(string? value, out string shortcut)
+    {
+        shortcut = "";
+        if (value is null || string.IsNullOrWhiteSpace(value) || value.Length > 100) return false;
+        var parts = value.Split(new[] { '+' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.Trim())
+            .Where(part => part.Length > 0)
+            .ToArray();
+        if (parts.Length < 2) return false;
+        var modifierOrder = new[] { "Ctrl", "Alt", "Shift", "Meta" };
+        var modifiers = new HashSet<string>(StringComparer.Ordinal);
+        string? code = null;
+        foreach (var part in parts)
+        {
+            var modifier = modifierOrder.FirstOrDefault(candidate =>
+                string.Equals(candidate, part, StringComparison.OrdinalIgnoreCase));
+            if (modifier is not null)
+            {
+                if (!modifiers.Add(modifier)) return false;
+            }
+            else if (code is null)
+            {
+                code = part;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        if (code is null || modifiers.Count == 0) return false;
+        var orderedParts = modifierOrder.Where(modifiers.Contains).ToList();
+        orderedParts.Add(code);
+        shortcut = string.Join("+", orderedParts);
+        return true;
+    }
 
     private static BrowserPersistentPermissions? CloneBrowserPermissions(
         BrowserPersistentPermissions? permissions) => permissions is null

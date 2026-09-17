@@ -169,6 +169,10 @@ public sealed class UserConfigStoreTests : IDisposable
         Assert.False(store.Get().AgenticThinking);
         Assert.False(store.Get().AllowRemoteNpmUpdates);
         Assert.False(store.Get().DangerouslyAllowAllNpmScripts);
+        Assert.NotNull(store.Get().SpeechToText);
+        Assert.Equal("push-to-talk", store.Get().SpeechToText!.Mode);
+        Assert.False(store.Get().SpeechToText!.AllowCloudTranscription);
+        Assert.Equal(1500, store.Get().SpeechToText!.ToggleSilenceMs);
     }
 
     [Fact]
@@ -190,7 +194,18 @@ public sealed class UserConfigStoreTests : IDisposable
                 "global": ["dom"],
                 "sites": { "https://example.test": ["screenshot", "action"] }
               },
-              "hiddenStatusKeys": ["mcp", "control", "mcp"]
+              "hiddenStatusKeys": ["mcp", "control", "mcp"],
+              "speechToText": {
+                "mode": "toggle-to-talk",
+                "language": "it-IT",
+                "allowCloudTranscription": true,
+                "toggleSilenceMs": 2200,
+                "shortcuts": {
+                  "pushToTalk": "Alt+Ctrl+Space",
+                  "toggleToTalk": "Ctrl+Shift+M"
+                },
+                "inputByRuntime": { "vscode": "opaque-device" }
+              }
             }
             """);
         var patch = new Dictionary<string, JsonElement>();
@@ -213,6 +228,13 @@ public sealed class UserConfigStoreTests : IDisposable
             new[] { "screenshot", "action" },
             reloaded.BrowserToolPermissions?.Sites?["https://example.test"]);
         Assert.Equal(new[] { "mcp", "control" }, reloaded.HiddenStatusKeys);
+        Assert.NotNull(reloaded.SpeechToText);
+        Assert.Equal("toggle-to-talk", reloaded.SpeechToText!.Mode);
+        Assert.Equal("it-IT", reloaded.SpeechToText!.Language);
+        Assert.True(reloaded.SpeechToText!.AllowCloudTranscription);
+        Assert.Equal(2200, reloaded.SpeechToText!.ToggleSilenceMs);
+        Assert.Equal("Ctrl+Alt+Space", reloaded.SpeechToText!.Shortcuts!["pushToTalk"]);
+        Assert.Equal("opaque-device", reloaded.SpeechToText!.InputByRuntime!["vscode"]);
     }
 
     [Fact]
@@ -228,7 +250,12 @@ public sealed class UserConfigStoreTests : IDisposable
               "agenticThinking": "yes",
               "allowRemoteNpmUpdates": "yes",
               "dangerouslyAllowAllNpmScripts": "yes",
-              "hiddenStatusKeys": "mcp"
+              "hiddenStatusKeys": "mcp",
+              "speechToText": {
+                "mode": "always-on",
+                "toggleSilenceMs": 0,
+                "shortcuts": { "pushToTalk": "Ctrl+Alt" }
+              }
             }
             """);
         var patch = new Dictionary<string, JsonElement>();
@@ -242,6 +269,10 @@ public sealed class UserConfigStoreTests : IDisposable
         Assert.False(store.Get().AllowRemoteNpmUpdates);
         Assert.False(store.Get().DangerouslyAllowAllNpmScripts);
         Assert.Null(store.Get().HiddenStatusKeys);
+        Assert.NotNull(store.Get().SpeechToText);
+        Assert.Equal("push-to-talk", store.Get().SpeechToText!.Mode);
+        Assert.Equal(500, store.Get().SpeechToText!.ToggleSilenceMs);
+        Assert.Equal("Ctrl+Alt+Space", store.Get().SpeechToText!.Shortcuts!["pushToTalk"]);
     }
 }
 

@@ -7,5 +7,26 @@
   },
   "actionTitle": {
     "message": "Open pi-webview"
+  },
+  "microphonePermissionTitle": {
+    "message": "Enable microphone"
+  },
+  "microphonePermissionDescription": {
+    "message": "pi-webview needs microphone access for dictation. It only captures microphone input while you dictate."
+  },
+  "microphonePermissionAllow": {
+    "message": "Allow microphone"
+  },
+  "microphonePermissionCancel": {
+    "message": "Cancel"
+  },
+  "microphonePermissionRequesting": {
+    "message": "Waiting for Chrome…"
+  },
+  "microphonePermissionGranted": {
+    "message": "Microphone enabled. You can return to the Side Panel."
+  },
+  "microphonePermissionDenied": {
+    "message": "Chrome did not grant microphone access. You can try again or close this window."
   }
 }

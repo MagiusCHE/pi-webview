@@ -64,6 +64,11 @@ import type {
   ThemePreference,
   UpdateAvailable,
 } from "../ide/protocol.ts";
+import {
+  normalizeSpeechToTextConfig,
+  type SpeechInputMode,
+  type SpeechToTextConfig,
+} from "../ide/speech-config.ts";
 import { currentLocale, setLocale, t, tpl, isLocaleId, type LocaleId } from "./i18n.ts";
 import { runtime } from "./environment.ts";
 import { sessionPickStrategy } from "./session-routing.ts";
@@ -174,9 +179,36 @@ import {
   shellResultExitCode,
   writeArgumentContent,
 } from "./tool-arguments.ts";
+import { SpeechDraft } from "./speech-draft.ts";
+import {
+  SpeechController,
+  type SpeechCompletion,
+  type SpeechControllerState,
+  type SpeechMediaDevices,
+} from "./speech-controller.ts";
+import {
+  detectSpeechCapabilities,
+  formatSpeechShortcut,
+  getLocalSpeechModelAvailability,
+  getSpeechMicrophonePermission,
+  getSpeechRuntime,
+  installLocalSpeechModel,
+  localSpeechModelControlState,
+  SPEECH_LANGUAGE_CATALOG,
+  speechLanguageDisplayName,
+  speechShortcutForMode,
+  speechShortcutFromKeyboardEvent,
+  speechShortcutMatchesEvent,
+  systemSpeechLanguage,
+  type SpeechCapabilities,
+  type SpeechMicrophonePermission,
+  type SpeechModelAvailability,
+} from "./speech-to-text.ts";
 import {
   trustIcon,
   sendIcon,
+  microphoneIcon,
+  speechWaveformIcon,
   stopIcon,
   attachFileIcon,
   newChatIcon,
@@ -242,6 +274,94 @@ const els = {
   settingsBrowserPermissionsStatus: document.getElementById(
     "settings-browser-permissions-status",
   ) as HTMLSpanElement,
+  settingsSpeechSection: document.getElementById(
+    "settings-speech-section",
+  ) as HTMLDivElement,
+  settingsSpeechTitle: document.getElementById("settings-speech-title") as HTMLDivElement,
+  settingsSpeechStatus: document.getElementById(
+    "settings-speech-status",
+  ) as HTMLDivElement,
+  settingsSpeechStatusIcon: document.getElementById(
+    "settings-speech-status-icon",
+  ) as HTMLSpanElement,
+  settingsSpeechStatusText: document.getElementById(
+    "settings-speech-status-text",
+  ) as HTMLSpanElement,
+  settingsSpeechControls: document.getElementById(
+    "settings-speech-controls",
+  ) as HTMLDivElement,
+  settingsSpeechDeviceLabel: document.getElementById(
+    "settings-speech-device-label",
+  ) as HTMLLabelElement,
+  settingsSpeechDevice: document.getElementById(
+    "settings-speech-device",
+  ) as HTMLSelectElement,
+  settingsSpeechRefreshDevices: document.getElementById(
+    "settings-speech-refresh-devices",
+  ) as HTMLButtonElement,
+  settingsSpeechDeviceNote: document.getElementById(
+    "settings-speech-device-note",
+  ) as HTMLDivElement,
+  settingsSpeechModeLabel: document.getElementById(
+    "settings-speech-mode-label",
+  ) as HTMLLabelElement,
+  settingsSpeechMode: document.getElementById(
+    "settings-speech-mode",
+  ) as HTMLSelectElement,
+  settingsSpeechPushShortcutLabel: document.getElementById(
+    "settings-speech-push-shortcut-label",
+  ) as HTMLLabelElement,
+  settingsSpeechPushShortcut: document.getElementById(
+    "settings-speech-push-shortcut",
+  ) as HTMLOutputElement,
+  settingsSpeechPushShortcutCapture: document.getElementById(
+    "settings-speech-push-shortcut-capture",
+  ) as HTMLButtonElement,
+  settingsSpeechToggleShortcutLabel: document.getElementById(
+    "settings-speech-toggle-shortcut-label",
+  ) as HTMLLabelElement,
+  settingsSpeechToggleShortcut: document.getElementById(
+    "settings-speech-toggle-shortcut",
+  ) as HTMLOutputElement,
+  settingsSpeechToggleShortcutCapture: document.getElementById(
+    "settings-speech-toggle-shortcut-capture",
+  ) as HTMLButtonElement,
+  settingsSpeechShortcutNote: document.getElementById(
+    "settings-speech-shortcut-note",
+  ) as HTMLDivElement,
+  settingsSpeechLanguageLabel: document.getElementById(
+    "settings-speech-language-label",
+  ) as HTMLLabelElement,
+  settingsSpeechLanguage: document.getElementById(
+    "settings-speech-language",
+  ) as HTMLSelectElement,
+  settingsSpeechModelStatus: document.getElementById(
+    "settings-speech-model-status",
+  ) as HTMLSpanElement,
+  settingsSpeechInstallModel: document.getElementById(
+    "settings-speech-install-model",
+  ) as HTMLButtonElement,
+  settingsSpeechRemoveModel: document.getElementById(
+    "settings-speech-remove-model",
+  ) as HTMLButtonElement,
+  settingsSpeechModelNote: document.getElementById(
+    "settings-speech-model-note",
+  ) as HTMLDivElement,
+  settingsSpeechPauseLabel: document.getElementById(
+    "settings-speech-pause-label",
+  ) as HTMLLabelElement,
+  settingsSpeechPause: document.getElementById(
+    "settings-speech-pause",
+  ) as HTMLInputElement,
+  settingsSpeechCloudLabel: document.getElementById(
+    "settings-speech-cloud-label",
+  ) as HTMLLabelElement,
+  settingsSpeechCloud: document.getElementById(
+    "settings-speech-cloud",
+  ) as HTMLInputElement,
+  settingsSpeechCloudNote: document.getElementById(
+    "settings-speech-cloud-note",
+  ) as HTMLDivElement,
   settingsNotificationsTitle: document.getElementById(
     "settings-notifications-title",
   ) as HTMLDivElement,
@@ -347,6 +467,7 @@ const els = {
   dropOverlayIcon: document.getElementById("drop-overlay-icon") as HTMLSpanElement,
   dropOverlayText: document.getElementById("drop-overlay-text") as HTMLSpanElement,
   send: document.getElementById("btn-send") as HTMLButtonElement,
+  speech: document.getElementById("btn-speech") as HTMLButtonElement,
   attachBtn: document.getElementById("btn-attach") as HTMLButtonElement,
   browserFilePicker: document.getElementById("browser-file-picker") as HTMLInputElement,
   trust: document.getElementById("trust") as HTMLButtonElement,
@@ -886,6 +1007,624 @@ let browserSessionPermissions: BrowserToolOperation[] = [];
 let browserPersistentPermissions: BrowserPersistentPermissions = {};
 let browserSessionSettingsReady: Promise<void> = Promise.resolve();
 
+// --- microphone speech-to-text ---------------------------------------------
+// The shared Web UI owns recognition. Hosts only persist UserConfig: no bridge,
+// IDE adapter or pi process ever receives an audio stream.
+
+let speechConfig: SpeechToTextConfig = normalizeSpeechToTextConfig(undefined);
+let speechRuntime = getSpeechRuntime();
+let speechCapabilities: SpeechCapabilities = detectSpeechCapabilities();
+let speechMicrophonePermission: SpeechMicrophonePermission =
+  speechCapabilities.microphonePermission;
+let speechModelAvailability: SpeechModelAvailability = "unknown";
+let speechModelChecking = false;
+let speechModelInstalling = false;
+let speechDevices: MediaDeviceInfo[] = [];
+let speechDeviceRefreshError = "";
+let speechError = "";
+let speechState: SpeechControllerState = "idle";
+let speechModeActive: SpeechInputMode | null = null;
+let speechShortcutCapture: "pushToTalk" | "toggleToTalk" | null = null;
+let speechPushShortcutKey: string | null = null;
+const speechDraft = new SpeechDraft();
+
+function setSpeechMicrophonePermission(value: SpeechMicrophonePermission): void {
+  speechMicrophonePermission = value;
+  speechCapabilities = { ...speechCapabilities, microphonePermission: value };
+}
+
+function speechRuntimeKey(): string {
+  if (runtime.isBrowserExtension) return `browser-extension:${location.origin}`;
+  if (runtime.isVsCode) return `vscode:${location.origin}`;
+  if (runtime.isIDE) return `visual-studio:${location.origin}`;
+  return `standalone:${location.origin}`;
+}
+
+function selectedSpeechDevice(): "default" | string {
+  return speechConfig.inputByRuntime[speechRuntimeKey()] ?? "default";
+}
+
+function currentSpeechLanguage(): string {
+  return speechConfig.language === "system"
+    ? systemSpeechLanguage()
+    : speechConfig.language;
+}
+
+function speechMediaDevices(): SpeechMediaDevices | undefined {
+  return typeof navigator !== "undefined" && navigator.mediaDevices
+    ? (navigator.mediaDevices as SpeechMediaDevices)
+    : undefined;
+}
+
+function speechSecureContext(): boolean {
+  return typeof window === "undefined" || window.isSecureContext;
+}
+
+function speechInputUnavailableInThisContainer(): boolean {
+  return (
+    !speechCapabilities.recognition ||
+    !speechSecureContext() ||
+    !speechCapabilities.microphonePolicyAllowsCapture
+  );
+}
+
+function speechStateText(): string {
+  if (!speechCapabilities.recognition) return t("speechStatusUnavailable");
+  if (!speechSecureContext()) return t("speechStatusInsecureContext");
+  if (!speechCapabilities.microphonePolicyAllowsCapture) {
+    return t("speechStatusContainerBlocksMicrophone");
+  }
+  if (speechError) return speechError;
+  if (speechMicrophonePermission === "denied") {
+    return runtime.isBrowserExtension
+      ? t("speechStatusChromePermissionDenied")
+      : t("speechStatusPermissionDenied");
+  }
+  if (speechState === "starting") return t("speechStatusStarting");
+  if (speechState === "stopping") return t("speechStatusStopping");
+  if (speechState === "listening") {
+    return speechModeActive === "toggle-to-talk"
+      ? t("speechStatusListeningToggle")
+      : t("speechStatusListeningPush");
+  }
+  if (speechCapabilities.localRecognition && speechModelAvailability === "available") {
+    return t("speechStatusLocalReady");
+  }
+  if (speechConfig.allowCloudTranscription && speechCapabilities.cloudRecognition) {
+    return t("speechStatusCloudReady");
+  }
+  if (speechModelInstalling || speechModelAvailability === "downloading") {
+    return t("speechStatusModelDownloading");
+  }
+  if (speechCapabilities.localRecognition && speechModelAvailability === "downloadable") {
+    return t("speechStatusModelDownloadable");
+  }
+  if (speechCapabilities.cloudRecognition) return t("speechStatusCloudOptIn");
+  return t("speechStatusNoUsableEngine");
+}
+
+function speechHasReadyEngine(): boolean {
+  return (
+    (speechCapabilities.localRecognition && speechModelAvailability === "available") ||
+    (speechCapabilities.cloudRecognition && speechConfig.allowCloudTranscription)
+  );
+}
+
+function speechModelStatusText(): string {
+  if (speechModelInstalling) return t("speechModelDownloading");
+  switch (localSpeechModelControlState(speechCapabilities, speechModelAvailability)) {
+    case "recognition-unavailable":
+      return t("speechModelRecognitionUnsupported");
+    case "local-recognition-unavailable":
+      return t("speechModelLocalRecognitionUnsupported");
+    case "availability-unavailable":
+      return t("speechModelAvailabilityUnsupported");
+    case "install-unavailable":
+      return t("speechModelInstallUnsupported");
+    case "available":
+      return t("speechModelAvailable");
+    case "downloadable":
+      return t("speechModelDownloadable");
+    case "downloading":
+      return t("speechModelDownloading");
+    case "unknown":
+      return t("speechModelUnknown");
+    case "unavailable":
+      return t("speechModelUnavailable");
+  }
+}
+
+function isSpeechPermissionError(code: string): boolean {
+  const normalized = code.toLowerCase();
+  return (
+    normalized.includes("not-allowed") ||
+    normalized.includes("notallowed") ||
+    normalized.includes("permission")
+  );
+}
+
+function speechErrorMessage(code: string): string {
+  const normalized = code.toLowerCase();
+  if (isSpeechPermissionError(code)) {
+    return runtime.isBrowserExtension
+      ? t("speechStatusChromePermissionDenied")
+      : t("speechStatusPermissionDenied");
+  }
+  if (normalized.includes("input-selection")) return t("speechErrorInputSelection");
+  if (normalized.includes("local-recognition")) return t("speechErrorLocalRequired");
+  return tpl(t("speechErrorGeneric"), { error: code });
+}
+
+async function refreshSpeechMicrophonePermission(): Promise<void> {
+  setSpeechMicrophonePermission(await getSpeechMicrophonePermission());
+  if (
+    speechMicrophonePermission === "granted" &&
+    speechError === t("speechStatusPermissionDenied")
+  ) {
+    speechError = "";
+  }
+  renderSpeechSettings();
+  renderSpeechButton();
+}
+
+function speechCanStart(): boolean {
+  const requiresBrowserPermissionWindow =
+    runtime.isBrowserExtension && speechMicrophonePermission === "denied";
+  if (
+    !speechCapabilities.recognition ||
+    !speechSecureContext() ||
+    !speechCapabilities.microphonePolicyAllowsCapture ||
+    (speechMicrophonePermission === "denied" && !requiresBrowserPermissionWindow) ||
+    speechState !== "idle"
+  ) {
+    return false;
+  }
+  return speechHasReadyEngine();
+}
+
+function applySpeechDraft(update: {
+  value: string;
+  selectionStart: number;
+  selectionEnd: number;
+}): void {
+  els.input.value = update.value;
+  els.input.selectionStart = update.selectionStart;
+  els.input.selectionEnd = update.selectionEnd;
+  autogrowInput();
+}
+
+function beginSpeechDraft(): void {
+  if (speechDraft.active) return;
+  speechDraft.begin({
+    value: els.input.value,
+    selectionStart: els.input.selectionStart ?? els.input.value.length,
+    selectionEnd: els.input.selectionEnd ?? els.input.value.length,
+  });
+  els.input.readOnly = true;
+  els.input.classList.add("speech-dictating");
+}
+
+function completeSpeechDraft(completion: SpeechCompletion): void {
+  if (!speechDraft.active) return;
+  if (completion.kind === "submitted") {
+    const restored = speechDraft.restore();
+    if (restored) applySpeechDraft(restored);
+  } else if (completion.text.trim()) {
+    const committed = speechDraft.commit();
+    if (committed) applySpeechDraft(committed);
+  } else {
+    const restored = speechDraft.cancel();
+    if (restored) applySpeechDraft(restored);
+  }
+  els.input.readOnly = false;
+  els.input.classList.remove("speech-dictating");
+}
+
+function updateSpeechConfig(next: SpeechToTextConfig): void {
+  speechConfig = normalizeSpeechToTextConfig(next);
+  persistWebviewConfig({ speechToText: speechConfig });
+  renderSpeechSettings();
+  renderSpeechButton();
+}
+
+async function refreshSpeechModelAvailability(): Promise<void> {
+  const runtimeForCheck = speechRuntime;
+  if (!runtimeForCheck || !speechCapabilities.modelAvailability) {
+    speechModelAvailability = "unknown";
+    renderSpeechSettings();
+    renderSpeechButton();
+    return;
+  }
+  const language = currentSpeechLanguage();
+  speechModelChecking = true;
+  renderSpeechSettings();
+  const available = await getLocalSpeechModelAvailability(runtimeForCheck, language);
+  if (runtimeForCheck !== speechRuntime || language !== currentSpeechLanguage()) return;
+  speechModelChecking = false;
+  speechModelAvailability = available;
+  renderSpeechSettings();
+  renderSpeechButton();
+}
+
+async function refreshSpeechDevices(requestPermission: boolean): Promise<void> {
+  const devicesApi = speechMediaDevices();
+  speechDeviceRefreshError = "";
+  if (!speechCapabilities.inputEnumeration || !devicesApi?.enumerateDevices) {
+    renderSpeechSettings();
+    return;
+  }
+  try {
+    if (requestPermission && devicesApi.getUserMedia) {
+      const stream = await devicesApi.getUserMedia({ audio: true });
+      for (const track of stream.getAudioTracks()) track.stop();
+    }
+    if (requestPermission) {
+      setSpeechMicrophonePermission("granted");
+      if (speechError === t("speechStatusPermissionDenied")) speechError = "";
+    }
+    speechDevices = (await devicesApi.enumerateDevices()).filter(
+      (device) => device.kind === "audioinput",
+    );
+    const selected = selectedSpeechDevice();
+    if (
+      selected !== "default" &&
+      (speechDevices.length > 0 || speechController?.active) &&
+      !speechDevices.some((device) => device.deviceId === selected)
+    ) {
+      // Never switch an active capture to a different microphone behind the
+      // user's back. Stop safely; the next explicit dictation uses default.
+      speechDeviceRefreshError = t("speechDeviceDisconnected");
+      if (speechController?.active) {
+        speechError = t("speechDeviceDisconnected");
+        speechController.stopSilently();
+      }
+      updateSpeechConfig({
+        ...speechConfig,
+        inputByRuntime: {
+          ...speechConfig.inputByRuntime,
+          [speechRuntimeKey()]: "default",
+        },
+      });
+      return;
+    }
+  } catch (error) {
+    const code =
+      error instanceof Error ? error.name || error.message : "microphone-unavailable";
+    if (isSpeechPermissionError(code)) setSpeechMicrophonePermission("denied");
+    speechDeviceRefreshError = speechErrorMessage(code);
+  }
+  renderSpeechSettings();
+}
+
+function updateSpeechButtonState(): void {
+  const button = els.speech;
+  button.hidden = speechInputUnavailableInThisContainer();
+  if (button.hidden) return;
+  const active = speechState !== "idle";
+  const mode = speechModeActive ?? speechConfig.mode;
+  const shortcut = formatSpeechShortcut(
+    speechShortcutForMode(speechConfig.shortcuts, mode),
+  );
+  button.innerHTML = active ? speechWaveformIcon() : microphoneIcon();
+  button.classList.toggle("listening", speechState === "listening");
+  button.classList.toggle("starting", speechState === "starting");
+  button.classList.toggle("stopping", speechState === "stopping");
+  button.setAttribute("aria-pressed", String(active));
+  const canStart = speechCanStart();
+  const idleLabel =
+    mode === "toggle-to-talk"
+      ? tpl(t("speechButtonToggle"), { shortcut })
+      : tpl(t("speechButtonPush"), { shortcut });
+  button.setAttribute(
+    "aria-label",
+    active ? speechStateText() : canStart ? idleLabel : speechStateText(),
+  );
+  button.title = button.getAttribute("aria-label") ?? "";
+  const interactionLocked =
+    statusState !== "open" || piRestarting || switchingSession || sessionLoading;
+  button.disabled = !active && (!canStart || interactionLocked);
+}
+
+function renderSpeechButton(): void {
+  updateSpeechButtonState();
+}
+
+function renderSpeechSettings(): void {
+  const unavailable = speechInputUnavailableInThisContainer();
+  els.settingsSpeechTitle.textContent = t("settingsSpeechTitle");
+  els.settingsSpeechStatus.classList.toggle("speech-unavailable-status", unavailable);
+  els.settingsSpeechStatusIcon.hidden = !unavailable;
+  els.settingsSpeechStatusIcon.innerHTML = unavailable ? trustIcon("warn-filled") : "";
+  els.settingsSpeechStatusText.textContent = speechStateText();
+  els.settingsSpeechControls.hidden = unavailable;
+  els.settingsSpeechDeviceLabel.textContent = t("speechDevice");
+  els.settingsSpeechRefreshDevices.textContent = t("speechRefreshDevices");
+  els.settingsSpeechModeLabel.textContent = t("speechMode");
+  els.settingsSpeechPushShortcutLabel.textContent = t("speechPushShortcut");
+  els.settingsSpeechToggleShortcutLabel.textContent = t("speechToggleShortcut");
+  els.settingsSpeechShortcutNote.textContent = t("speechShortcutNote");
+  els.settingsSpeechPushShortcutCapture.textContent =
+    speechShortcutCapture === "pushToTalk"
+      ? t("speechShortcutCaptureActive")
+      : t("speechShortcutCapture");
+  els.settingsSpeechToggleShortcutCapture.textContent =
+    speechShortcutCapture === "toggleToTalk"
+      ? t("speechShortcutCaptureActive")
+      : t("speechShortcutCapture");
+  els.settingsSpeechLanguageLabel.textContent = t("speechLanguage");
+  els.settingsSpeechInstallModel.textContent = speechModelInstalling
+    ? t("speechInstallingModel")
+    : t("speechInstallModel");
+  els.settingsSpeechRemoveModel.textContent = t("speechRemoveModel");
+  els.settingsSpeechPauseLabel.textContent = t("speechPause");
+  const available = speechCapabilities.recognition && speechSecureContext();
+  const microphoneCaptureAllowed =
+    available && speechCapabilities.microphonePolicyAllowsCapture;
+  const active = speechState !== "idle";
+  const modelControlState = localSpeechModelControlState(
+    speechCapabilities,
+    speechModelAvailability,
+  );
+  const readyEngine = microphoneCaptureAllowed && speechHasReadyEngine();
+  const languageCanSetUpLocal =
+    microphoneCaptureAllowed &&
+    (readyEngine ||
+      modelControlState === "available" ||
+      modelControlState === "downloadable");
+  const cloudIsOnlyRemainingPath =
+    microphoneCaptureAllowed &&
+    !readyEngine &&
+    modelControlState !== "available" &&
+    modelControlState !== "downloadable" &&
+    speechCapabilities.cloudRecognition;
+  const deviceSelectable = readyEngine && speechCapabilities.inputSelection;
+  els.settingsSpeechSection.classList.toggle("speech-settings-pending", !readyEngine);
+  els.settingsSpeechSection.classList.toggle(
+    "speech-local-setup-unavailable",
+    !languageCanSetUpLocal,
+  );
+  els.settingsSpeechCloudLabel.textContent = cloudIsOnlyRemainingPath
+    ? t("speechCloudOnlyOption")
+    : t("speechCloud");
+  els.settingsSpeechCloudNote.textContent = !microphoneCaptureAllowed
+    ? t("speechCloudContainerBlockedNote")
+    : speechConfig.allowCloudTranscription
+      ? t("speechCloudEnabledNote")
+      : cloudIsOnlyRemainingPath
+        ? t("speechCloudOnlyNote")
+        : t("speechCloudNote");
+  els.settingsSpeechDevice.textContent = "";
+  const defaultDevice = document.createElement("option");
+  defaultDevice.value = "default";
+  defaultDevice.textContent = t("speechDefaultDevice");
+  els.settingsSpeechDevice.appendChild(defaultDevice);
+  for (const [index, device] of speechDevices.entries()) {
+    const option = document.createElement("option");
+    option.value = device.deviceId;
+    option.textContent =
+      device.label || tpl(t("speechDeviceUnnamed"), { number: String(index + 1) });
+    els.settingsSpeechDevice.appendChild(option);
+  }
+  els.settingsSpeechDevice.value = selectedSpeechDevice();
+  els.settingsSpeechDevice.disabled = !deviceSelectable || active;
+  els.settingsSpeechRefreshDevices.disabled =
+    !readyEngine || !speechCapabilities.inputEnumeration || active;
+  els.settingsSpeechDeviceNote.textContent = !available
+    ? t("speechStatusUnavailable")
+    : !microphoneCaptureAllowed
+      ? t("speechStatusContainerBlocksMicrophone")
+      : !readyEngine
+        ? t("speechControlsUnavailable")
+        : speechMicrophonePermission === "denied"
+          ? runtime.isBrowserExtension
+            ? t("speechStatusChromePermissionDenied")
+            : t("speechStatusPermissionDenied")
+          : !speechCapabilities.inputSelection
+            ? t("speechDeviceUnsupported")
+            : speechDeviceRefreshError ||
+              (speechDevices.length === 0 ? t("speechDeviceNoAccess") : "");
+
+  els.settingsSpeechMode.textContent = "";
+  for (const option of [
+    { value: "push-to-talk", label: t("speechModePush") },
+    { value: "toggle-to-talk", label: t("speechModeToggle") },
+  ] as const) {
+    const element = document.createElement("option");
+    element.value = option.value;
+    element.textContent = option.label;
+    els.settingsSpeechMode.appendChild(element);
+  }
+  els.settingsSpeechMode.value = speechConfig.mode;
+  els.settingsSpeechMode.disabled = !readyEngine || active;
+
+  els.settingsSpeechPushShortcut.value = formatSpeechShortcut(
+    speechConfig.shortcuts.pushToTalk,
+  );
+  els.settingsSpeechToggleShortcut.value = formatSpeechShortcut(
+    speechConfig.shortcuts.toggleToTalk,
+  );
+  els.settingsSpeechPushShortcutCapture.disabled = !readyEngine || active;
+  els.settingsSpeechToggleShortcutCapture.disabled = !readyEngine || active;
+
+  const systemLanguage = systemSpeechLanguage();
+  const languages = [
+    ...new Set([
+      systemLanguage,
+      ...(speechConfig.language === "system" ? [] : [speechConfig.language]),
+      ...SPEECH_LANGUAGE_CATALOG,
+    ]),
+  ];
+  els.settingsSpeechLanguage.textContent = "";
+  const systemOption = document.createElement("option");
+  systemOption.value = "system";
+  systemOption.textContent = tpl(t("speechLanguageSystem"), {
+    language: speechLanguageDisplayName(systemLanguage, currentLocale),
+  });
+  els.settingsSpeechLanguage.appendChild(systemOption);
+  for (const language of languages) {
+    const option = document.createElement("option");
+    option.value = language;
+    option.textContent = speechLanguageDisplayName(language, currentLocale);
+    els.settingsSpeechLanguage.appendChild(option);
+  }
+  els.settingsSpeechLanguage.value = speechConfig.language;
+  els.settingsSpeechLanguage.disabled = !languageCanSetUpLocal || active;
+  const modelCanDownload =
+    microphoneCaptureAllowed &&
+    !active &&
+    !speechModelInstalling &&
+    modelControlState === "downloadable" &&
+    speechCapabilities.modelInstall;
+  const modelStatus = speechModelChecking
+    ? t("speechModelChecking")
+    : speechModelStatusText();
+  els.settingsSpeechModelStatus.textContent = modelStatus;
+  els.settingsSpeechInstallModel.textContent = speechModelInstalling
+    ? t("speechInstallingModel")
+    : modelCanDownload
+      ? t("speechInstallModel")
+      : t("speechDownloadUnavailable");
+  els.settingsSpeechInstallModel.disabled = !modelCanDownload;
+  els.settingsSpeechInstallModel.title = modelCanDownload
+    ? t("speechInstallModel")
+    : modelStatus;
+  els.settingsSpeechRemoveModel.disabled = true;
+  els.settingsSpeechRemoveModel.title = t("speechRemoveUnsupported");
+  els.settingsSpeechModelNote.textContent = modelCanDownload
+    ? t("speechRemoveUnsupported")
+    : `${modelStatus} ${t("speechRemoveUnsupported")}`;
+
+  els.settingsSpeechPause.value = String(speechConfig.toggleSilenceMs);
+  els.settingsSpeechPause.disabled = !readyEngine || active;
+  els.settingsSpeechCloud.checked = speechConfig.allowCloudTranscription;
+  els.settingsSpeechCloud.disabled =
+    !microphoneCaptureAllowed || active || !speechCapabilities.cloudRecognition;
+}
+
+function applySpeechConfig(value: unknown): void {
+  speechConfig = normalizeSpeechToTextConfig(value);
+  renderSpeechSettings();
+  renderSpeechButton();
+  void refreshSpeechModelAvailability();
+  void refreshSpeechMicrophonePermission();
+}
+
+function updateSpeechState(
+  state: SpeechControllerState,
+  mode: SpeechInputMode | null,
+): void {
+  speechState = state;
+  speechModeActive = mode;
+  if (state === "starting") beginSpeechDraft();
+  if (state === "listening") {
+    setSpeechMicrophonePermission("granted");
+    void refreshSpeechDevices(false);
+  }
+  if (state === "idle" && !speechDraft.active) {
+    els.input.readOnly = false;
+    els.input.classList.remove("speech-dictating");
+  }
+  renderSpeechSettings();
+  renderSpeechButton();
+}
+
+const speechController = speechRuntime
+  ? new SpeechController(
+      speechRuntime,
+      {
+        onState: updateSpeechState,
+        onTranscript: (finalText, interimText) => {
+          beginSpeechDraft();
+          const update = speechDraft.update(
+            [finalText, interimText].filter(Boolean).join(" "),
+          );
+          if (update) applySpeechDraft(update);
+        },
+        onSubmit: (text) => submitSpeechText(text),
+        onComplete: completeSpeechDraft,
+        onError: (code) => {
+          const unavailableSelectedDevice =
+            selectedSpeechDevice() !== "default" &&
+            (code.toLowerCase().includes("notfound") ||
+              code.toLowerCase().includes("device-not-found"));
+          if (isSpeechPermissionError(code)) setSpeechMicrophonePermission("denied");
+          if (unavailableSelectedDevice) {
+            speechError = t("speechDeviceDisconnected");
+            updateSpeechConfig({
+              ...speechConfig,
+              inputByRuntime: {
+                ...speechConfig.inputByRuntime,
+                [speechRuntimeKey()]: "default",
+              },
+            });
+          } else {
+            speechError = speechErrorMessage(code);
+          }
+          renderSpeechSettings();
+          renderSpeechButton();
+        },
+        onInputSelectionUnavailable: () => {
+          speechCapabilities = { ...speechCapabilities, inputSelection: false };
+          speechError = t("speechErrorInputSelection");
+        },
+      },
+      speechMediaDevices(),
+    )
+  : null;
+
+async function startSpeech(mode: SpeechInputMode): Promise<void> {
+  if (!speechController || speechState !== "idle") return;
+  if (!speechCapabilities.microphonePolicyAllowsCapture) {
+    speechError = t("speechStatusContainerBlocksMicrophone");
+    renderSpeechSettings();
+    renderSpeechButton();
+    return;
+  }
+  speechError = "";
+  const localReady =
+    speechCapabilities.localRecognition && speechModelAvailability === "available";
+  if (!localReady && !speechConfig.allowCloudTranscription) {
+    speechError = t("speechErrorLocalRequired");
+    renderSpeechSettings();
+    renderSpeechButton();
+    return;
+  }
+  if (runtime.isBrowserExtension && speechMicrophonePermission !== "granted") {
+    if (!browserPanelConnection) {
+      speechError = t("speechStatusChromePermissionUnavailable");
+    } else {
+      browserPanelConnection.send({ type: "request_microphone_permission" });
+      speechError = t("speechStatusChromePermissionWindowOpened");
+    }
+    renderSpeechSettings();
+    renderSpeechButton();
+    return;
+  }
+  beginSpeechDraft();
+  const started = await speechController.start({
+    mode,
+    language: currentSpeechLanguage(),
+    processLocally: localReady,
+    toggleSilenceMs: speechConfig.toggleSilenceMs,
+    inputDeviceId: selectedSpeechDevice(),
+  });
+  if (!started && speechDraft.active) {
+    const restored = speechDraft.cancel();
+    if (restored) applySpeechDraft(restored);
+    els.input.readOnly = false;
+    els.input.classList.remove("speech-dictating");
+  }
+}
+
+function toggleSpeech(): void {
+  if (!speechController) return;
+  if (speechController.active) {
+    speechController.stopToggleToTalk();
+  } else {
+    void startSpeech("toggle-to-talk");
+  }
+}
+
 function effectiveNotifications(): "desktop" | "vscode" | "off" {
   return sessionNotificationsOverride ?? notificationsDefault;
 }
@@ -1099,6 +1838,8 @@ function applyUiStrings(): void {
   els.hiddenStatusTitle.textContent = t("settingsHiddenStatusGroup");
   els.hiddenStatusNote.textContent = t("settingsHiddenStatusNote");
   renderHiddenStatusSettings();
+  renderSpeechSettings();
+  renderSpeechButton();
   updateStatus();
   updateThemeButtons();
   populateSessionMenu();
@@ -1212,6 +1953,7 @@ async function requestConfig(): Promise<void> {
       cfg.browserToolPermissions,
     );
     hiddenStatusKeys = normalizeHiddenStatusKeys(cfg.hiddenStatusKeys);
+    applySpeechConfig(cfg.speechToText);
     renderStatusSlots();
     applyUiStrings();
   }
@@ -1257,6 +1999,9 @@ function handleIdeResponse(res: IdeResponse): void {
     if (Object.prototype.hasOwnProperty.call(cfg, "hiddenStatusKeys")) {
       hiddenStatusKeys = normalizeHiddenStatusKeys(cfg.hiddenStatusKeys);
       renderStatusSlots();
+    }
+    if (Object.prototype.hasOwnProperty.call(cfg, "speechToText")) {
+      applySpeechConfig(cfg.speechToText);
     }
     applyUiStrings();
   }
@@ -1828,6 +2573,11 @@ function openSettings(): void {
   refreshVersionInfo();
   refreshCliFlags();
   void fetchPiSettings();
+  if (!speechInputUnavailableInThisContainer()) {
+    void refreshSpeechDevices(false);
+    void refreshSpeechModelAvailability();
+    void refreshSpeechMicrophonePermission();
+  }
 }
 
 function closeSettings(): void {
@@ -1838,7 +2588,9 @@ function closeSettings(): void {
   pendingPiSettings.clear();
   cliDirty = false;
   browserServerUrlReady = false;
+  speechShortcutCapture = null;
   updateSettingsApplyState();
+  renderSpeechSettings();
   renderPiSettings();
 }
 
@@ -2252,6 +3004,201 @@ els.allowNpmInstallScripts.addEventListener("change", () => {
     els.allowNpmInstallScripts.checked = true;
     persistWebviewConfig({ dangerouslyAllowAllNpmScripts: true });
   })();
+});
+
+els.settingsSpeechDevice.addEventListener("change", () => {
+  updateSpeechConfig({
+    ...speechConfig,
+    inputByRuntime: {
+      ...speechConfig.inputByRuntime,
+      [speechRuntimeKey()]: els.settingsSpeechDevice.value || "default",
+    },
+  });
+});
+
+els.settingsSpeechRefreshDevices.addEventListener("click", () => {
+  void refreshSpeechDevices(true);
+});
+
+els.settingsSpeechMode.addEventListener("change", () => {
+  const mode = els.settingsSpeechMode.value;
+  if (mode !== "push-to-talk" && mode !== "toggle-to-talk") return;
+  updateSpeechConfig({ ...speechConfig, mode });
+});
+
+function beginSpeechShortcutCapture(kind: "pushToTalk" | "toggleToTalk"): void {
+  speechShortcutCapture = kind;
+  renderSpeechSettings();
+}
+
+els.settingsSpeechPushShortcutCapture.addEventListener("click", () => {
+  beginSpeechShortcutCapture("pushToTalk");
+});
+els.settingsSpeechToggleShortcutCapture.addEventListener("click", () => {
+  beginSpeechShortcutCapture("toggleToTalk");
+});
+
+els.settingsSpeechLanguage.addEventListener("change", () => {
+  const language = els.settingsSpeechLanguage.value || "system";
+  updateSpeechConfig({ ...speechConfig, language });
+  void refreshSpeechModelAvailability();
+});
+
+els.settingsSpeechInstallModel.addEventListener("click", () => {
+  void (async () => {
+    if (!speechRuntime || speechModelInstalling) return;
+    speechModelInstalling = true;
+    renderSpeechSettings();
+    const installed = await installLocalSpeechModel(
+      speechRuntime,
+      currentSpeechLanguage(),
+    );
+    speechModelInstalling = false;
+    if (!installed) speechError = t("speechInstallFailed");
+    await refreshSpeechModelAvailability();
+    renderSpeechSettings();
+    renderSpeechButton();
+  })();
+});
+
+els.settingsSpeechPause.addEventListener("change", () => {
+  const toggleSilenceMs = Number(els.settingsSpeechPause.value);
+  updateSpeechConfig({ ...speechConfig, toggleSilenceMs });
+});
+
+els.settingsSpeechCloud.addEventListener("change", () => {
+  void (async () => {
+    if (!els.settingsSpeechCloud.checked) {
+      updateSpeechConfig({ ...speechConfig, allowCloudTranscription: false });
+      return;
+    }
+    els.settingsSpeechCloud.checked = false;
+    els.settingsSpeechCloud.disabled = true;
+    const confirmed = await showConfirm(t("speechCloudConfirm"));
+    if (confirmed) {
+      updateSpeechConfig({ ...speechConfig, allowCloudTranscription: true });
+    }
+    els.settingsSpeechCloud.disabled = false;
+    renderSpeechSettings();
+    renderSpeechButton();
+  })();
+});
+
+if (typeof navigator !== "undefined" && navigator.mediaDevices) {
+  navigator.mediaDevices.addEventListener("devicechange", () => {
+    void refreshSpeechDevices(false);
+  });
+}
+
+document.addEventListener(
+  "keydown",
+  (event) => {
+    if (speechShortcutCapture) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        speechShortcutCapture = null;
+        renderSpeechSettings();
+        return;
+      }
+      const shortcut = speechShortcutFromKeyboardEvent(event);
+      if (!shortcut) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const kind = speechShortcutCapture;
+      speechShortcutCapture = null;
+      updateSpeechConfig({
+        ...speechConfig,
+        shortcuts: { ...speechConfig.shortcuts, [kind]: shortcut },
+      });
+      return;
+    }
+    if (speechPushShortcutKey && event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      speechPushShortcutKey = null;
+      speechController?.stopSilently();
+      return;
+    }
+    if (
+      event.repeat ||
+      !speechCapabilities.recognition ||
+      !els.settingsModal.hidden ||
+      !document.hasFocus()
+    ) {
+      return;
+    }
+    const pushShortcut = speechConfig.shortcuts.pushToTalk;
+    if (speechShortcutMatchesEvent(pushShortcut, event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      speechPushShortcutKey = event.code;
+      void startSpeech("push-to-talk");
+      return;
+    }
+    const toggleShortcut = speechConfig.shortcuts.toggleToTalk;
+    if (speechShortcutMatchesEvent(toggleShortcut, event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleSpeech();
+    }
+  },
+  true,
+);
+
+function releasesSpeechPushShortcut(event: KeyboardEvent): boolean {
+  if (!speechPushShortcutKey) return false;
+  if (event.code === speechPushShortcutKey) return true;
+  const shortcut = speechConfig.shortcuts.pushToTalk;
+  return (
+    (shortcut.includes("Ctrl") && /^(ControlLeft|ControlRight)$/.test(event.code)) ||
+    (shortcut.includes("Alt") && /^(AltLeft|AltRight)$/.test(event.code)) ||
+    (shortcut.includes("Shift") && /^(ShiftLeft|ShiftRight)$/.test(event.code)) ||
+    (shortcut.includes("Meta") && /^(MetaLeft|MetaRight)$/.test(event.code))
+  );
+}
+
+document.addEventListener(
+  "keyup",
+  (event) => {
+    if (!releasesSpeechPushShortcut(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    speechPushShortcutKey = null;
+    speechController?.releasePushToTalk();
+  },
+  true,
+);
+
+window.addEventListener("blur", () => {
+  speechPushShortcutKey = null;
+  speechController?.stopSilently();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") {
+    speechPushShortcutKey = null;
+    speechController?.stopSilently();
+  }
+});
+window.addEventListener("pagehide", () => speechController?.stopSilently());
+
+els.speech.addEventListener("pointerdown", (event) => {
+  if (speechConfig.mode !== "push-to-talk" || event.button !== 0) return;
+  event.preventDefault();
+  els.speech.setPointerCapture?.(event.pointerId);
+  void startSpeech("push-to-talk");
+});
+els.speech.addEventListener("pointerup", (event) => {
+  if (speechConfig.mode !== "push-to-talk") return;
+  event.preventDefault();
+  speechController?.releasePushToTalk();
+});
+els.speech.addEventListener("pointercancel", () => speechController?.stopSilently());
+els.speech.addEventListener("lostpointercapture", () => {
+  if (speechConfig.mode === "push-to-talk") speechController?.releasePushToTalk();
+});
+els.speech.addEventListener("click", () => {
+  if (speechConfig.mode === "toggle-to-talk") toggleSpeech();
 });
 
 // history limit: saved in the config and re-applied right away (truncates from the top)
@@ -7838,6 +8785,8 @@ function updateSendButton(): void {
   els.send.disabled = interactionLocked;
   els.input.disabled = interactionLocked;
   els.sessionBtn.disabled = interactionLocked;
+  if (interactionLocked && speechController?.active) speechController.stopSilently();
+  renderSpeechButton();
 }
 
 function renderModelInfo(): void {
@@ -8790,6 +9739,43 @@ const TERMINAL_ONLY_COMMANDS = new Set([
 ]);
 
 let slashCommandSubmissionPending = false;
+
+/**
+ * Sends a completed dictation segment through the same prompt/steering paths
+ * as the composer without clearing a pre-existing manual draft or attachments.
+ * Spoken slash-prefixed text remains an ordinary prompt, never a UI command.
+ */
+function submitSpeechText(rawText: string): boolean {
+  if (
+    !transport ||
+    statusState !== "open" ||
+    switchingSession ||
+    sessionLoading ||
+    piRestarting
+  ) {
+    return false;
+  }
+  const text = rawText.trim();
+  if (!text) return false;
+  const message = attachVisibleContext(text);
+  sessionHasMessages = true;
+  pushMessageHistory(text);
+  if (working || compacting) {
+    const command = compacting
+      ? rpc.steer(message)
+      : rpc.prompt(message, { streamingBehavior: "steer" });
+    void rpcRequest(command).then(
+      (response) => {
+        if (!response.success) addStatusLine(t("steerSendFailed"));
+      },
+      () => addStatusLine(t("steerSendFailed")),
+    );
+  } else {
+    transport.send({ channel: "rpc", payload: rpc.prompt(message) });
+  }
+  scrollToBottom(true);
+  return true;
+}
 
 async function sendOrStop(): Promise<void> {
   if (!transport || switchingSession || sessionLoading || piRestarting) return;
@@ -10350,6 +11336,14 @@ async function boot(): Promise<void> {
     browserPanelConnection = connectBrowserPanel((message) => {
       if (message.type === "browser_context_changed" && message.context) {
         renderIdeEvent({ type: "browser_context_changed", context: message.context });
+      } else if (message.type === "browser_microphone_permission") {
+        const granted = message.granted === true;
+        setSpeechMicrophonePermission(granted ? "granted" : "denied");
+        speechError = granted
+          ? t("speechStatusChromePermissionGranted")
+          : t("speechStatusChromePermissionDenied");
+        renderSpeechSettings();
+        renderSpeechButton();
       } else if (message.type === "browser_context_cleared") {
         renderIdeEvent({ type: "browser_context_cleared", reason: message.error });
       } else if (message.type === "browser_handoff_available") {

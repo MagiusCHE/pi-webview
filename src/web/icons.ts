@@ -29,6 +29,26 @@ export function sendIcon(): string {
   return `<svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true">${SEND}</svg>`;
 }
 
+// Material "mic". The active state uses the separate waveform below so the
+// browser microphone state is apparent even without relying on color alone.
+const MICROPHONE =
+  '<path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21H8v2h8v-2h-3v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>';
+
+export function microphoneIcon(): string {
+  return `<svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true">${MICROPHONE}</svg>`;
+}
+
+const WAVEFORM =
+  '<path class="speech-wave-bar speech-wave-bar-1" d="M4 10h2v4H4z"/>' +
+  '<path class="speech-wave-bar speech-wave-bar-2" d="M8 6h2v12H8z"/>' +
+  '<path class="speech-wave-bar speech-wave-bar-3" d="M12 3h2v18h-2z"/>' +
+  '<path class="speech-wave-bar speech-wave-bar-4" d="M16 7h2v10h-2z"/>' +
+  '<path class="speech-wave-bar speech-wave-bar-5" d="M20 10h2v4h-2z"/>';
+
+export function speechWaveformIcon(): string {
+  return `<svg class="speech-waveform" viewBox="0 0 26 24" fill="currentColor" width="18" height="18" aria-hidden="true">${WAVEFORM}</svg>`;
+}
+
 export function stopIcon(): string {
   return `<svg viewBox="0 0 24 24" fill="currentColor" width="15" height="15" aria-hidden="true">${STOP}</svg>`;
 }

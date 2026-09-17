@@ -206,6 +206,132 @@
             </div>
           </div>
         </div>
+        <div id="settings-speech-section" class="settings-section">
+          <div class="settings-section-title" id="settings-speech-title"></div>
+          <div
+            id="settings-speech-status"
+            class="settings-note settings-speech-status"
+            role="status"
+          >
+            <span
+              id="settings-speech-status-icon"
+              class="settings-speech-status-icon"
+              aria-hidden="true"
+            ></span>
+            <span id="settings-speech-status-text"></span>
+          </div>
+          <div id="settings-speech-controls" hidden>
+            <div class="settings-row settings-speech-cloud-row">
+              <label id="settings-speech-cloud-label" for="settings-speech-cloud"></label>
+              <input id="settings-speech-cloud" class="field-checkbox" type="checkbox" />
+            </div>
+            <div id="settings-speech-cloud-note" class="settings-note"></div>
+            <div class="settings-row settings-speech-operational">
+              <label
+                id="settings-speech-device-label"
+                for="settings-speech-device"
+              ></label>
+              <div class="settings-inline-control">
+                <select id="settings-speech-device" class="field-select"></select>
+                <button
+                  id="settings-speech-refresh-devices"
+                  class="btn"
+                  type="button"
+                ></button>
+              </div>
+            </div>
+            <div
+              id="settings-speech-device-note"
+              class="settings-note settings-speech-operational"
+            ></div>
+            <div class="settings-row settings-speech-operational">
+              <label id="settings-speech-mode-label" for="settings-speech-mode"></label>
+              <select id="settings-speech-mode" class="field-select"></select>
+            </div>
+            <div class="settings-row settings-speech-operational">
+              <label
+                id="settings-speech-push-shortcut-label"
+                for="settings-speech-push-shortcut"
+              ></label>
+              <div class="settings-inline-control">
+                <output
+                  id="settings-speech-push-shortcut"
+                  class="speech-shortcut-value"
+                ></output>
+                <button
+                  id="settings-speech-push-shortcut-capture"
+                  class="btn"
+                  type="button"
+                ></button>
+              </div>
+            </div>
+            <div class="settings-row settings-speech-operational">
+              <label
+                id="settings-speech-toggle-shortcut-label"
+                for="settings-speech-toggle-shortcut"
+              ></label>
+              <div class="settings-inline-control">
+                <output
+                  id="settings-speech-toggle-shortcut"
+                  class="speech-shortcut-value"
+                ></output>
+                <button
+                  id="settings-speech-toggle-shortcut-capture"
+                  class="btn"
+                  type="button"
+                ></button>
+              </div>
+            </div>
+            <div
+              id="settings-speech-shortcut-note"
+              class="settings-note settings-speech-operational"
+            ></div>
+            <div class="settings-row settings-speech-local-setup">
+              <label
+                id="settings-speech-language-label"
+                for="settings-speech-language"
+              ></label>
+              <select id="settings-speech-language" class="field-select"></select>
+            </div>
+            <div
+              class="settings-row settings-speech-model-actions settings-speech-local-setup"
+            >
+              <span
+                id="settings-speech-model-status"
+                class="settings-hint"
+                role="status"
+              ></span>
+              <span class="settings-inline-control">
+                <button
+                  id="settings-speech-install-model"
+                  class="btn"
+                  type="button"
+                ></button>
+                <button
+                  id="settings-speech-remove-model"
+                  class="btn"
+                  type="button"
+                  disabled
+                ></button>
+              </span>
+            </div>
+            <div
+              id="settings-speech-model-note"
+              class="settings-note settings-speech-local-setup"
+            ></div>
+            <div class="settings-row settings-speech-operational">
+              <label id="settings-speech-pause-label" for="settings-speech-pause"></label>
+              <input
+                id="settings-speech-pause"
+                class="field-number"
+                type="number"
+                min="500"
+                max="10000"
+                step="100"
+              />
+            </div>
+          </div>
+        </div>
         <div id="settings-browser-section" class="settings-section" hidden>
           <div class="settings-section-title" id="settings-browser-title">
             Connessione browser
@@ -360,6 +486,14 @@
           <input id="browser-file-picker" type="file" multiple hidden />
           <span class="send-group">
             <button id="btn-stop" class="stop-btn" type="button" title="" hidden></button>
+            <button
+              id="btn-speech"
+              class="speech-btn"
+              type="button"
+              title=""
+              aria-pressed="false"
+              hidden
+            ></button>
             <button id="btn-send" class="send-btn" title="Invia">↑</button>
           </span>
         </div>

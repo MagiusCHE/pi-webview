@@ -62,6 +62,8 @@ When the standalone UI detects the enabled companion, it asks whether to move th
 
 The composer shows the active page favicon and title, with the page URL on hover. URL and title remain prompt context even when no text is selected. A current selection is added to the same visible context chip.
 
+Where Chrome exposes a usable speech engine, dictation opens a short pi-webview permission window only after an explicit action in the Side Panel. Chrome asks for microphone access only when the user selects **Allow microphone** in that window. It captures only the selected microphone input—never tab, desktop, meeting or file audio—and does not record or send raw audio to `piw`. Cloud transcription remains off until the user explicitly enables it.
+
 The agent gains nine browser tools while running through `piw`:
 
 - `browser_page_dom` serializes the complete active-page DOM. Large results are saved in a private temporary file on the piw machine;

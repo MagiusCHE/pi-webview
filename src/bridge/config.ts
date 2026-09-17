@@ -12,6 +12,10 @@ import type {
   ThinkingSettings,
   UserConfig,
 } from "../ide/protocol.ts";
+import {
+  DEFAULT_SPEECH_TO_TEXT_CONFIG,
+  normalizeSpeechToTextConfig,
+} from "../ide/speech-config.ts";
 import { getTrust } from "./trust.ts";
 
 export const DEFAULT_CONFIG: UserConfig = {
@@ -21,6 +25,7 @@ export const DEFAULT_CONFIG: UserConfig = {
   agenticThinking: false,
   allowRemoteNpmUpdates: false,
   dangerouslyAllowAllNpmScripts: false,
+  speechToText: { ...DEFAULT_SPEECH_TO_TEXT_CONFIG },
 };
 
 // default thresholds of pi's automatic compaction (config ~/.pi/config.json)
@@ -109,7 +114,11 @@ export class ConfigStore {
     try {
       const raw = readFileSync(this.configPath(), "utf-8");
       const parsed = JSON.parse(raw) as Partial<UserConfig>;
-      return { ...DEFAULT_CONFIG, ...parsed };
+      return {
+        ...DEFAULT_CONFIG,
+        ...parsed,
+        speechToText: normalizeSpeechToTextConfig(parsed.speechToText),
+      };
     } catch {
       return { ...DEFAULT_CONFIG };
     }
@@ -120,7 +129,13 @@ export class ConfigStore {
   }
 
   patch(patch: Partial<UserConfig>): UserConfig {
-    this.config = { ...this.config, ...patch };
+    this.config = {
+      ...this.config,
+      ...patch,
+      ...(Object.prototype.hasOwnProperty.call(patch, "speechToText")
+        ? { speechToText: normalizeSpeechToTextConfig(patch.speechToText) }
+        : {}),
+    };
     this.write();
     return this.get();
   }

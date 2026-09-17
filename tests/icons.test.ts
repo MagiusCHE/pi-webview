@@ -5,6 +5,8 @@ import {
   openFileIcon,
   trustIcon,
   sendIcon,
+  microphoneIcon,
+  speechWaveformIcon,
   stopIcon,
 } from "../src/web/icons.ts";
 
@@ -39,6 +41,17 @@ test("sendIcon/stopIcon: icone SVG colorabili, glifi diversi", () => {
   assert.match(stop, /M6 6h12v12H6/);
   // they are not the same icon
   assert.notEqual(send, stop);
+});
+
+test("microphone and active waveform distinguish dictation state without color alone", () => {
+  const microphone = microphoneIcon();
+  const waveform = speechWaveformIcon();
+  assert.match(microphone, /^<svg/);
+  assert.match(microphone, /fill="currentColor"/);
+  assert.match(waveform, /^<svg/);
+  assert.match(waveform, /speech-waveform/);
+  assert.match(waveform, /speech-wave-bar-1/);
+  assert.notEqual(microphone, waveform);
 });
 
 test("openFileIcon: external-link SVG colorabile", () => {

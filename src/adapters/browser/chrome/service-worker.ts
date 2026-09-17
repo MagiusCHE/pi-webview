@@ -34,6 +34,7 @@ interface ChromeTab {
 
 interface ChromeMessageSender {
   tab?: ChromeTab;
+  url?: string;
 }
 
 interface ChromeStorageArea {
@@ -44,6 +45,7 @@ interface ChromeStorageArea {
 
 interface ChromeApi {
   runtime: {
+    getURL(path: string): string;
     onConnect: { addListener(listener: (port: ChromePort) => void): void };
     onMessage: {
       addListener(
@@ -91,6 +93,12 @@ interface ChromeApi {
     };
   };
   windows: {
+    create(options: {
+      url: string;
+      type: "popup";
+      width: number;
+      height: number;
+    }): Promise<{ id?: number }>;
     onFocusChanged: { addListener(listener: (windowId: number) => void): void };
     onRemoved: { addListener(listener: (windowId: number) => void): void };
   };
@@ -136,6 +144,12 @@ interface HandoffMessage {
   ticket?: unknown;
 }
 
+interface MicrophonePermissionResultMessage {
+  type: "microphone_permission_result";
+  ownerWindowId?: unknown;
+  granted?: unknown;
+}
+
 const ports = new Map<ChromePort, number | undefined>();
 const selections = new Map<
   number,
@@ -143,6 +157,7 @@ const selections = new Map<
 >();
 const activeTabsByWindow = new Map<number, number>();
 const injectedTabs = new Set<number>();
+const microphonePermissionWindows = new Map<number, number | undefined>();
 
 function isWebPage(url: string | undefined): boolean {
   return Boolean(url && /^(?:https?):/i.test(url));
@@ -597,6 +612,33 @@ function post(message: unknown, windowId?: number): void {
   }
 }
 
+function microphonePermissionWindowFor(
+  ownerWindowId: number | undefined,
+): number | undefined {
+  for (const [popupWindowId, owner] of microphonePermissionWindows) {
+    if (owner === ownerWindowId) return popupWindowId;
+  }
+  return undefined;
+}
+
+async function openMicrophonePermissionWindow(
+  ownerWindowId: number | undefined,
+): Promise<void> {
+  if (microphonePermissionWindowFor(ownerWindowId) !== undefined) return;
+  const url = new URL(chrome.runtime.getURL("microphone-permission.html"));
+  if (ownerWindowId !== undefined) {
+    url.searchParams.set("ownerWindowId", String(ownerWindowId));
+  }
+  const popup = await chrome.windows.create({
+    url: url.toString(),
+    type: "popup",
+    width: 460,
+    height: 260,
+  });
+  if (popup.id === undefined) throw new Error("microphone-permission-window-unavailable");
+  microphonePermissionWindows.set(popup.id, ownerWindowId);
+}
+
 async function ensureContentScript(tab: ChromeTab): Promise<void> {
   if (tab.id === undefined || !isWebPage(tab.url) || injectedTabs.has(tab.id)) return;
   injectedTabs.add(tab.id);
@@ -674,6 +716,21 @@ chrome.runtime.onConnect.addListener((port) => {
     if (data?.type === "handoff_adopted" || data?.type === "handoff_ready") {
       void finishHandoff(port);
     }
+    if (data?.type === "request_microphone_permission") {
+      const windowId = ports.get(port);
+      void openMicrophonePermissionWindow(windowId)
+        .then(() => post({ type: "browser_microphone_permission_opened" }, windowId))
+        .catch(() =>
+          post(
+            {
+              type: "browser_microphone_permission",
+              granted: false,
+              error: "permission-window-unavailable",
+            },
+            windowId,
+          ),
+        );
+    }
     if (
       data?.type === "browser_tool_execute" &&
       typeof data.requestId === "string" &&
@@ -704,7 +761,23 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  const data = message as SelectionMessage | HandoffMessage;
+  const data = message as
+    SelectionMessage | HandoffMessage | MicrophonePermissionResultMessage;
+  if (
+    data?.type === "microphone_permission_result" &&
+    sender.url?.startsWith(chrome.runtime.getURL("microphone-permission.html"))
+  ) {
+    const ownerWindowId =
+      typeof data.ownerWindowId === "number" ? data.ownerWindowId : undefined;
+    const granted = data.granted === true;
+    if (granted) {
+      const popupWindowId = microphonePermissionWindowFor(ownerWindowId);
+      if (popupWindowId !== undefined) microphonePermissionWindows.delete(popupWindowId);
+    }
+    post({ type: "browser_microphone_permission", granted }, ownerWindowId);
+    sendResponse({ ok: true });
+    return;
+  }
   if (data?.type === "page_selection" && sender.tab?.id !== undefined) {
     const ranges = (data.ranges ?? [])
       .map((range) => ({ text: typeof range.text === "string" ? range.text : "" }))
@@ -795,5 +868,16 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
   if (windowId >= 0) void publishActiveTab(windowId);
 });
 chrome.windows.onRemoved.addListener((windowId) => {
+  const ownerWindowId = microphonePermissionWindows.get(windowId);
+  if (microphonePermissionWindows.delete(windowId)) {
+    post(
+      {
+        type: "browser_microphone_permission",
+        granted: false,
+        error: "permission-window-dismissed",
+      },
+      ownerWindowId,
+    );
+  }
   void removeBrowserWindowSessionIntent(windowId, chrome.storage.session);
 });

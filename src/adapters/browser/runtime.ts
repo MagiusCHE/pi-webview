@@ -46,6 +46,7 @@ export interface BrowserPanelMessage {
   type: string;
   context?: BrowserPageContext;
   error?: string;
+  granted?: boolean;
   result?: Record<string, unknown>;
 }
 

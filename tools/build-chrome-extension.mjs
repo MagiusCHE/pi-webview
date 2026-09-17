@@ -21,6 +21,10 @@ writeFileSync(`${outputDir}/manifest.json`, `${JSON.stringify(manifest, null, 2)
 cpSync("src/adapters/browser/chrome/_locales", `${outputDir}/_locales`, {
   recursive: true,
 });
+cpSync(
+  "src/adapters/browser/chrome/microphone-permission.html",
+  `${outputDir}/microphone-permission.html`,
+);
 
 await Promise.all([
   build({
@@ -37,6 +41,14 @@ await Promise.all([
     platform: "browser",
     format: "iife",
     outfile: `${outputDir}/content-script.js`,
+    logLevel: "info",
+  }),
+  build({
+    entryPoints: ["src/adapters/browser/chrome/microphone-permission.ts"],
+    bundle: true,
+    platform: "browser",
+    format: "iife",
+    outfile: `${outputDir}/microphone-permission.js`,
     logLevel: "info",
   }),
 ]);

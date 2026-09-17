@@ -11,6 +11,7 @@ The pi-webview Chrome companion connects the browser side panel to a piw server 
 The extension may handle:
 
 - messages and attachments submitted by the user through the side-panel conversation;
+- live microphone audio only while the user explicitly dictates in the Side Panel; it is not recorded, stored or sent to piw, and only the resulting text follows the normal message flow;
 - the configured piw server URL, including an authentication token when the user supplies one;
 - the URL, title and favicon of the active browser tab;
 - text selected by the user on the active page;
@@ -29,7 +30,7 @@ DOM and screenshots are not captured merely because a page is opened. Complete a
 
 Messages and attachments submitted through the side panel are sent to the piw server to perform the user’s request. Page URL, title and selected text are shown in the side panel and may be included as context when the user sends a message to pi. Complete or targeted DOM and screenshots are returned only in response to the corresponding agent tool call and an applicable authorization grant. Structured page actions, including visual/coordinate clicks, navigation and CSS mutations are sent to the Chrome companion only when an applicable action grant exists; after the initial authorization, later sequences within that grant’s scope run without another prompt.
 
-The companion sends this data to the piw server configured by the user. piw runs pi and may pass messages, attachments, selected text, DOM extracts or screenshots to the AI provider and other tools configured by the user. The privacy terms of those services apply to data sent to them.
+The companion sends this data to the piw server configured by the user. piw runs pi and may pass messages, attachments, selected text, DOM extracts or screenshots to the AI provider and other tools configured by the user. The privacy terms of those services apply to data sent to them. If the user explicitly enables cloud transcription, microphone audio and/or its transcription may instead be processed by the browser's speech service or its provider; raw audio is never sent to piw, pi or the developer.
 
 ## Storage
 
@@ -51,6 +52,7 @@ The developer does not receive or sell browsing data. Data is shared only with:
 ## Permissions
 
 - **Side panel:** displays the pi-webview interface beside browser pages.
+- **Microphone:** after the user explicitly starts dictation in the Side Panel, pi-webview opens its own short permission window. Chrome requests microphone access only when the user presses **Allow microphone** there. The extension does not capture tab, desktop, meeting or file audio, and does not record, store or send raw microphone audio to piw.
 - **Tabs:** reads the active tab’s title, URL and favicon, captures its visible viewport on request, and performs authorized reload or HTTP/HTTPS navigation.
 - **Scripting and website access:** reads the current selection, acquires complete or targeted DOM and performs authorized selector/visual/coordinate clicks, other structured page actions and CSS class/inline-style mutations only for the documented browser-context and agent-tool features. Pointer events remain synthetic; the extension does not request the `debugger` permission.
 - **Storage:** stores the piw connection URL and temporary session handoff state locally; piw stores the authorization scopes described above in the local session/config files.

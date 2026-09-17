@@ -4,6 +4,13 @@ import type {
   BrowserToolOperation,
   BrowserToolPayload,
 } from "./browser-tools.ts";
+import type { SpeechToTextConfig } from "./speech-config.ts";
+
+export type {
+  SpeechInputMode,
+  SpeechToTextConfig,
+  SpeechToTextShortcuts,
+} from "./speech-config.ts";
 
 // IDE bridge protocol — shared contracts UI ↔ host (concept 0002 D3).
 // The wire format is identical both via WebSocket (standalone, bridge) and via
@@ -449,6 +456,9 @@ export interface UserConfig {
   /** setStatus keys hidden by the user. RPC exposes the key as the stable
    *  identifier of the status source. */
   hiddenStatusKeys?: string[];
+  /** Global microphone dictation preferences. Device IDs are scoped by runtime
+   *  because browser/WebView IDs are opaque and origin-specific. */
+  speechToText?: SpeechToTextConfig;
 }
 
 export type IdeEvent =

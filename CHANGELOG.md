@@ -4,6 +4,10 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-17
+
+- Added a privacy-first, capability-gated speech-to-text composer flow with local recognition preferred, push-to-talk and toggle modes, preserved manual drafts, and an explicit cloud-transcription opt-in.
+- Added a consent-gated Chrome Side Panel microphone permission flow that captures only selected microphone input and never tab, desktop, meeting, or file audio.
 - Presented the pi-webview version reminder as a single informational startup-style card instead of a warning.
 - Allowed consent-gated HTTP(S) navigation from Chrome internal pages such as the New Tab page, while keeping DOM reads, screenshots and page actions blocked there.
 

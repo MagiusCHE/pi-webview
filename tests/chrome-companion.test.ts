@@ -19,7 +19,32 @@ test("Chrome companion is a Manifest V3 side-panel extension", () => {
   assert.equal(manifest.background?.service_worker, "service-worker.js");
   assert.ok(manifest.permissions?.includes("sidePanel"));
   assert.ok(manifest.permissions?.includes("tabs"));
+  assert.equal(manifest.permissions?.includes("audioCapture"), false);
   assert.equal(manifest.permissions?.includes("debugger"), false);
+});
+
+test("Chrome requests microphone consent from a normal extension popup", () => {
+  const serviceWorker = readFileSync(
+    "src/adapters/browser/chrome/service-worker.ts",
+    "utf8",
+  );
+  const permissionPage = readFileSync(
+    "src/adapters/browser/chrome/microphone-permission.ts",
+    "utf8",
+  );
+  const main = readFileSync("src/web/main.ts", "utf8");
+  const buildScript = readFileSync("tools/build-chrome-extension.mjs", "utf8");
+  assert.match(serviceWorker, /request_microphone_permission/);
+  assert.match(serviceWorker, /microphone-permission\.html/);
+  assert.match(
+    permissionPage,
+    /navigator\.mediaDevices\.getUserMedia\(\{ audio: true \}\)/,
+  );
+  assert.match(permissionPage, /microphone_permission_result/);
+  assert.match(main, /requiresBrowserPermissionWindow/);
+  assert.match(main, /request_microphone_permission/);
+  assert.match(buildScript, /microphone-permission\.html/);
+  assert.match(buildScript, /microphone-permission\.ts/);
 });
 
 test("Chrome companion declares page access used by context and tools", () => {

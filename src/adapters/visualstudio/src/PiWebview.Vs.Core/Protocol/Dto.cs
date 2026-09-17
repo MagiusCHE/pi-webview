@@ -230,6 +230,28 @@ public sealed class BrowserPersistentPermissions
     public Dictionary<string, List<string>>? Sites { get; set; }
 }
 
+/// <summary>Global microphone dictation preferences shared with the Web UI.</summary>
+public sealed class SpeechToTextConfig
+{
+    [System.Text.Json.Serialization.JsonPropertyName("mode")]
+    public string Mode { get; set; } = "push-to-talk";
+
+    [System.Text.Json.Serialization.JsonPropertyName("language")]
+    public string Language { get; set; } = "system";
+
+    [System.Text.Json.Serialization.JsonPropertyName("allowCloudTranscription")]
+    public bool AllowCloudTranscription { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("toggleSilenceMs")]
+    public int ToggleSilenceMs { get; set; } = 1500;
+
+    [System.Text.Json.Serialization.JsonPropertyName("shortcuts")]
+    public Dictionary<string, string>? Shortcuts { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("inputByRuntime")]
+    public Dictionary<string, string>? InputByRuntime { get; set; }
+}
+
 /// <summary>Shared user config (D7 of concept 0002).</summary>
 public sealed class UserConfig
 {
@@ -265,6 +287,9 @@ public sealed class UserConfig
 
     [System.Text.Json.Serialization.JsonPropertyName("hiddenStatusKeys")]
     public List<string>? HiddenStatusKeys { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("speechToText")]
+    public SpeechToTextConfig? SpeechToText { get; set; }
 }
 
 /// <summary>pi CLI flags (settings block 3): name → value.</summary>

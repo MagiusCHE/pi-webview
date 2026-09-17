@@ -78,6 +78,22 @@ test("Chrome browser-tool grants expose three scopes and a reset control", () =>
   assert.match(main, /browserToolPermissions: browserPersistentPermissions/);
 });
 
+test("Chrome permits confirmed HTTP(S) navigation from a restricted source page", () => {
+  const serviceWorker = readFileSync(
+    "src/adapters/browser/chrome/service-worker.ts",
+    "utf8",
+  );
+  const main = readFileSync("src/web/main.ts", "utf8");
+  assert.match(main, /browserToolPermissionOrigin/);
+  assert.match(main, /expectedUrl: context\.url/);
+  assert.match(serviceWorker, /navigation\?\.type !== "navigate"/);
+  assert.match(serviceWorker, /request\.expectedUrl/);
+  assert.match(
+    serviceWorker,
+    /chrome\.tabs\.update\(tab\.id, \{ url: navigation\.url \}\)/,
+  );
+});
+
 test("Chrome page actions are structured and do not evaluate remote code", () => {
   const serviceWorker = readFileSync(
     "src/adapters/browser/chrome/service-worker.ts",

@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  isolatedBrowserNavigationAction,
   normalizeBrowserElementSelector,
   normalizeBrowserPageActions,
   type BrowserPageAction,
 } from "../src/ide/browser-tools.ts";
 import {
   browserToolPermissionGranted,
+  browserToolPermissionOrigin,
   grantBrowserPersistentPermission,
   grantBrowserSessionPermission,
   hasBrowserPersistentPermissions,
@@ -50,6 +52,28 @@ test("browser permission config drops malformed operations and origins", () => {
     { global: ["dom"], sites: { [origin]: ["action"] } },
   );
   assert.equal(hasBrowserPersistentPermissions({}), false);
+});
+
+test("restricted browser pages authorize navigation against the destination origin", () => {
+  const navigation = normalizeBrowserPageActions([
+    { type: "navigate", url: "https://regolo.it" },
+  ]);
+  assert.equal(
+    browserToolPermissionOrigin("action", "chrome://newtab/", true, navigation),
+    "https://regolo.it",
+  );
+  assert.equal(
+    browserToolPermissionOrigin("action", "chrome://newtab/", true, [{ type: "reload" }]),
+    null,
+  );
+  assert.throws(
+    () =>
+      isolatedBrowserNavigationAction([
+        { type: "navigate", url: "https://regolo.it" },
+        { type: "click", selector: "button" },
+      ]),
+    /only action/,
+  );
 });
 
 test("browser page actions are normalized without accepting executable code", () => {

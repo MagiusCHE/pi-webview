@@ -69,6 +69,7 @@ import { runtime } from "./environment.ts";
 import { sessionPickStrategy } from "./session-routing.ts";
 import {
   browserToolPermissionGranted,
+  browserToolPermissionOrigin,
   grantBrowserPersistentPermission,
   grantBrowserSessionPermission,
   normalizeBrowserPermissionOperations,
@@ -7113,13 +7114,7 @@ async function handleBrowserToolRequest(
   requestedSelector?: string,
 ): Promise<void> {
   const context = visibleBrowserContext();
-  let origin = "";
-  try {
-    origin = context ? new URL(context.url).origin : "";
-  } catch {
-    origin = "";
-  }
-  if (!context || !origin || context.restricted || !browserPanelConnection) {
+  if (!context || !browserPanelConnection) {
     await ideRequest({
       type: "browserToolResponse",
       requestId,
@@ -7129,6 +7124,8 @@ async function handleBrowserToolRequest(
   }
   let actions: BrowserPageAction[] | undefined;
   let selector: string | undefined;
+  let origin: string | null;
+  let expectedOrigin: string | undefined;
   try {
     actions =
       operation === "action" ? normalizeBrowserPageActions(requestedActions) : undefined;
@@ -7136,11 +7133,26 @@ async function handleBrowserToolRequest(
       operation === "dom" && requestedSelector !== undefined
         ? normalizeBrowserElementSelector(requestedSelector)
         : undefined;
+    origin = browserToolPermissionOrigin(
+      operation,
+      context.url,
+      context.restricted,
+      actions,
+    );
+    expectedOrigin = new URL(context.url).origin;
   } catch {
     await ideRequest({
       type: "browserToolResponse",
       requestId,
       result: { ok: false, operation, error: t("browserPageToolInvalid") },
+    });
+    return;
+  }
+  if (!origin) {
+    await ideRequest({
+      type: "browserToolResponse",
+      requestId,
+      result: { ok: false, operation, error: t("browserPageToolDenied") },
     });
     return;
   }
@@ -7159,7 +7171,8 @@ async function handleBrowserToolRequest(
     operation,
     ...(actions ? { actions } : {}),
     ...(selector ? { selector } : {}),
-    expectedOrigin: origin,
+    ...(expectedOrigin ? { expectedOrigin } : {}),
+    expectedUrl: context.url,
     expectedDocumentId: context.documentId,
   });
 }

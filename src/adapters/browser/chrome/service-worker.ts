@@ -1,5 +1,6 @@
 import type { BrowserPageContext } from "../../../ide/protocol.ts";
 import {
+  isolatedBrowserNavigationAction,
   normalizeBrowserPageActions,
   type BrowserPageAction,
   type BrowserPageActionResult,
@@ -399,6 +400,7 @@ async function executeBrowserTool(
     actions?: unknown;
     selector?: string;
     expectedOrigin?: string;
+    expectedUrl?: string;
     expectedDocumentId?: string;
   },
 ): Promise<void> {
@@ -409,12 +411,25 @@ async function executeBrowserTool(
       ...(windowId === undefined ? { currentWindow: true } : { windowId }),
     });
     const tabUrl = tab?.url;
-    if (tab?.id === undefined || !tabUrl || !isWebPage(tabUrl)) {
+    if (tab?.id === undefined || !tabUrl) {
+      throw new Error("The active browser page cannot be accessed.");
+    }
+    const actions =
+      request.operation === "action"
+        ? normalizeBrowserPageActions(request.actions)
+        : undefined;
+    const navigation = actions ? isolatedBrowserNavigationAction(actions) : undefined;
+    // Chrome-internal pages cannot be scripted or captured, but Tabs API
+    // navigation to a validated HTTP(S) destination is safe and needs no page script.
+    if (!isWebPage(tabUrl) && navigation?.type !== "navigate") {
       throw new Error("The active browser page cannot be accessed.");
     }
     const tabOrigin = new URL(tabUrl).origin;
     const documentId = selections.get(tab.id)?.documentId;
     if (request.expectedOrigin && request.expectedOrigin !== tabOrigin) {
+      throw new Error("The active page changed before the browser tool started.");
+    }
+    if (request.expectedUrl && request.expectedUrl !== safeBrowserPageUrl(tabUrl)) {
       throw new Error("The active page changed before the browser tool started.");
     }
     if (request.expectedDocumentId && request.expectedDocumentId !== documentId) {
@@ -468,20 +483,21 @@ async function executeBrowserTool(
       return;
     }
     if (request.operation === "action") {
-      const actions = normalizeBrowserPageActions(request.actions);
-      const navigation = actions.find(
-        (action) => action.type === "reload" || action.type === "navigate",
-      );
+      if (!actions) throw new Error("The browser action request is invalid.");
       if (navigation) {
-        if (actions.length !== 1) {
-          throw new Error("Navigation must be the only action in its sequence.");
-        }
+        let updated = tab;
         if (navigation.type === "reload") await chrome.tabs.reload(tab.id);
-        else await chrome.tabs.update(tab.id, { url: navigation.url });
+        else updated = await chrome.tabs.update(tab.id, { url: navigation.url });
         port.postMessage({
           type: "browser_tool_result",
           result: {
             ...base,
+            ...(navigation.type === "navigate"
+              ? {
+                  url: safeBrowserPageUrl(updated.url ?? navigation.url),
+                  title: updated.title ?? base.title,
+                }
+              : {}),
             ok: true,
             actionResults: [{ index: 0, type: navigation.type, ok: true }],
           },
@@ -645,6 +661,7 @@ chrome.runtime.onConnect.addListener((port) => {
       operation?: unknown;
       windowId?: unknown;
       expectedOrigin?: unknown;
+      expectedUrl?: unknown;
       expectedDocumentId?: unknown;
       actions?: unknown;
       selector?: unknown;
@@ -673,6 +690,9 @@ chrome.runtime.onConnect.addListener((port) => {
           : {}),
         ...(typeof data.expectedOrigin === "string"
           ? { expectedOrigin: data.expectedOrigin }
+          : {}),
+        ...(typeof data.expectedUrl === "string"
+          ? { expectedUrl: data.expectedUrl }
           : {}),
         ...(typeof data.expectedDocumentId === "string"
           ? { expectedDocumentId: data.expectedDocumentId }

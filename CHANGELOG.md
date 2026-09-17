@@ -5,6 +5,7 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 ## [Unreleased]
 
 - Presented the pi-webview version reminder as a single informational startup-style card instead of a warning.
+- Allowed consent-gated HTTP(S) navigation from Chrome internal pages such as the New Tab page, while keeping DOM reads, screenshots and page actions blocked there.
 
 ## [0.4.2] - 2026-09-16
 

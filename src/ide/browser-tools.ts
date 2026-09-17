@@ -205,6 +205,25 @@ function optionalScrollDelta(value: unknown, name: string): number | undefined {
   return value;
 }
 
+export type BrowserNavigationAction = Extract<
+  BrowserPageAction,
+  { type: "reload" | "navigate" }
+>;
+
+/** Returns a navigation only when it is the complete action sequence. */
+export function isolatedBrowserNavigationAction(
+  actions: BrowserPageAction[],
+): BrowserNavigationAction | undefined {
+  const navigation = actions.find(
+    (action): action is BrowserNavigationAction =>
+      action.type === "reload" || action.type === "navigate",
+  );
+  if (navigation && actions.length !== 1) {
+    throw new Error("Navigation must be the only action in its sequence.");
+  }
+  return navigation;
+}
+
 export function normalizeBrowserPageActions(value: unknown): BrowserPageAction[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > MAX_ACTIONS) {
     throw new Error(`actions must contain between 1 and ${MAX_ACTIONS} items.`);

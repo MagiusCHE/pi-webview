@@ -1,11 +1,38 @@
-import type {
-  BrowserPersistentPermissions,
-  BrowserToolOperation,
+import {
+  isolatedBrowserNavigationAction,
+  type BrowserPageAction,
+  type BrowserPersistentPermissions,
+  type BrowserToolOperation,
 } from "../ide/browser-tools.ts";
 
 export type BrowserPermissionScope = "session" | "site" | "global";
 
 const OPERATIONS: BrowserToolOperation[] = ["dom", "screenshot", "action"];
+
+/**
+ * Determines the origin shown in a browser-tool consent dialog. A navigation
+ * from a browser-internal page has no page origin that can be granted, so it
+ * is scoped to the validated HTTP(S) destination instead.
+ */
+export function browserToolPermissionOrigin(
+  operation: BrowserToolOperation,
+  pageUrl: string,
+  restricted: boolean | undefined,
+  actions?: BrowserPageAction[],
+): string | null {
+  const navigation =
+    operation === "action" && actions
+      ? isolatedBrowserNavigationAction(actions)
+      : undefined;
+  if (restricted && navigation?.type !== "navigate") return null;
+  const candidate = navigation?.type === "navigate" ? navigation.url : pageUrl;
+  try {
+    const origin = new URL(candidate).origin;
+    return origin === "null" ? null : origin;
+  } catch {
+    return null;
+  }
+}
 
 export function normalizeBrowserPermissionOperations(
   value: unknown,

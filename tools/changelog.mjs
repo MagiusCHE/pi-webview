@@ -1,3 +1,18 @@
+export function releaseNotesForVersion(markdown, version) {
+  const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const heading = new RegExp(
+    `^##[ \\t]+\\[?${escaped}\\]?(?:[ \\t]+-[^\\r\\n]*)?[ \\t]*$`,
+    "m",
+  ).exec(markdown);
+  if (!heading) return null;
+
+  const bodyStart = heading.index + heading[0].length;
+  const remainder = markdown.slice(bodyStart);
+  const nextHeading = /^##\s+/m.exec(remainder);
+  const bodyEnd = bodyStart + (nextHeading?.index ?? remainder.length);
+  return markdown.slice(bodyStart, bodyEnd).trim();
+}
+
 export function releaseChangelog(markdown, version, date) {
   const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   if (new RegExp(`^##\\s+\\[?${escaped}\\]?`, "m").test(markdown)) return markdown;

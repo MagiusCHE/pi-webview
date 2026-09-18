@@ -14,7 +14,7 @@ coverage/
 /packages/pi-webview/CHANGELOG.md
 /packages/pi-webview/PRIVACY.md
 
-# npm pack output (release.mjs allega e pulisce il .tgz)
+# npm pack output (release.mjs records and reuses the verified .tgz for recovery)
 *.tgz
 
 # Env / secrets (mai committare)

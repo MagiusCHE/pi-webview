@@ -14,7 +14,7 @@ import {
   shouldShowReleaseReminder,
 } from "../packages/pi-webview/lib/release-reminder.ts";
 import { isReleaseReminderMessage } from "../src/web/release-reminder.ts";
-import { releaseChangelog } from "../tools/changelog.mjs";
+import { releaseChangelog, releaseNotesForVersion } from "../tools/changelog.mjs";
 
 const englishChangelog = `# Changelog
 
@@ -104,5 +104,7 @@ test("release preparation moves English Unreleased notes once", () => {
   const released = releaseChangelog(englishChangelog, "0.4.0", "2026-09-15");
   assert.match(released, /## \[Unreleased\]\s+## \[0\.4\.0\] - 2026-09-15/);
   assert.deepEqual(extractReleaseNotes(released, "0.4.0", "it"), ["English change."]);
+  assert.equal(releaseNotesForVersion(released, "0.4.0"), "- English change.");
+  assert.equal(releaseNotesForVersion(released, "9.9.9"), null);
   assert.equal(releaseChangelog(released, "0.4.0", "2026-09-16"), released);
 });

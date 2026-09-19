@@ -23,7 +23,12 @@ import {
 } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { NPMJS_REGISTRY, publishAndVerifyNpmPackage, runNpm } from "./npm-publish.mjs";
+import {
+  NPMJS_REGISTRY,
+  parseNpmPackOutput,
+  publishAndVerifyNpmPackage,
+  runNpm,
+} from "./npm-publish.mjs";
 import { releaseChangelog, releaseNotesForVersion } from "./changelog.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -70,6 +75,8 @@ const validateArguments = () => {
   const seen = new Set();
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
+    // pnpm forwards the `--` separator verbatim on some versions, so it is not an argument.
+    if (argument === "--") continue;
     if (!KNOWN_FLAGS.has(argument)) fail(`unknown release argument: ${argument}`);
     if (seen.has(argument)) fail(`release argument may be used only once: ${argument}`);
     seen.add(argument);
@@ -320,19 +327,7 @@ const createReleaseTarball = (piPackage) => {
   console.log(`\n→ create verified tarball ${piPackage.name}@${piPackage.version}…`);
   const packed = runNpm(["pack", "--json", "--registry", NPMJS_REGISTRY], { cwd: piDir });
   if (packed.status !== 0) fail("unable to create the verified npm release tarball");
-
-  let entries;
-  try {
-    entries = JSON.parse(packed.stdout);
-  } catch {
-    fail("npm pack did not return its JSON artifact metadata");
-  }
-  const filename = Array.isArray(entries) ? entries[0]?.filename : undefined;
-  if (typeof filename !== "string" || filename.length === 0) {
-    fail("npm pack did not report a tarball filename");
-  }
-
-  return tarballDetails(filename);
+  return tarballDetails(parseNpmPackOutput(packed.stdout));
 };
 
 const localTagTarget = (releaseName) => {

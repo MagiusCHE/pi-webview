@@ -277,6 +277,22 @@ export const waitForNpmWebToken = async (
   }
 };
 
+export const parseNpmPackOutput = (output) => {
+  let parsed;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    throw new Error("npm pack did not return its JSON artifact metadata");
+  }
+  // npm <=11 returns an array of entries, npm 12 returns an object keyed by package name.
+  const entries = Array.isArray(parsed) ? parsed : Object.values(parsed ?? {});
+  const filename = entries
+    .map((entry) => entry?.filename)
+    .find((value) => typeof value === "string" && value.length > 0);
+  if (!filename) throw new Error("npm pack did not report a tarball filename");
+  return filename;
+};
+
 export const readNpmPublication = async ({
   registry = NPMJS_REGISTRY,
   name,

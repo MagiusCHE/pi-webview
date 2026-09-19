@@ -23,6 +23,7 @@ export function parseNpmAuthChallenge(
   output: string,
 ): { authUrl: string; doneUrl: string } | null;
 export function parseNpmWebLoginUrl(output: string): string | null;
+export function parseNpmPackOutput(output: string): string;
 export function npmVersionUrl(registry: string, name: string, version: string): string;
 export function npmFailureCode(output: string, status?: number | null): string;
 export function openExternalUrl(url: string, options?: unknown): Promise<void>;

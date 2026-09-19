@@ -26,4 +26,11 @@ test("release CLI rejects unsafe argument combinations before release work start
   const unknown = runRelease(["--not-a-release-option"]);
   assert.notEqual(unknown.status, 0);
   assert.match(`${unknown.stdout}\n${unknown.stderr}`, /unknown release argument/);
+
+  const separator = runRelease(["--", "--version", "0.5.0", "--publish"]);
+  assert.notEqual(separator.status, 0);
+  assert.match(
+    `${separator.stdout}\n${separator.stderr}`,
+    /--version cannot be combined with --publish/,
+  );
 });

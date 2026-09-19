@@ -7,6 +7,7 @@ import {
   npmVersionUrl,
   parseNpmAuthChallenge,
   parseNpmWebLoginUrl,
+  parseNpmPackOutput,
   publishAndVerifyNpmPackage,
   readNpmPublication,
   verifyNpmPublication,
@@ -300,6 +301,20 @@ test("release publication completes npm browser 2FA without exposing the OTP", a
   ]);
   assert.equal(publishAttempts, 2);
   assert.deepEqual(calls.at(-1)?.options?.env, { NPM_CONFIG_OTP: "test-ephemeral-otp" });
+});
+
+test("release pack parsing accepts the npm 11 array and npm 12 object shapes", () => {
+  const entry = { filename: "magiusche-pi-webview-0.6.0.tgz", integrity: "sha512-x" };
+  assert.equal(parseNpmPackOutput(JSON.stringify([entry])), entry.filename);
+  assert.equal(
+    parseNpmPackOutput(JSON.stringify({ "@magiusche/pi-webview": entry })),
+    entry.filename,
+  );
+  assert.throws(() => parseNpmPackOutput("not json"), /JSON artifact metadata/);
+  assert.throws(
+    () => parseNpmPackOutput(JSON.stringify({ pkg: { size: 1 } })),
+    /tarball filename/,
+  );
 });
 
 test("release failures retain only an npm error code, never raw command output", () => {

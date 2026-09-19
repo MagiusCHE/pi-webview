@@ -4,6 +4,13 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-19
+
+- Made release publishing deterministic: every release builds all distributable artifacts, packages one hash-verified tarball, and publishes exactly that archive.
+- Added npm browser sign-in and browser-based two-factor confirmation to the publish flow, and verified the published tarball integrity on the npm registry before creating the release.
+- Verified the release tag commit and the GitHub release asset hash, with a recorded artifact manifest for safe idempotent recovery.
+- Split release preparation from publishing so a release tag can no longer point to a commit that predates its version bump.
+
 ## [0.5.0] - 2026-09-17
 
 - Added a privacy-first, capability-gated speech-to-text composer flow with local recognition preferred, push-to-talk and toggle modes, preserved manual drafts, and an explicit cloud-transcription opt-in.

@@ -952,14 +952,6 @@ header {
   overflow-x: auto;
 }
 
-.assistant-text {
-  white-space: pre-wrap;
-  word-break: break-word;
-  text-align: left;
-  font-size: 16.5px;
-  color: var(--fg);
-}
-
 /* status line: small, muted, left-aligned */
 .msg.status {
   align-items: flex-start;
@@ -3229,11 +3221,12 @@ body.stats-bar-expanded .stats-slots {
   color: var(--fg-tertiary);
   font-size: 11.5px;
 }
+/* Promoted tool output shown as the chat response: the text must read exactly
+   like the rest of the chat (inherited base size and line-height), never
+   larger. Structured content keeps its own .code-block presentation. */
 .presented-output-text {
   width: 100%;
   color: var(--fg);
-  font-size: 16.5px;
-  line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

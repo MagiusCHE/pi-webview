@@ -222,6 +222,34 @@ test("release verification refuses incomplete or mismatched registry metadata", 
   );
 });
 
+test("release publication keeps an already published artifact authoritative", async () => {
+  const calls: string[][] = [];
+  const messages: string[] = [];
+  const run = (args: string[]) => {
+    calls.push(args);
+    if (args[0] === "whoami") return { status: 0, stdout: "publisher", stderr: "" };
+    throw new Error(`unexpected npm command: ${args[0]}`);
+  };
+
+  // Same version, different bytes: a later rebuild of the same commit.
+  const publication = await publishAndVerifyNpmPackage({
+    packageDir: "/release/package",
+    tarballPath: "/release/package/magiusche-pi-webview-0.6.0.tgz",
+    integrity: "sha512-rebuilt",
+    shasum: "rebuilt-sha1",
+    name: npmPackage.name,
+    version: npmPackage.version,
+    logger: { log: (message: string) => messages.push(message) },
+    run,
+    fetchImpl: async () => response(200, npmPackage),
+  });
+
+  assert.equal(publication.published, false);
+  assert.equal(publication.integrityMatches, false);
+  assert.deepEqual(calls, []);
+  assert.match(messages.join("\n"), /published artifact stays authoritative/);
+});
+
 test("release publication authenticates first and verifies the exact registry version", async () => {
   const calls: Array<{ args: string[]; options?: { cwd?: string } }> = [];
   const responses = [response(404, {}), response(200, npmPackage)];

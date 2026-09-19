@@ -13,6 +13,8 @@ export interface NpmPublication {
     };
   };
   url: string;
+  integrityMatches: boolean;
+  shasumMatches: boolean;
 }
 
 export interface NpmPublishResult extends NpmPublication {

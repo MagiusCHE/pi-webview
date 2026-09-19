@@ -301,6 +301,7 @@ export const readNpmPublication = async ({
   version,
   integrity,
   shasum,
+  allowArtifactMismatch = false,
   fetchImpl = fetch,
 }) => {
   const url = npmVersionUrl(registry, name, version);
@@ -319,15 +320,20 @@ export const readNpmPublication = async ({
   if (typeof metadata.dist?.tarball !== "string") {
     throw new Error("npm registry returned published metadata without a tarball");
   }
-  if (integrity && metadata.dist.integrity !== integrity) {
+  // Companion artifacts embed build timestamps, so rebuilding the same commit
+  // produces different tarball bytes. Recovery by an already published version
+  // must keep the published artifact authoritative instead of failing.
+  const integrityMatches = !integrity || metadata.dist.integrity === integrity;
+  const shasumMatches = !shasum || metadata.dist.shasum === shasum;
+  if (!allowArtifactMismatch && !integrityMatches) {
     throw new Error(
       "npm registry tarball integrity does not match the prepared artifact",
     );
   }
-  if (shasum && metadata.dist.shasum !== shasum) {
+  if (!allowArtifactMismatch && !shasumMatches) {
     throw new Error("npm registry tarball checksum does not match the prepared artifact");
   }
-  return { metadata, url };
+  return { metadata, url, integrityMatches, shasumMatches };
 };
 
 export const verifyNpmPublication = async ({
@@ -408,10 +414,17 @@ export const publishAndVerifyNpmPackage = async ({
     version,
     integrity,
     shasum,
+    allowArtifactMismatch: true,
     fetchImpl,
   });
   if (existing) {
-    logger.log(`→ npm registry already contains ${name}@${version}; publish skipped.`);
+    if (!existing.integrityMatches || !existing.shasumMatches) {
+      logger.log(
+        `→ npm registry already contains ${name}@${version} from an earlier build; the published artifact stays authoritative.`,
+      );
+    } else {
+      logger.log(`→ npm registry already contains ${name}@${version}; publish skipped.`);
+    }
     return { ...existing, published: false };
   }
 

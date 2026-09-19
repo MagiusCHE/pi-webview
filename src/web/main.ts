@@ -4035,9 +4035,9 @@ async function resumeSessionInWorkspace(path: string, folder: string): Promise<v
   }
 }
 
-// 3-choice dialog: fork the session into the new folder, new session,
-// or cancel
-function askWorkspaceAction(folder: string): Promise<"fork" | "new" | null> {
+// 3-choice dialog: move the session into the new folder (no duplicate), fork
+// it there, new session, or cancel
+function askWorkspaceAction(folder: string): Promise<"move" | "fork" | "new" | null> {
   return new Promise((resolve) => {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
@@ -4048,9 +4048,13 @@ function askWorkspaceAction(folder: string): Promise<"fork" | "new" | null> {
     );
     const actions = document.createElement("div");
     actions.className = "modal-actions";
+    const moveBtn = document.createElement("button");
+    moveBtn.type = "button";
+    moveBtn.className = "btn primary";
+    moveBtn.textContent = t("moveSessionHere");
     const forkBtn = document.createElement("button");
     forkBtn.type = "button";
-    forkBtn.className = "btn primary";
+    forkBtn.className = "btn";
     forkBtn.textContent = t("forkHere");
     const newBtn = document.createElement("button");
     newBtn.type = "button";
@@ -4060,14 +4064,15 @@ function askWorkspaceAction(folder: string): Promise<"fork" | "new" | null> {
     cancelBtn.type = "button";
     cancelBtn.className = "btn";
     cancelBtn.textContent = t("cancel");
-    actions.append(forkBtn, newBtn, cancelBtn);
+    actions.append(moveBtn, forkBtn, newBtn, cancelBtn);
     card.append(lead, actions);
     backdrop.appendChild(card);
 
-    const done = (val: "fork" | "new" | null): void => {
+    const done = (val: "move" | "fork" | "new" | null): void => {
       backdrop.remove();
       resolve(val);
     };
+    moveBtn.addEventListener("click", () => done("move"));
     forkBtn.addEventListener("click", () => done("fork"));
     newBtn.addEventListener("click", () => done("new"));
     cancelBtn.addEventListener("click", () => done(null));
@@ -4084,8 +4089,8 @@ async function changeWorkspace(): Promise<void> {
   const target = await openFolderBrowser(workspacePath);
   if (!target) return;
   if (target === workspacePath) return; // same folder: no change
-  // An empty session has nothing to preserve or fork: move directly to the
-  // selected workspace and let pi start its empty session there.
+  // An empty session has nothing to preserve, fork or move: switch directly to
+  // the selected workspace and let pi start its empty session there.
   const currentIsEmpty = !sessionHasMessages && isNewSession(currentSession());
   const choice = currentIsEmpty ? "new" : await askWorkspaceAction(target);
   if (!choice || !beginSessionTransition()) return;
@@ -4095,17 +4100,17 @@ async function changeWorkspace(): Promise<void> {
       type: "setWorkspace",
       path: target,
       action: choice,
-      ...(choice === "fork" && currentSessionPath
+      ...(choice !== "new" && currentSessionPath
         ? { sessionPath: currentSessionPath }
         : {}),
     });
     if (!res?.ok) return;
     workspacePath = target;
     workspaceLabel = target.split(/[\\/]/).pop() ?? "";
-    if (choice === "fork") {
-      const forkPath = (res.data as { sessionPath?: string } | undefined)?.sessionPath;
-      if (!forkPath) return;
-      historyLoaded = await performSwitchSession(forkPath);
+    if (choice !== "new") {
+      const nextPath = (res.data as { sessionPath?: string } | undefined)?.sessionPath;
+      if (!nextPath) return;
+      historyLoaded = await performSwitchSession(nextPath);
     } else {
       currentSessionPath = null;
       refreshSessionNotificationOverride();

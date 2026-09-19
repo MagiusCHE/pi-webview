@@ -128,6 +128,7 @@
     "loading": "Loading…",
     "messagePlaceholder": "Message for pi — Enter to send, Shift+Enter for a new line",
     "model": "Model",
+    "moveSessionHere": "Move the session into the new folder",
     "nameUsage": "Usage: /name <name>",
     "newChat": "New chat in another panel",
     "newSession": "New session",

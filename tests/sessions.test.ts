@@ -16,6 +16,7 @@ import {
   listSessions,
   defaultSessionDir,
   forkSession,
+  moveSession,
   getSessionInfo,
   encodeProjectFolder,
   readSessionModel,
@@ -180,6 +181,65 @@ test("forkSession: copia la sessione nel workspace con header aggiornato", () =>
     assert.deepEqual(lines[3].data, { notifications: "desktop" });
     // the original is not touched
     assert.ok(readFileSync(source, "utf-8").includes("id-2"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("moveSession: sposta la sessione nel nuovo workspace senza duplicati", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-webview-move-"));
+  try {
+    const proj1 = join(root, "--work-projone--");
+    const proj2 = join(root, "--work-projtwo--");
+    mkdirSync(proj1, { recursive: true });
+
+    const source = join(proj1, "2026-07-01_bbb.jsonl");
+    writeFileSync(
+      source,
+      JSON.stringify({
+        type: "session",
+        version: "3",
+        id: "id-3",
+        cwd: "/work/projone",
+        parentSession: "/sessions/--work-root--/root.jsonl",
+      }) +
+        "\n" +
+        JSON.stringify({ type: "session_info", id: "k1", name: "Da spostare" }) +
+        "\n" +
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          message: { role: "user", content: "ciao" },
+        }) +
+        "\n" +
+        JSON.stringify({
+          type: "custom",
+          customType: "pi-webview-session-settings",
+          id: "settings-1",
+          data: { notifications: "desktop", browserToolPermissions: ["dom"] },
+        }) +
+        "\n",
+    );
+
+    const { path } = moveSession(source, "/work/projtwo", root);
+    assert.ok(
+      path.startsWith(proj2),
+      "sessione spostata nella cartella del nuovo workspace",
+    );
+    assert.equal(existsSync(source), false, "l'originale viene rimosso");
+
+    const lines = readFileSync(path, "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    assert.equal(lines[0].cwd, "/work/projtwo");
+    assert.ok(lines[0].id && lines[0].id !== "id-3");
+    // the chain stays on the original parent: pointing at the removed file would dangle
+    assert.equal(lines[0].parentSession, "/sessions/--work-root--/root.jsonl");
+    assert.equal(lines.length, 4);
+    assert.equal(lines[1].name, "Da spostare");
+    assert.equal(lines[2].type, "message");
+    assert.deepEqual(lines[3].data, { notifications: "desktop" });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -14,6 +14,7 @@ import {
   appendFileSync,
   existsSync,
   unlinkSync,
+  rmSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { SessionInfo, CliFlags, SessionSettings } from "../ide/protocol.ts";
@@ -312,6 +313,36 @@ export function forkSession(
   workspace: string,
   dir: string = defaultSessionDir(),
 ): { path: string } {
+  const entries = readSessionEntries(sourcePath);
+  return {
+    path: writeSessionCopy(entries, {
+      workspace,
+      parentSession: sourcePath,
+      dir,
+    }),
+  };
+}
+
+// Move of a session into another workspace: the conversation is copied with
+// the new workspace header and the original file is removed, so the session
+// stops appearing under its old workspace instead of being duplicated.
+// The copy keeps the original's parent: pointing at the removed file would
+// leave a dangling reference.
+export function moveSession(
+  sourcePath: string,
+  workspace: string,
+  dir: string = defaultSessionDir(),
+): { path: string } {
+  const entries = readSessionEntries(sourcePath);
+  const header = sessionHeader(entries);
+  const parent =
+    typeof header.parentSession === "string" ? header.parentSession : undefined;
+  const path = writeSessionCopy(entries, { workspace, parentSession: parent, dir });
+  rmSync(sourcePath, { force: true });
+  return { path };
+}
+
+function readSessionEntries(sourcePath: string): Record<string, unknown>[] {
   const entries = readFileSync(sourcePath, "utf-8")
     .split("\n")
     .map((line) => {
@@ -322,9 +353,25 @@ export function forkSession(
       }
     })
     .filter((e): e is Record<string, unknown> => e !== null);
+  sessionHeader(entries);
+  return entries;
+}
+
+function sessionHeader(entries: Record<string, unknown>[]): Record<string, unknown> {
   const header = entries.find((e) => e.type === "session");
   if (!header) throw new Error("invalid source session (no header)");
+  return header;
+}
 
+function writeSessionCopy(
+  entries: Record<string, unknown>[],
+  {
+    workspace,
+    parentSession,
+    dir,
+  }: { workspace: string; parentSession?: string; dir: string },
+): string {
+  const header = sessionHeader(entries);
   const id = randomUUID();
   const timestamp = new Date().toISOString();
   const newHeader = {
@@ -333,7 +380,7 @@ export function forkSession(
     id,
     timestamp,
     cwd: workspace,
-    parentSession: sourcePath,
+    parentSession,
   };
   const projDir = join(dir, encodeProjectFolder(workspace));
   mkdirSync(projDir, { recursive: true });
@@ -356,7 +403,7 @@ export function forkSession(
     }
     appendFileSync(newPath, JSON.stringify(copiedEntry) + "\n");
   }
-  return { path: newPath };
+  return newPath;
 }
 
 function projectFolderMatches(folder: string, workspace: string): boolean {

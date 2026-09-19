@@ -4,6 +4,8 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+- Added "move the session into the new folder" to the session-picker folder change: the conversation continues in the selected workspace and the old copy is removed, so no duplicate session is left behind.
+
 ## [0.6.0] - 2026-09-19
 
 - Made release publishing deterministic: every release builds all distributable artifacts, packages one hash-verified tarball, and publishes exactly that archive.

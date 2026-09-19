@@ -39,6 +39,7 @@ import { ConfigStore, readCompactionSettings, readThinkingSettings } from "./con
 import {
   listSessions,
   forkSession,
+  moveSession,
   getSessionInfo,
   renameSessionFile,
   deleteSessionFile,
@@ -755,9 +756,23 @@ function main(): void {
       }
       if (req.type === "setWorkspace") {
         let sessionPath: string | undefined;
+        // A move copies the session under the new workspace and removes the
+        // original: pi must stop first so no write lands in the removed file.
+        const moving = req.action === "move";
+        if (moving && !req.sessionPath) {
+          respond(req.id ?? "", {
+            ok: false,
+            error: "workspace move requires a session path",
+          });
+          return;
+        }
+        if (moving) pi.dispose();
         try {
           if (req.action === "fork" && req.sessionPath) {
             const res = forkSession(req.sessionPath, req.path);
+            sessionPath = (res as { path?: string }).path;
+          } else if (moving && req.sessionPath) {
+            const res = moveSession(req.sessionPath, req.path);
             sessionPath = (res as { path?: string }).path;
           } else if (req.action === "resume") {
             if (!req.sessionPath) {
@@ -770,13 +785,22 @@ function main(): void {
             sessionPath = req.sessionPath;
           }
         } catch (err) {
-          respond(req.id ?? "", {
-            ok: false,
-            error: `fork into the new folder failed: ${err instanceof Error ? err.message : String(err)}`,
-          });
+          // pi was already stopped: restart it on the untouched session so a
+          // failed move never leaves the UI without a running agent.
+          const reason = err instanceof Error ? err.message : String(err);
+          const restart = moving
+            ? switchWorkspace(workspaceDir, currentSessionPath)
+            : Promise.resolve();
+          void restart.then(() =>
+            respond(req.id ?? "", {
+              ok: false,
+              error: `${moving ? "move" : "fork"} into the new folder failed: ${reason}`,
+            }),
+          );
           return;
         }
-        void switchWorkspace(req.path, req.action === "resume" ? sessionPath : undefined)
+        const startOn = moving || req.action === "resume" ? sessionPath : undefined;
+        void switchWorkspace(req.path, startOn)
           .then(() =>
             respond(req.id ?? "", {
               ok: true,

@@ -1,5 +1,6 @@
 export const NPMJS_REGISTRY: string;
 export const NPM_AUTH_TIMEOUT_MS: number;
+export const NPM_VERIFY_TIMEOUT_MS: number;
 
 export interface NpmPublication {
   metadata: {

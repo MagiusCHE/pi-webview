@@ -167,6 +167,23 @@ test("release verification retries registry propagation and validates package id
   assert.deepEqual(delays, [2_000]);
 });
 
+test("release verification backs off while the npm registry processes a publish", async () => {
+  const delays: number[] = [];
+  await assert.rejects(
+    verifyNpmPublication({
+      name: "@magiusche/pi-webview",
+      version: "0.6.0",
+      fetchImpl: async () => response(404, {}),
+      sleepImpl: async (milliseconds: number) => {
+        delays.push(milliseconds);
+      },
+      attempts: 6,
+    }),
+    /did not expose @magiusche\/pi-webview@0\.6\.0 within 5 minutes/,
+  );
+  assert.deepEqual(delays, [2_000, 4_000, 8_000, 10_000, 10_000]);
+});
+
 test("release verification refuses incomplete or mismatched registry metadata", async () => {
   await assert.rejects(
     readNpmPublication({

@@ -4,6 +4,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 export const NPMJS_REGISTRY = "https://registry.npmjs.org/";
 export const NPM_AUTH_TIMEOUT_MS = 10 * 60_000;
+// A publish PUT can answer 202 Accepted and reach the public packument minutes later.
+export const NPM_VERIFY_TIMEOUT_MS = 5 * 60_000;
 
 const DEFAULT_POLL_MS = 2_000;
 const MAX_POLL_MS = 10_000;
@@ -336,8 +338,11 @@ export const verifyNpmPublication = async ({
   shasum,
   fetchImpl = fetch,
   sleepImpl = sleep,
-  attempts = 12,
+  logger,
+  timeoutMs = NPM_VERIFY_TIMEOUT_MS,
+  attempts = 60,
 }) => {
+  const deadline = Date.now() + timeoutMs;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const publication = await readNpmPublication({
       registry,
@@ -348,9 +353,19 @@ export const verifyNpmPublication = async ({
       fetchImpl,
     });
     if (publication) return publication;
-    if (attempt + 1 < attempts) await sleepImpl(DEFAULT_POLL_MS);
+
+    const delay = Math.min(DEFAULT_POLL_MS * 2 ** attempt, MAX_POLL_MS);
+    if (attempt + 1 >= attempts || Date.now() + delay > deadline) break;
+    if (attempt === 0) {
+      logger?.log(
+        "→ npm registry is still processing the publish; waiting for it to appear…",
+      );
+    }
+    await sleepImpl(delay);
   }
-  throw new Error(`npm registry did not expose ${name}@${version} after publishing`);
+  throw new Error(
+    `npm registry did not expose ${name}@${version} within ${Math.round(timeoutMs / 60_000)} minutes of publishing`,
+  );
 };
 
 const publishArgs = ({ registry, tag, tarballPath }) => [
@@ -436,6 +451,7 @@ export const publishAndVerifyNpmPackage = async ({
     shasum,
     fetchImpl,
     sleepImpl,
+    logger,
   });
   logger.log(`✓ npm registry verified ${name}@${version}.`);
   return { ...publication, published: true };

@@ -25,6 +25,9 @@ cpSync(
   "src/adapters/browser/chrome/microphone-permission.html",
   `${outputDir}/microphone-permission.html`,
 );
+cpSync("src/adapters/browser/chrome/icons", `${outputDir}/icons`, {
+  recursive: true,
+});
 
 await Promise.all([
   build({

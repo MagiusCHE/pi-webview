@@ -4,6 +4,8 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-09-21
+
 - Fixed the promoted tool output printed as the chat response rendering larger than the rest of the conversation: it now uses the same text size and line height as normal chat messages.
 - Fixed the Chrome Web Store listing icon disappearing against the white store theme: the Chrome companion now ships a terracotta tile icon that stays visible in both light and dark themes.
 

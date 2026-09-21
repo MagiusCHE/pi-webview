@@ -5368,6 +5368,30 @@ function finishThinking(): void {
   }
 }
 
+// run end (STOP, provider abort, pi exit): a thought that is still streaming
+// never receives its end event, so it would keep its spinner, timer and
+// running counter forever — a yellow animated count in a finished block. The
+// partial text stays visible, marked as interrupted instead.
+function interruptThinking(): void {
+  if (!thinkingEl || thinkingContentRendered) return;
+  flushThinkingContentRender();
+  stopThinkingTimer();
+  thinkingSpinnerEl?.remove();
+  thinkingSpinnerEl = null;
+  const content = thinkingAccum.trim();
+  if (content) {
+    if (thinkingContentEl) thinkingContentEl.textContent = content;
+    setAgenticItemState(thinkingEl, "interrupted");
+    thinkingContentRendered = true;
+    return;
+  }
+  unregisterAgenticItem(thinkingEl);
+  thinkingEl.remove();
+  thinkingEl = null;
+  thinkingContentEl = null;
+  updateThinkingBlocksButton();
+}
+
 // --- "Waiting for response" indicator (provider inactivity watchdog) -------
 // `turn_start` arms the initial wait before every provider request. Every text
 // delta resets the same 1s timeout: this also exposes a long silent interval
@@ -7134,6 +7158,7 @@ function renderRpcEvent(evt: RpcEvent): void {
     agenticRunStartedAt = performance.now();
   }
   if (evt.type === "agent_end" || evt.type === "agent_settled") {
+    interruptThinking();
     removeEmptyActiveAgenticBlock();
     finishRunningAgenticBlocks();
     activeAgenticBlock = null;
@@ -11277,6 +11302,7 @@ function trackWorking(evt: RpcEvent): void {
     // Tools aborted by STOP have no tool_execution_end: freeze their timers
     // and turn every still-running spinner into a visible failure.
     failRunningTools();
+    interruptThinking();
     void fetchSessionStats(); // context/token updated at turn end
     void fetchBalance(); // the balance changes after the usage
     updateSendButton();

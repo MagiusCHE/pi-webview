@@ -4,6 +4,8 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+- Fixed the agentic thinking counter staying yellow and animated after an interrupted run: a thought that never receives its end event is now closed as interrupted when the run ends or pi disconnects.
+
 ## [0.6.2] - 2026-09-21
 
 - Fixed the promoted tool output printed as the chat response rendering larger than the rest of the conversation: it now uses the same text size and line height as normal chat messages.

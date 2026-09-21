@@ -59,6 +59,7 @@
     "browserServerUrlNote": "Default: http://127.0.0.1:7361. HTTP and HTTPS are allowed. Use remote HTTP only on a trusted private network such as Tailscale. The URL may contain a private credential.",
     "browserSettingsTitle": "Browser connection",
     "bridgeDisconnected": "The connection to the piw bridge was interrupted. You can try reloading the window.",
+    "bridgeUnreachable": "The piw bridge is unreachable: check that it is running and that the page URL carries the right token. Retrying automatically…",
     "bridgeUrlPlaceholder": "ws://127.0.0.1:PORT?token=…",
     "cancel": "Cancel",
     "changeWorkspaceAsk": "What should happen to the current session?",

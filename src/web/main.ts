@@ -768,9 +768,35 @@ function waitForWindowMessage(
   });
 }
 
+// crypto.randomUUID() exists only in a SecureContext: a page served over plain
+// http:// on a LAN or tailnet address (e.g. a phone reaching the bridge by IP)
+// does not have it, and a throw here would abort boot() before the bridge is
+// even contacted (silent red dot, no session). getRandomValues also works in
+// insecure contexts, so the discovery nonce never depends on https.
+function browserDiscoveryNonce(): string {
+  const webCrypto = typeof crypto === "undefined" ? undefined : crypto;
+  if (webCrypto && typeof webCrypto.randomUUID === "function") {
+    return webCrypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  if (webCrypto && typeof webCrypto.getRandomValues === "function") {
+    webCrypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 function startBrowserCompanionDiscovery(): void {
   if (runtime.mode !== "standalone" || browserCompanionDiscovery) return;
-  const nonce = crypto.randomUUID();
+  let nonce: string;
+  try {
+    nonce = browserDiscoveryNonce();
+  } catch {
+    // the companion handoff is optional: it must never abort the bridge boot
+    browserCompanionDiscovery = Promise.resolve(null);
+    return;
+  }
   const announce = () => {
     window.postMessage(
       { type: "pi-webview-browser-discovery", nonce, protocolVersion: 1 },
@@ -11411,6 +11437,12 @@ async function boot(): Promise<void> {
   hideBootLoader();
   if (runtime.isBrowserExtension) {
     await explainBrowserConnectionFailure(browserConnectionError);
+  } else if (usesWebSocketBridge) {
+    // standalone: without a resolvable bridge URL (bridge down, rotated token)
+    // the dot alone would stay red forever, because the reconnect loop starts
+    // only once a transport exists. Report the failure and keep retrying.
+    appendSystemBox("error", t("bridgeUnreachable"));
+    reconnect.start();
   }
 }
 

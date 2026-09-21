@@ -59,6 +59,7 @@
     "browserServerUrlNote": "Predefinito: http://127.0.0.1:7361. Sono consentiti HTTP e HTTPS. Usa HTTP remoto solo su una rete privata fidata, come Tailscale. L’URL può contenere una credenziale privata.",
     "browserSettingsTitle": "Connessione browser",
     "bridgeDisconnected": "La connessione al bridge piw si è interrotta. Puoi provare a ricaricare la finestra.",
+    "bridgeUnreachable": "Il bridge piw non è raggiungibile: verifica che sia attivo e che l’URL della pagina contenga il token giusto. Nuovo tentativo automatico…",
     "bridgeUrlPlaceholder": "ws://127.0.0.1:PORT?token=…",
     "cancel": "Annulla",
     "changeWorkspaceAsk": "Cosa vuoi fare con la sessione attuale?",

@@ -285,6 +285,23 @@ export function isFileSetting(key: string): boolean {
   return DEFS.some((d) => d.key === key && d.source === "pi-settings-file");
 }
 
+/**
+ * Default model used for NEW sessions (merge of global and trusted project
+ * settings). Used to replace a session model that no longer exists.
+ */
+export function readDefaultModelSetting(
+  ctx: PiSettingsContext,
+): PiModelSettingValue | undefined {
+  const def = DEFS.find((d) => d.key === "defaultModel");
+  if (!def) return undefined;
+  const value = readSettingValue(ctx, def);
+  if (!value || typeof value !== "object") return undefined;
+  const model = value as Partial<PiModelSettingValue>;
+  return typeof model.provider === "string" && typeof model.id === "string"
+    ? { provider: model.provider, id: model.id }
+    : undefined;
+}
+
 function settingPatch(def: PiSettingDef, value: unknown): Record<string, unknown> {
   if (def.type === "model") {
     const model = value as PiModelSettingValue;

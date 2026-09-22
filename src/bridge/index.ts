@@ -48,10 +48,17 @@ import {
   readSessionCliFlags,
   writeSessionCliFlags,
   sessionModelArgs,
+  readSessionModel,
   sessionPathForId,
 } from "./sessions.ts";
 import { TrustRuntime } from "./trust.ts";
-import { getPiSettings, setPiSettingFile, setPiSettingsFile } from "./pi-settings.ts";
+import {
+  getPiSettings,
+  readDefaultModelSetting,
+  setPiSettingFile,
+  setPiSettingsFile,
+} from "./pi-settings.ts";
+import { ModelConfigFallback } from "./pi-config-errors.ts";
 import { readStartupInfo } from "./startup-info.ts";
 import { saveAttachment, pathExists, attachFromPath } from "./attachments.ts";
 import { fetchProviderBalance } from "./balance.ts";
@@ -532,15 +539,62 @@ function main(): void {
     // Project trust of the running pi process: a change is applied by a
     // restart, and the session-only options arm a per-run override flag.
     const trust = new TrustRuntime(workspaceDir);
+    // one fallback per launch cycle when the saved model no longer exists
+    const modelFallback = new ModelConfigFallback();
+    let lastPiCommandLine = "";
     const makePi = (
       cwd: string,
       sessionPath?: string,
       flags: CliFlags = readSessionCliFlags(sessionPath ?? ""),
+      modelArgsOverride?: string[],
     ): PiProcess => {
+      const modelArgs =
+        modelArgsOverride ?? (sessionPath ? sessionModelArgs(sessionPath) : []);
+      const args = [
+        ...(sessionPath ? ["--session", sessionPath] : []),
+        ...modelArgs,
+        ...cliFlagArgs(flags),
+        ...trust.launchArgs(),
+      ];
+      lastPiCommandLine = `${piCommand} --mode rpc ${args.join(" ")}`.trim();
       const proc = new PiProcess(
         piCommand,
         {
           onEvent: (event) => send({ channel: "rpc", payload: event as RpcEvent }),
+          onBoot: () => modelFallback.reset(),
+          onExit: (_code, _signal, error, kind) => {
+            if (kind === "config" && modelFallback.use()) {
+              // The saved session model no longer exists: relaunch on the
+              // default model of new sessions and tell the user about it.
+              const from = currentSessionPath
+                ? readSessionModel(currentSessionPath)
+                : undefined;
+              const to = readDefaultModelSetting({
+                workspace: workspaceDir,
+                workspaceTrusted: trust.isTrusted(),
+              });
+              send({
+                channel: "rpc",
+                payload: {
+                  type: "model_fallback",
+                  ...(from ? { from } : {}),
+                  ...(to ? { to } : {}),
+                },
+              });
+              restartPi(currentSessionPath, activeCliFlags, []);
+              return;
+            }
+            // Definitive failure (crash loop exhausted or unusable default
+            // model): unlock the webview and show the error with the hint.
+            send({
+              channel: "rpc",
+              payload: {
+                type: "connection_closed",
+                command: lastPiCommandLine,
+                ...(error ? { error } : {}),
+              },
+            });
+          },
           onStderr: (line) => {
             if (!line.trim()) return;
             console.error(`[pi:err] ${line}`);
@@ -572,12 +626,7 @@ function main(): void {
             PI_WEBVIEW_BROWSER_CONTROL_URL: `http://${LOOPBACK_IP}:${port}/internal/browser-tool`,
             PI_WEBVIEW_BROWSER_CONTROL_CAPABILITY: controlCapability,
           },
-          args: [
-            ...(sessionPath ? ["--session", sessionPath] : []),
-            ...(sessionPath ? sessionModelArgs(sessionPath) : []),
-            ...cliFlagArgs(flags),
-            ...trust.launchArgs(),
-          ],
+          args,
         },
       );
       // Project trust of the running process: the pending change (a saved
@@ -591,7 +640,11 @@ function main(): void {
     pi.start();
     log(`channel open (intent=${intent.kind})`);
 
-    const restartPi = (sessionPath: string | undefined, flags: CliFlags): void => {
+    const restartPi = (
+      sessionPath: string | undefined,
+      flags: CliFlags,
+      modelArgsOverride?: string[],
+    ): void => {
       activeCliFlags = { ...flags };
       pi.dispose();
       // pi removes an empty session file while shutting down. Re-check after
@@ -605,7 +658,7 @@ function main(): void {
         channel: "rpc",
         payload: { type: "connection_closed", reason: "restart" },
       });
-      pi = makePi(workspaceDir, currentSessionPath, activeCliFlags);
+      pi = makePi(workspaceDir, currentSessionPath, activeCliFlags, modelArgsOverride);
       pi.start();
       send({ channel: "rpc", payload: { type: "pi_restarted" } });
     };

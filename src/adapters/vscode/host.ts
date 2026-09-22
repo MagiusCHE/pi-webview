@@ -153,13 +153,16 @@ import {
   readSessionSettings,
   writeSessionSettings,
   sessionModelArgs,
+  readSessionModel,
 } from "../../bridge/sessions.ts";
 import { TrustRuntime } from "../../bridge/trust.ts";
 import {
   getPiSettings,
+  readDefaultModelSetting,
   setPiSettingFile,
   setPiSettingsFile,
 } from "../../bridge/pi-settings.ts";
+import { ModelConfigFallback } from "../../bridge/pi-config-errors.ts";
 import { readStartupInfo } from "../../bridge/startup-info.ts";
 import { saveAttachment, pathExists, attachFromPath } from "../../bridge/attachments.ts";
 import { fetchProviderBalance } from "../../bridge/balance.ts";
@@ -201,6 +204,8 @@ export abstract class PiWebviewHost {
   private cliFlagsNeedSessionPersistence = false;
   /** true during an intentional restart (setCliFlags): pi's exit is not a crash */
   private restarting = false;
+  /** one fallback per launch cycle when the saved model no longer exists */
+  private modelFallback = new ModelConfigFallback();
   /** Project trust of the RUNNING pi process: a change (saved decision or
    *  session-only override) is applied by the next restart. */
   private trust: TrustRuntime | null = null;
@@ -217,7 +222,7 @@ export abstract class PiWebviewHost {
   /** restarts pi with the current launch options (setCliFlags): the webview
    *  gets connection_closed(reason restart) + pi_restarted to re-initialize
    *  without a reload (transparent); the current session is resumed with --session */
-  protected restartPi(flagsOverride?: CliFlags): void {
+  protected restartPi(flagsOverride?: CliFlags, modelArgsOverride?: string[]): void {
     const sessionPath = this.currentSessionPath;
     this.restarting = true;
     this.pi?.dispose();
@@ -226,7 +231,7 @@ export abstract class PiWebviewHost {
       channel: "rpc",
       payload: { type: "connection_closed", reason: "restart" } satisfies RpcEvent,
     });
-    this.startPi(sessionPath, undefined, flagsOverride);
+    this.startPi(sessionPath, undefined, flagsOverride, modelArgsOverride);
     this.restarting = false;
     this.post({ channel: "rpc", payload: { type: "pi_restarted" } satisfies RpcEvent });
   }
@@ -301,6 +306,7 @@ export abstract class PiWebviewHost {
     sessionPath?: string,
     piOverride?: string,
     flagsOverride?: CliFlags,
+    modelArgsOverride?: string[],
   ): void {
     logLine(`startPi session=${sessionPath ?? ""} pid=${process.pid}`);
     let piCmd = piOverride
@@ -373,8 +379,10 @@ export abstract class PiWebviewHost {
     // its JSONL file yet. Do not retain the previous session by accident.
     this.currentSessionPath = sessionArgs.length > 0 ? sessionPath : undefined;
     // A resumed session must keep its saved model. Explicit arguments prevent
-    // pi from silently falling back to the default when restoring it.
-    const activeSessionModelArgs = sessionPath ? sessionModelArgs(sessionPath) : [];
+    // pi from silently falling back to the default when restoring it. A
+    // fallback launch overrides them with the default model of new sessions.
+    const activeSessionModelArgs =
+      modelArgsOverride ?? (sessionPath ? sessionModelArgs(sessionPath) : []);
     // CLI flags from settings (block 3: e.g. --session-control). An explicit
     // Apply override must survive even when the session file does not exist yet.
     this.activeCliFlags = resolveCliFlagsForLaunch(
@@ -415,6 +423,7 @@ export abstract class PiWebviewHost {
           // "cancelled".
           this.post({ channel: "rpc", payload: evt as RpcEvent });
         },
+        onBoot: () => this.modelFallback.reset(),
         onStderr: (line) => {
           console.warn("[pi]", line);
           // debug: raw stderr → companion.log (does the OSC 777 arrive here?)
@@ -452,9 +461,31 @@ export abstract class PiWebviewHost {
             logLine(`notify skipped (window focused) title=${title}`);
           }
         },
-        onExit: (_code, _signal, error) => {
-          logLine(`pi exited error=${error ?? "none"}`);
+        onExit: (_code, _signal, error, kind) => {
+          logLine(`pi exited error=${error ?? "none"} kind=${kind ?? "-"}`);
           if (this.restarting) return; // intentional restart: not a crash
+          if (kind === "config" && this.modelFallback.use()) {
+            // The saved session model no longer exists: relaunch on the
+            // default model of new sessions and tell the user about it.
+            const from = this.currentSessionPath
+              ? readSessionModel(this.currentSessionPath)
+              : undefined;
+            const ws = this.workspace();
+            const to = readDefaultModelSetting({
+              workspace: ws,
+              workspaceTrusted: ws ? this.trustRuntime().isTrusted() : undefined,
+            });
+            this.post({
+              channel: "rpc",
+              payload: {
+                type: "model_fallback",
+                ...(from ? { from } : {}),
+                ...(to ? { to } : {}),
+              } satisfies RpcEvent,
+            });
+            this.restartPi(undefined, []);
+            return;
+          }
           // asks the user to verify pi from a terminal with the SAME command
           // line used here, so the real error becomes visible
           const locale = this.config.get().locale;

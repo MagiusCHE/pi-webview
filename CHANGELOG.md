@@ -4,6 +4,8 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+- Fixed the startup loop when the session's saved provider or model no longer exists: pi no longer retries the same broken launch, resuming or switching to that session falls back once to the default model of new sessions instead of being refused, the fallback is reported in the chat and the interface stays usable when even the default is broken.
+- Fixed the thinking level kept from the previous model after a model switch: it is now clamped to the levels supported by the new model.
 - Fixed the agentic thinking counter staying yellow and animated after an interrupted run: a thought that never receives its end event is now closed as interrupted when the run ends or pi disconnects.
 
 ## [0.6.2] - 2026-09-21

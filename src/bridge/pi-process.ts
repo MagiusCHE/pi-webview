@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import type { ChildProcessByStdio } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { createJsonlParser, writeJsonl } from "./jsonl.ts";
+import { isModelConfigError } from "./pi-config-errors.ts";
 import { resolveDirectNode } from "./spawn.ts";
 
 export interface PiProcessOptions {
@@ -14,9 +15,20 @@ export interface PiProcessOptions {
   args?: string[];
 }
 
+/** Exit classification: "spawn" = binary not executable, "config" = pi's
+ *  provider/model configuration is invalid (retrying would fail identically). */
+export type PiExitKind = "spawn" | "config";
+
 export interface PiProcessCallbacks {
   onEvent: (event: Record<string, unknown>) => void;
-  onExit?: (code: number | null, signal: NodeJS.Signals | null, error?: string) => void;
+  onExit?: (
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    error?: string,
+    kind?: PiExitKind,
+  ) => void;
+  /** first stdout line received: pi booted (used to re-arm fallbacks) */
+  onBoot?: () => void;
   onStderr?: (line: string) => void;
   /** OSC 777 notify (turn complete etc.): the TUI shows it as a desktop
    *  notification — surface it in the UI, never as chat text */
@@ -34,6 +46,7 @@ export class PiProcess {
   private spawnError = false; // spawn failed: the following 'exit' event must be ignored
   private bootWatchdog: ReturnType<typeof setTimeout> | null = null;
   private booted = false; // first line from pi → boot ok, watchdog disarmed
+  private stderrTail: string[] = []; // last stderr lines: exit diagnostics
   private command: string;
   private cb: PiProcessCallbacks;
   private opts: PiProcessOptions;
@@ -78,6 +91,7 @@ export class PiProcess {
     );
     this.child = child;
     this.booted = false;
+    this.stderrTail = [];
     // Boot watchdog: pi frozen (no output for 45s, e.g. stalled on missing
     // networks at startup) → kill the tree; the restart follows the normal
     // 'exit' flow (backoff 1s, cap 5) and each attempt gets a new watchdog.
@@ -113,6 +127,7 @@ export class PiProcess {
           clearTimeout(this.bootWatchdog);
           this.bootWatchdog = null;
         }
+        this.cb.onBoot?.();
       }
       try {
         payload = JSON.parse(line);
@@ -160,11 +175,17 @@ export class PiProcess {
       while ((idx = stderrBuffer.indexOf("\n")) !== -1) {
         const line = stderrBuffer.slice(0, idx);
         stderrBuffer = stderrBuffer.slice(idx + 1);
-        if (line.trim()) this.cb.onStderr?.(line);
+        if (line.trim()) {
+          this.rememberStderr(line);
+          this.cb.onStderr?.(line);
+        }
       }
     });
     child.stderr.on("end", () => {
-      if (stderrBuffer.trim()) this.cb.onStderr?.(stderrBuffer);
+      if (stderrBuffer.trim()) {
+        this.rememberStderr(stderrBuffer);
+        this.cb.onStderr?.(stderrBuffer);
+      }
     });
 
     // spawn failed (e.g. ENOENT/EACCES: binary not executable): do NOT retry,
@@ -202,6 +223,14 @@ export class PiProcess {
       }
       this.child = null;
       if (this.stopping) return;
+      // Invalid provider/model: every retry fails identically, so the restart
+      // loop must stop here and let the host fall back to the default model.
+      const configError = this.stderrTail.find((line) => isModelConfigError(line));
+      if (configError) {
+        this.cb.log?.("pi: modello/provider inesistente — nessun retry");
+        this.cb.onExit?.(code, signal, configError.trim(), "config");
+        return;
+      }
       this.restarts++;
       if (this.restarts > 5) {
         this.cb.log?.("pi continua a crashare — mi fermo");
@@ -216,6 +245,12 @@ export class PiProcess {
   send(obj: unknown): void {
     this.queue.push(obj);
     this.pump();
+  }
+
+  /** Keeps the last stderr lines: at exit they identify configuration errors. */
+  private rememberStderr(line: string): void {
+    this.stderrTail.push(line);
+    if (this.stderrTail.length > 20) this.stderrTail.shift();
   }
 
   private pump(): void {

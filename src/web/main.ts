@@ -126,6 +126,7 @@ import {
   type AgenticMetric,
   type AgenticMetricProgress,
 } from "./agentic-thinking.ts";
+import { clampThinkingLevel } from "./thinking-levels.ts";
 import {
   attachBrowserPageContext,
   attachEditorSelectionContext,
@@ -3694,37 +3695,12 @@ async function refreshSessions(showResumeNotice = false): Promise<void> {
     const label = data?.workspace?.split(/[\\/]/).pop();
     if (label) workspaceLabel = label;
   }
-  blockedResumeModel = null;
-  const resumedModel = sessions.find(
-    (session) => session.path === currentSessionPath,
-  )?.model;
-  if (resumedModel) {
-    const available = await rpcRequest(rpc.getAvailableModels()).catch(() => null);
-    if (available?.success) {
-      const models =
-        (
-          available.data as
-            { models?: Array<{ provider?: string; id?: string }> } | undefined
-        )?.models ?? [];
-      if (
-        !models.some(
-          (model) =>
-            model.provider === resumedModel.provider && model.id === resumedModel.id,
-        )
-      ) {
-        blockedResumeModel = `${resumedModel.provider}/${resumedModel.id}`;
-      }
-    }
-  }
   await fetchThinkingSettings();
   syncThinkingChat();
   populateSessionMenu();
   await loadHistory();
-  if (blockedResumeModel) {
-    addStatusLine(tpl(t("resumeModelUnavailable"), { model: blockedResumeModel }));
-  }
   updateSteerPlaceholder();
-  if (showResumeNotice && !blockedResumeModel && sessionHasMessages) {
+  if (showResumeNotice && sessionHasMessages) {
     let info = currentSession();
     if (!info && currentSessionPath) {
       const infoRes = await ideRequest({
@@ -4205,28 +4181,6 @@ async function performSwitchSession(path: string): Promise<boolean> {
     if (infoRes?.ok) info = infoRes.data as SessionInfo;
   }
   const savedModel = info?.model;
-  if (savedModel) {
-    const available = await rpcRequest(rpc.getAvailableModels()).catch(() => null);
-    const models =
-      (available?.success
-        ? (
-            available.data as
-              { models?: Array<{ provider?: string; id?: string }> } | undefined
-          )?.models
-        : undefined) ?? [];
-    if (
-      !models.some(
-        (model) => model.provider === savedModel.provider && model.id === savedModel.id,
-      )
-    ) {
-      addStatusLine(
-        tpl(t("resumeModelUnavailable"), {
-          model: `${savedModel.provider}/${savedModel.id}`,
-        }),
-      );
-      return false;
-    }
-  }
 
   const res = await rpcRequest({ type: "switch_session", sessionPath: path });
   if (!res.success) return false;
@@ -4236,8 +4190,75 @@ async function performSwitchSession(path: string): Promise<boolean> {
   els.thread.textContent = "";
   // Refresh get_state after the switch. pi already restored the saved model.
   await refreshSessions(true);
+  // A model removed from models.json cannot be restored by pi: the switch must
+  // still happen, falling back to the default model of new sessions.
+  if (savedModel) await fallbackResumeModel(savedModel);
   updateDocumentTitle();
   return true;
+}
+
+/** Default model of new sessions from the pi settings (host-side file). */
+async function readDefaultModelFromSettings(): Promise<
+  { provider: string; id: string } | undefined
+> {
+  const res = await ideRequest({ type: "getSettings", key: "defaultModel" });
+  const data = res?.ok ? (res.data as PiSettingsResult | undefined) : undefined;
+  const value = data?.settings?.find((setting) => setting.key === "defaultModel")
+    ?.value as Partial<PiModelSettingValue> | undefined;
+  return typeof value?.provider === "string" && typeof value.id === "string"
+    ? { provider: value.provider, id: value.id }
+    : undefined;
+}
+
+/** The session model no longer exists: apply the default model instead of
+ *  refusing the switch, and report the fallback in the chat. */
+async function fallbackResumeModel(savedModel: {
+  provider: string;
+  id: string;
+}): Promise<void> {
+  const availableRes = await rpcRequest(rpc.getAvailableModels()).catch(() => null);
+  const models =
+    (availableRes?.success
+      ? (
+          availableRes.data as
+            | {
+                models?: Array<{
+                  provider: string;
+                  id: string;
+                  name?: string;
+                  input?: string[];
+                }>;
+              }
+            | undefined
+        )?.models
+      : undefined) ?? [];
+  if (models.some((m) => m.provider === savedModel.provider && m.id === savedModel.id)) {
+    return; // still available: nothing to do
+  }
+  const target = await readDefaultModelFromSettings();
+  const usable = target
+    ? models.find((m) => m.provider === target.provider && m.id === target.id)
+    : undefined;
+  if (!usable) {
+    addSystemBox("error", t("modelFallbackUnavailable"));
+    return;
+  }
+  const r = await rpcRequest(rpc.setModel(usable.provider, usable.id));
+  if (!r.success) {
+    addSystemBox("error", t("modelFallbackUnavailable"));
+    return;
+  }
+  currentModel = usable;
+  modelSupportsVision = Array.isArray(usable.input) && usable.input.includes("image");
+  modelInfoText = [usable.provider, usable.name ?? usable.id].filter(Boolean).join(" · ");
+  renderModelInfo();
+  renderAttachments();
+  void fetchSessionStats();
+  void fetchBalance();
+  addSystemBox(
+    "warn",
+    tpl(t("modelFallback"), { model: `${usable.provider}/${usable.id}` }),
+  );
 }
 
 function switchSession(path: string): void {
@@ -7177,6 +7198,12 @@ function renderRpcEvent(evt: RpcEvent): void {
     renderNativeQueues(steeringAttachments.update(steering), followUp);
     return;
   }
+  // pi clamps the thinking level to the active model's supported levels (a
+  // model switch included): mirror the effective level, never the stale one
+  if (evt.type === "thinking_level_changed") {
+    applyThinkingLevel(evt.level);
+    return;
+  }
   if (evt.type === "turn_end") return;
   if (evt.type === "message_start") {
     const msg = (
@@ -7311,6 +7338,20 @@ function renderRpcEvent(evt: RpcEvent): void {
     const msg = String(err?.message ?? evt.error ?? "Extension error");
     const line = path ? `${path}: ${msg}` : msg;
     addSystemBox("error", line);
+    return;
+  }
+  // the session model no longer exists: the host relaunched pi on the default
+  // model of new sessions and reports it here (never silent)
+  if (evt.type === "model_fallback") {
+    const to = evt.to as { provider?: unknown; id?: unknown } | undefined;
+    const model =
+      typeof to?.provider === "string" && typeof to?.id === "string"
+        ? `${to.provider}/${to.id}`
+        : "";
+    addSystemBox(
+      "warn",
+      model ? tpl(t("modelFallback"), { model }) : t("modelFallbackDefault"),
+    );
     return;
   }
   // raw pi stderr lines (terminal parity): forwarded by the host/bridge.
@@ -8828,7 +8869,6 @@ let followUpMode: "one-at-a-time" | "all" = "one-at-a-time";
 let autoCompactionEnabled = true;
 let thinkingLevel = "";
 let currentModel: { provider?: string; name?: string; id?: string } | null = null;
-let blockedResumeModel: string | null = null;
 
 function updateSendButton(): void {
   // Session loading is a full interaction lock, including keyboard input
@@ -9166,13 +9206,13 @@ async function openModelPopover(): Promise<void> {
           void rpcRequest(rpc.setModel(m.provider ?? "", m.id)).then((r) => {
             if (r.success) {
               currentModel = m;
-              blockedResumeModel = null;
               modelSupportsVision = Array.isArray(m.input) && m.input.includes("image");
               modelInfoText = [m.provider, m.name ?? m.id].filter(Boolean).join(" · ");
               renderModelInfo();
               renderAttachments(); // the chips update thumbnail ↔ file icon
               void fetchSessionStats(); // context window of the new model
               void fetchBalance(); // balance of the new provider
+              void syncThinkingLevelWithModel(); // clamp to the new model's levels
             }
           });
         });
@@ -9198,6 +9238,29 @@ async function openModelPopover(): Promise<void> {
   });
   // immediate focus on the search field (if the popover opened)
   els.btnModel.querySelector<HTMLInputElement>(".pop-search")?.focus();
+}
+
+/** Mirrors the thinking level pi actually applied (pi clamps it to the levels
+ *  supported by the active model on every model switch). */
+function applyThinkingLevel(level: unknown): void {
+  thinkingLevel = typeof level === "string" ? level : "";
+  renderThinkingInfo();
+}
+
+/** Safety net after a model switch: pi emits `thinking_level_changed` when the
+ *  clamped level differs, and this keeps the UI correct even without it. */
+async function syncThinkingLevelWithModel(): Promise<void> {
+  const res = await rpcRequest(rpc.getAvailableThinkingLevels()).catch(() => null);
+  const levels = (res?.data as { levels?: string[] } | undefined)?.levels;
+  if (!Array.isArray(levels)) return;
+  const next = clampThinkingLevel(thinkingLevel, levels);
+  if (next === thinkingLevel) return;
+  if (!next) {
+    applyThinkingLevel("");
+    return;
+  }
+  const r = await rpcRequest(rpc.setThinkingLevel(next)).catch(() => null);
+  if (r?.success) applyThinkingLevel(next);
 }
 
 async function openThinkingPopover(): Promise<void> {
@@ -9906,10 +9969,6 @@ async function sendOrStop(): Promise<void> {
       appendSystemBox("warn", t("extensionCommandsUnavailable"));
       return;
     }
-  }
-  if (blockedResumeModel) {
-    addStatusLine(tpl(t("resumeModelUnavailable"), { model: blockedResumeModel }));
-    return;
   }
   // Extension commands always go through prompt so pi can execute them
   // immediately. Every other message submitted while busy is handed to pi's

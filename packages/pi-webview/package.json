@@ -1,6 +1,6 @@
 {
   "name": "@magiusche/pi-webview",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "WebView UI for the pi coding agent: standalone, Chrome Side Panel and IDE companions",
   "type": "module",
   "license": "MIT",

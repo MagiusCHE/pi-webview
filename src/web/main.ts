@@ -7204,7 +7204,12 @@ function renderRpcEvent(evt: RpcEvent): void {
     applyThinkingLevel(evt.level);
     return;
   }
-  if (evt.type === "turn_end") return;
+  if (evt.type === "turn_end") {
+    // The context gauge follows every model response, not only the end of the
+    // whole run: a long tool loop kept it stale until agent_settled.
+    void fetchSessionStats();
+    return;
+  }
   if (evt.type === "message_start") {
     const msg = (
       evt as {

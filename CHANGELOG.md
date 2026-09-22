@@ -4,6 +4,8 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+- Fixed the context gauge staying stale during a long agent run: it now refreshes after every model response instead of only when the whole run settles.
+
 ## [0.6.3] - 2026-09-22
 
 - Fixed the startup loop when the session's saved provider or model no longer exists: pi no longer retries the same broken launch, resuming or switching to that session falls back once to the default model of new sessions instead of being refused, the fallback is reported in the chat and the interface stays usable when even the default is broken.

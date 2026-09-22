@@ -29,3 +29,32 @@ test("locale: isLocaleId e currentLocale", () => {
   assert.equal(isLocaleId(null), false);
   assert.ok(currentLocale === "it" || currentLocale === "en");
 });
+
+// A multi-word label left identical in both languages is a missing
+// translation, not a style choice ("Agentic thinking" shipped untranslated in
+// the Italian UI). Only language-neutral values are allowed to match.
+const LANGUAGE_NEUTRAL_LABELS = new Set([
+  "autoCompactAt", // technical wording
+  "demoToolCommand", // shell command
+  "updateVersionRange", // version placeholder
+]);
+
+test("locale: nessuna etichetta multi-parola resta in inglese nella UI italiana", () => {
+  const untranslated = Object.keys(LOCALES.it.ui).filter((key) => {
+    const value = LOCALES.it.ui[key];
+    const english = LOCALES.en.ui[key];
+    return (
+      typeof value === "string" &&
+      typeof english === "string" &&
+      value === english &&
+      value.length >= 12 &&
+      /\s/.test(value) &&
+      !LANGUAGE_NEUTRAL_LABELS.has(key)
+    );
+  });
+  assert.deepEqual(
+    untranslated,
+    [],
+    `etichette non tradotte in it.json: ${untranslated.join(", ")}`,
+  );
+});

@@ -4,10 +4,9 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+- Localized the Agentic thinking block in Italian: the block label ("Ragionamento agentico") and the counter chips (pensieri, letture, scritture, strumenti) were still English.
 - Fixed the first run without any configured provider: the webview now shows pi's "no models available" guidance (terminal `/login`, providers/models documentation) instead of an empty model picker and an unexplained `unknown` model.
-
 - Fixed the VS Code companion check on Windows: the GUI `Code.exe` was used as if it were the CLI ("bad option: --list-extensions"), the `code.cmd` wrapper is now preferred and an unusable CLI falls back to the direct vsix install.
-
 - Fixed the context gauge staying stale during a long agent run: it now refreshes after every model response instead of only when the whole run settles.
 
 ## [0.6.3] - 2026-09-22

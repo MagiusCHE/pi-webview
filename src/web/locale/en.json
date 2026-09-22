@@ -63,6 +63,7 @@
     "modelFallback": "The model saved for this session no longer exists: switching to {model}.",
     "modelFallbackDefault": "The model saved for this session no longer exists: switching to the default model.",
     "modelFallbackUnavailable": "No valid model is available: pick one from the settings and try again.",
+    "noModelsAvailable": "No models available: run /login from a terminal to sign in to a provider (OAuth or API key), then reload. See pi's providers.md and models.md documentation.",
     "bridgeUrlPlaceholder": "ws://127.0.0.1:PORT?token=…",
     "cancel": "Cancel",
     "changeWorkspaceAsk": "What should happen to the current session?",

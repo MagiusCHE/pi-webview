@@ -176,6 +176,21 @@ function codeCliKnownPaths(): string[] {
   ];
 }
 
+/**
+ * Windows CLI selection for `where code` results. The CLI wrapper is
+ * `code.cmd`/`code.bat`; the extension-less `code` is a bash script and the
+ * GUI `Code.exe` from the install root rejects every CLI flag ("bad option:
+ * --list-extensions"), so an .exe is accepted only from a bin directory.
+ */
+export function pickWindowsCodeCli(candidates: readonly string[]): string | null {
+  const list = candidates.map((entry) => entry.trim()).filter(Boolean);
+  const wrapper = list.find((entry) => /\.(cmd|bat)$/i.test(entry));
+  if (wrapper) return wrapper;
+  return (
+    list.find((entry) => /\.exe$/i.test(entry) && /[\\/]bin[\\/]/i.test(entry)) ?? null
+  );
+}
+
 export async function resolveCodeCli(): Promise<string | null> {
   try {
     const probe = process.platform === "win32" ? "where" : "which";
@@ -183,13 +198,13 @@ export async function resolveCodeCli(): Promise<string | null> {
       timeout: 5_000,
       windowsHide: true,
     });
-    for (const line of stdout.split(/\r?\n/)) {
-      const p = line.trim();
-      if (!p) continue;
-      if (process.platform === "win32") {
-        if (/\.(cmd|exe|bat)$/i.test(p)) return p;
-      } else if (existsSync(p)) {
-        return p;
+    if (process.platform === "win32") {
+      const picked = pickWindowsCodeCli(stdout.split(/\r?\n/));
+      if (picked) return picked;
+    } else {
+      for (const line of stdout.split(/\r?\n/)) {
+        const p = line.trim();
+        if (p && existsSync(p)) return p;
       }
     }
   } catch {
@@ -853,8 +868,22 @@ export async function ensureCompanions(
     try {
       step("VS Code: checking code CLI…");
       const cli = await resolveCodeCli();
-      if (cli) {
-        const installed = await installedCompanionVersion(cli);
+      let installed: string | null = null;
+      let cliUsable = cli !== null;
+      if (cli && cliUsable) {
+        try {
+          installed = await installedCompanionVersion(cli);
+        } catch (err) {
+          // A resolved path that rejects CLI flags (Windows GUI Code.exe) must
+          // not surface as an error: use the direct extraction instead.
+          cliUsable = false;
+          step(
+            `VS Code: code CLI unusable (${describeExecError(err)}) — switching to direct install`,
+            true,
+          );
+        }
+      }
+      if (cliUsable && cli) {
         if (!force && installed !== null && installed === vsixVersion) {
           clearReloadSignal(); // already current: no pending signal
           step(`VS Code: companion already current (${vsixVersion})`);
@@ -879,7 +908,7 @@ export async function ensureCompanions(
           });
         }
       } else {
-        // no `code` CLI anywhere → last resort: direct VSIX extraction into
+        // no usable `code` CLI → last resort: direct VSIX extraction into
         // every recognized desktop/server extensions directory
         step("VS Code: no code CLI — checking direct-install destinations");
         notes.push(

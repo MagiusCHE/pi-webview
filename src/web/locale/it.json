@@ -62,6 +62,7 @@
     "bridgeUnreachable": "Il bridge piw non è raggiungibile: verifica che sia attivo e che l’URL della pagina contenga il token giusto. Nuovo tentativo automatico…",
     "modelFallback": "Il modello salvato per questa sessione non esiste più: passo a {model}.",
     "modelFallbackDefault": "Il modello salvato per questa sessione non esiste più: passo al modello predefinito.",
+    "noModelsAvailable": "Nessun modello disponibile: esegui /login da terminale per accedere a un provider (OAuth o API key), poi ricarica. Vedi la documentazione di pi (providers.md, models.md).",
     "bridgeUrlPlaceholder": "ws://127.0.0.1:PORT?token=…",
     "cancel": "Annulla",
     "changeWorkspaceAsk": "Cosa vuoi fare con la sessione attuale?",

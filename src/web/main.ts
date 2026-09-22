@@ -7312,6 +7312,8 @@ function renderRpcEvent(evt: RpcEvent): void {
     // the fresh process reloaded the project resources: the trust chip shows
     // the status it was launched with and the pending "!" disappears
     void refreshTrust();
+    // a terminal /login (or a new provider) changes the model list
+    void warnWhenNoModelsAvailable();
     updateSendButton();
     // A unified Apply may have changed launch flags; keep its single dirty
     // state aligned while preserving edits staged during unrelated restarts.
@@ -8874,6 +8876,7 @@ let followUpMode: "one-at-a-time" | "all" = "one-at-a-time";
 let autoCompactionEnabled = true;
 let thinkingLevel = "";
 let currentModel: { provider?: string; name?: string; id?: string } | null = null;
+let noModelsWarned = false;
 
 function updateSendButton(): void {
   // Session loading is a full interaction lock, including keyboard input
@@ -9168,6 +9171,24 @@ function openPopover(anchor: HTMLElement, build: (menu: HTMLElement) => void): v
   window.addEventListener("resize", onResize);
 }
 
+/**
+ * First run without any provider: the TUI prints "No models available. Use
+ * /login …", but that warning never reaches RPC mode. The webview must show
+ * the same guidance instead of a silent "unknown" model.
+ */
+async function warnWhenNoModelsAvailable(): Promise<void> {
+  const res = await rpcRequest(rpc.getAvailableModels()).catch(() => null);
+  if (!res?.success) return; // pi not reachable: no false warning
+  const models = (res.data as { models?: unknown[] } | undefined)?.models ?? [];
+  if (models.length > 0) {
+    noModelsWarned = false;
+    return;
+  }
+  if (noModelsWarned) return;
+  noModelsWarned = true;
+  addSystemBox("warn", t("noModelsAvailable"));
+}
+
 async function openModelPopover(): Promise<void> {
   const res = await rpcRequest(rpc.getAvailableModels()).catch(() => null);
   const models =
@@ -9225,7 +9246,8 @@ async function openModelPopover(): Promise<void> {
       if (filtered.length === 0) {
         const empty = document.createElement("div");
         empty.className = "pop-empty";
-        empty.textContent = "—";
+        // no provider at all (first run) vs no search result
+        empty.textContent = models.length === 0 ? t("noModelsAvailable") : "—";
         list.appendChild(empty);
       }
     };
@@ -11533,6 +11555,10 @@ async function boot(): Promise<void> {
     // only once a transport exists. Report the failure and keep retrying.
     appendSystemBox("error", t("bridgeUnreachable"));
     reconnect.start();
+  } else {
+    // pi is reachable: on a first run with no provider configured, explain
+    // how to authenticate instead of leaving the model picker empty
+    void warnWhenNoModelsAvailable();
   }
 }
 

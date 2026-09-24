@@ -212,6 +212,14 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   tema sui form nativi (dropdown che rispettano il tema). Ogni cambio,
   creazione, fork o cancellazione sessione attiva subito il loading overlay e
   blocca mouse, composer e shortcut fino al caricamento della nuova cronologia
+- **Chip costo/saldo del provider**: il saldo è risolto dall'**host dell'API**
+  del provider, mai da un id provider hardcoded — la webview manda il `baseUrl`
+  del modello corrente (da `get_available_models`, con fallback `models.json`),
+  gli host risolvono il reader del payload (`balance.ts`, mirror C#
+  `BalanceClient.cs`). Un provider custom che punta allo stesso host (es. una
+  seconda chiave DeepSeek) si comporta come quello integrato. Il costo sessione
+  resta visibile da solo (`cost-only`) quando il provider non espone un saldo,
+  con 3-4 decimali sotto il centesimo
 - **Pulsante reload**: riavvia il processo pi (IdeRequest `restartPi`,
   gestito dai 3 host con la stessa meccanica dell'apply dei CLI flags:
   `connection_closed(reason restart)` + `pi_restarted` → re-init trasparente,

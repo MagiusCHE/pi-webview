@@ -6023,13 +6023,51 @@ function renderContextGauge(): void {
   updateStatsTitle();
 }
 
-// real provider balance (deepseek/openrouter): via companion/bridge
-// (reads the key from auth.json, the webview only gets { currency, balance })
+// API base URL of the current model, from pi's own catalog (get_available_models
+// returns the complete model definitions, baseUrl included). The balance
+// endpoint is derived from it, so nothing is keyed on a provider name: any
+// provider pointing at a supported API works, custom ids included. Cached per
+// provider/id; the empty string marks a model without baseUrl so the RPC is not
+// repeated for it.
+const modelBaseUrls = new Map<string, string>();
+
+function modelKey(provider: string, id: string): string {
+  return `${provider}\u0000${id}`;
+}
+
+async function modelBaseUrl(): Promise<string | undefined> {
+  const provider = currentModel?.provider;
+  const id = currentModel?.id;
+  if (!provider || !id) return undefined;
+  const key = modelKey(provider, id);
+  if (!modelBaseUrls.has(key)) {
+    const res = await rpcRequest(rpc.getAvailableModels()).catch(() => null);
+    const models =
+      (res?.success
+        ? (
+            res.data as
+              | {
+                  models?: Array<{ provider?: string; id?: string; baseUrl?: string }>;
+                }
+              | undefined
+          )?.models
+        : undefined) ?? [];
+    for (const m of models) {
+      if (m.provider && m.id)
+        modelBaseUrls.set(modelKey(m.provider, m.id), m.baseUrl ?? "");
+    }
+  }
+  return modelBaseUrls.get(key) || undefined;
+}
+
+// real provider balance: via companion/bridge, which reads the key from
+// auth.json and calls the balance endpoint of the provider's API
 async function fetchBalance(): Promise<void> {
   if (!currentModel?.provider) return;
   const res = await ideRequest({
     type: "getBalance",
     provider: currentModel.provider,
+    baseUrl: await modelBaseUrl(),
   });
   const b = res?.ok ? (res.data as { currency?: string; balance?: number } | null) : null;
   if (b && typeof b.balance === "number" && b.currency) {
@@ -7264,6 +7302,10 @@ function renderRpcEvent(evt: RpcEvent): void {
     // trust the response alone: it arrives after the event)
     const errMsg = evt.errorMessage as string | undefined;
     finishCompaction(!!errMsg, errMsg);
+    // pi's exact message (e.g. "Compaction failed: Nothing to compact
+    // (session too small)") must be visible in the chat, not only in the
+    // block tooltip
+    if (errMsg) addSystemBox("error", errMsg);
     // A successful continuation emits turn_start immediately before its next
     // provider request; do not guess that boundary from compaction completion.
   } else if (evt.type === "connection_closed") {
@@ -8926,10 +8968,20 @@ function balanceTone(balance: number): "ok" | "warn" | "low" {
   return "low"; // almost exhausted → red
 }
 
+// a sub-cent session must not read as "$0.00": extra precision below one cent
+function formatCost(cost: number): string {
+  if (cost >= 0.01) return cost.toFixed(2);
+  if (cost >= 0.001) return cost.toFixed(3);
+  return cost.toFixed(4);
+}
+
 function renderBalanceChip(): void {
   const chip = els.balanceChip;
   chip.textContent = "";
-  if (!creditText) {
+  const hasCost = sessionCost > 0;
+  // providers without a balance endpoint (or with an unreachable one) have no
+  // balance: the session cost still has to be visible on its own
+  if (!creditText && !hasCost) {
     chip.hidden = true;
     chip.title = "";
     chip.className = "balance-chip";
@@ -8937,22 +8989,31 @@ function renderBalanceChip(): void {
   }
   chip.hidden = false;
   // session cost / balance: the COLOR lives ONLY on the balance, cost and
-  // slash stay muted (and disappear together under 600px)
-  if (sessionCost > 0) {
+  // slash stay muted (and disappear together under 600px; a cost-only chip
+  // keeps the cost, since there is no balance to fall back on)
+  if (hasCost) {
     const cost = document.createElement("span");
     cost.className = "chip-cost";
-    cost.textContent = `${creditCurrency}${sessionCost.toFixed(2)}`;
-    const slash = document.createElement("span");
-    slash.className = "chip-slash";
-    slash.textContent = "/";
-    chip.append(cost, slash);
+    cost.textContent = `${creditCurrency}${formatCost(sessionCost)}`;
+    chip.appendChild(cost);
+    if (creditText) {
+      const slash = document.createElement("span");
+      slash.className = "chip-slash";
+      slash.textContent = "/";
+      chip.appendChild(slash);
+    }
   }
-  const bal = document.createElement("span");
-  bal.className = "chip-balance";
-  bal.textContent = creditText;
-  chip.appendChild(bal);
-  chip.title = t("balanceTitle");
-  chip.className = `balance-chip tone-${balanceTone(creditBalance)}`;
+  if (creditText) {
+    const bal = document.createElement("span");
+    bal.className = "chip-balance";
+    bal.textContent = creditText;
+    chip.appendChild(bal);
+    chip.title = t("balanceTitle");
+    chip.className = `balance-chip tone-${balanceTone(creditBalance)}`;
+    return;
+  }
+  chip.title = t("sessionCostTitle");
+  chip.className = "balance-chip cost-only";
 }
 
 // numeric balance separated from the formatted text (for the color threshold)

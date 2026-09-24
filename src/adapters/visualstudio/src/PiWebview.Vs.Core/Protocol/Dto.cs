@@ -71,6 +71,11 @@ public sealed class IdeRequest
     [System.Text.Json.Serialization.JsonPropertyName("provider")]
     public string? Provider { get; set; }
 
+    // getBalance: API base URL of the selected model (the balance endpoint is
+    // derived from the host, so no provider name is hardcoded)
+    [System.Text.Json.Serialization.JsonPropertyName("baseUrl")]
+    public string? BaseUrl { get; set; }
+
     [System.Text.Json.Serialization.JsonPropertyName("patch")]
     public Dictionary<string, JsonElement>? Patch { get; set; }
 

@@ -767,7 +767,7 @@ function main(): void {
         return;
       }
       if (req.type === "getBalance") {
-        void fetchProviderBalance(req.provider).then((b) =>
+        void fetchProviderBalance(req.provider, req.baseUrl).then((b) =>
           respond(req.id ?? "", { ok: true, data: b ?? null }),
         );
         return;

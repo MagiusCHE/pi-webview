@@ -1975,6 +1975,9 @@ footer {
   .chip-slash {
     display: none; /* balance: single cost and slash gone, balance remains */
   }
+  .balance-chip.cost-only .chip-cost {
+    display: inline; /* cost-only chip: no balance to fall back on, keep the cost */
+  }
 }
 /* very narrow toolbar (<340): thinking value and balance also go away */
 @container (max-width: 340px) {

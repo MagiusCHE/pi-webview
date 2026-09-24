@@ -653,7 +653,7 @@ export abstract class PiWebviewHost {
         return;
       }
       case "getBalance":
-        void fetchProviderBalance(req.provider).then((b) =>
+        void fetchProviderBalance(req.provider, req.baseUrl).then((b) =>
           this.respond(req.id, true, b ?? null),
         );
         return;

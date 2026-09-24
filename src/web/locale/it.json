@@ -192,6 +192,7 @@
     "selection": "selezione",
     "selectionCleared": "selezione rimossa",
     "send": "Invia",
+    "sessionCostTitle": "Costo cumulato di questa sessione, calcolato sui consumi reali dei token (il provider non espone un saldo)",
     "sessionTitle": "Sessione attuale",
     "sessions": "Sessioni",
     "settings": "Impostazioni",

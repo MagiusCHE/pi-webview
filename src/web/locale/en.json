@@ -193,6 +193,7 @@
     "selection": "selection",
     "selectionCleared": "selection removed",
     "send": "Send",
+    "sessionCostTitle": "Cumulated cost of this session, computed from real token usage (the provider exposes no balance)",
     "sessionTitle": "Current session",
     "sessions": "Sessions",
     "settings": "Settings",

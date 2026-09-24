@@ -146,7 +146,7 @@ export type IdeRequest =
   | { type: "setConfig"; patch: Partial<UserConfig>; id?: string }
   | { type: "storeSession"; path: string; id?: string }
   | { type: "openNewChat"; id?: string }
-  | { type: "getBalance"; provider: string; id?: string }
+  | { type: "getBalance"; provider: string; id?: string; baseUrl?: string }
   | { type: "listSessions"; workspace?: string; id?: string }
   | { type: "getWorkspace"; id?: string }
   | { type: "getVersion"; id?: string }

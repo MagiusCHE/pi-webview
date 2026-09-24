@@ -4,6 +4,10 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+- Provider balance now follows the API host of the provider instead of a hardcoded provider id: any provider pointing at the same API (for example a second DeepSeek key under a custom provider id) reports cost and balance like the built-in one, and the session cost stays visible on its own when a provider exposes no balance.
+- Sub-cent session costs are shown with extra precision instead of rounding to `$0.00`, and the OpenRouter balance is derived from `total_credits - total_usage` when the endpoint no longer returns `remaining_credits`.
+- Fixed a failed compaction hiding pi's message: the exact error (for example "Compaction failed: Nothing to compact (session too small)") is now shown in the chat instead of only in the block tooltip.
+
 ## [0.6.4] - 2026-09-22
 
 - Localized the Agentic thinking block in Italian: the block label ("Ragionamento agentico") and the counter chips (pensieri, letture, scritture, strumenti) were still English.

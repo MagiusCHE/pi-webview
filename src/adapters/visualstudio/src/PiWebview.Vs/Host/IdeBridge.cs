@@ -48,7 +48,7 @@ public static class IdeBridge
                     return;
                 case "getBalance":
                     if (req.Provider is null) { host.PostIdeResponse(Fail(req, "getBalance: missing provider")); return; }
-                    host.PostIdeResponse(Ok(req, await BalanceClient.FetchProviderBalanceAsync(req.Provider).ConfigureAwait(false)));
+                    host.PostIdeResponse(Ok(req, await BalanceClient.FetchProviderBalanceAsync(req.Provider, req.BaseUrl).ConfigureAwait(false)));
                     return;
                 case "getCompactionSettings":
                     host.PostIdeResponse(Ok(req, CompactionSettingsReader.Read()));

@@ -8,7 +8,6 @@
 
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import { spawn } from "node:child_process";
 import {
   appendFileSync,
   createReadStream,
@@ -65,6 +64,7 @@ import { fetchProviderBalance } from "./balance.ts";
 import { revealFileInSystemManager } from "./open-file.ts";
 import { clearLock } from "./lock.ts";
 import { normalizeLaunchCwd } from "./launch-context.ts";
+import { openBrowser } from "./open-browser.ts";
 import { BrowserHandoffRegistry } from "./browser-handoff.ts";
 import {
   browserDefaultWorkspace,
@@ -1319,17 +1319,6 @@ function main(): void {
     );
     shutdown(1);
   });
-}
-
-function openBrowser(url: string): void {
-  const platform = process.platform;
-  const cmd: [string, string[]] =
-    platform === "darwin"
-      ? ["open", [url]]
-      : platform === "win32"
-        ? ["cmd", ["/c", "start", "", url]]
-        : ["xdg-open", [url]];
-  spawn(cmd[0], cmd[1], { detached: true, stdio: "ignore" }).unref();
 }
 
 main();

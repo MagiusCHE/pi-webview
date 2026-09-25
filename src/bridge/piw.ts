@@ -31,6 +31,7 @@ import { resolvePi } from "./spawn.ts";
 import { readLock, writeLock, clearLock, pidAlive, healthCheck } from "./lock.ts";
 import { getSessionInfo, listSessions } from "./sessions.ts";
 import { resolveLaunchCwd } from "./launch-context.ts";
+import { openBrowser } from "./open-browser.ts";
 import {
   ALL_IPV4_INTERFACES,
   LOOPBACK_IP,
@@ -245,17 +246,6 @@ function printRemoteAccess(
   for (const host of hosts) {
     console.log(`piw: accesso remoto: ${remotePageUrl(host, port, intent, token)}`);
   }
-}
-
-function openBrowser(url: string): void {
-  const platform = process.platform;
-  const cmd: [string, string[]] =
-    platform === "darwin"
-      ? ["open", [url]]
-      : platform === "win32"
-        ? ["cmd", ["/c", "start", "", url]]
-        : ["xdg-open", [url]];
-  spawn(cmd[0], cmd[1], { detached: true, stdio: "ignore" }).unref();
 }
 
 async function main(): Promise<void> {

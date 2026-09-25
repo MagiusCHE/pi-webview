@@ -4,6 +4,10 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+- Fixed the session picker appearing to do nothing on large sessions: switching and history loading now wait up to 90 seconds instead of the 10 second RPC timeout, so a session that takes longer to reload no longer drops back to the new-session screen mid-load.
+- Fixed a failed session switch being invisible: an error from pi, a cancelled switch or a timed-out request is now reported in the chat instead of leaving the interface on the previous screen, the "session resumed" notice is only shown after a successful load and the new-session banner no longer appears over an unloaded session.
+- Fixed the Windows browser launch dropping the launch intent: `piw` now passes the URL to `cmd start` quoted, so the `&launch=…` parameter survives and a reused bridge opens the new session in the folder where `piw` was invoked.
+
 ## [0.6.5] - 2026-09-24
 
 - Provider balance now follows the API host of the provider instead of a hardcoded provider id: any provider pointing at the same API (for example a second DeepSeek key under a custom provider id) reports cost and balance like the built-in one, and the session cost stays visible on its own when a provider exposes no balance.

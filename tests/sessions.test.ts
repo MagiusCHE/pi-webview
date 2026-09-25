@@ -498,6 +498,24 @@ test("listSessions: workspace filter with a windows path", () => {
   }
 });
 
+test("listSessions: Windows project paths with # and dots remain local", () => {
+  const dir = mkdtempSync(join(tmpdir(), "piw-sess-win-special-"));
+  try {
+    const cwd = "C:\\work\\c#\\demo.1.2\\source\\app";
+    const projDir = join(dir, encodeProjectFolder(cwd));
+    mkdirSync(projDir, { recursive: true });
+    writeFileSync(join(projDir, "sess.jsonl"), header("id-special", cwd) + "\n");
+
+    assert.equal(
+      listSessions(dir, "c:/WORK/c#/demo.1.2/source/app")[0]?.id,
+      "id-special",
+    );
+    assert.equal(listSessions(dir).length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("listSessions: windows workspace matching ignores case and separator style", () => {
   const dir = mkdtempSync(join(tmpdir(), "piw-sess-win-case-"));
   try {

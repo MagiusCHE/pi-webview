@@ -71,7 +71,12 @@ import {
 } from "../ide/speech-config.ts";
 import { currentLocale, setLocale, t, tpl, isLocaleId, type LocaleId } from "./i18n.ts";
 import { runtime } from "./environment.ts";
-import { sessionPickStrategy } from "./session-routing.ts";
+import {
+  SESSION_HISTORY_TIMEOUT_MS,
+  SESSION_SWITCH_TIMEOUT_MS,
+  sessionPickStrategy,
+  sessionSwitchOutcome,
+} from "./session-routing.ts";
 import {
   browserToolPermissionGranted,
   browserToolPermissionOrigin,
@@ -589,10 +594,10 @@ const loadingLogs: { level: "error" | "warn" | "info"; text: string }[] = [];
 // active session history is ready.
 const pendingReleaseReminderCards: string[] = [];
 const LOADING_QUIET_MS = 1500; // logs silence that ends the loading
-const LOADING_MAX_MS = 30000; // never load longer than this
+const LOADING_MAX_MS = 30000; // default safety net, extended for large sessions
 const LOADING_LOG_CAP = 200; // lines kept in the box
 
-function beginSessionLoading(): void {
+function beginSessionLoading(maxWaitMs = LOADING_MAX_MS): void {
   sessionLoading = true;
   updateSendButton();
   loadingAgentActive = false;
@@ -606,11 +611,11 @@ function beginSessionLoading(): void {
   // has been rendered (loadHistory arms it) — get_state retries at boot can
   // take much longer than the quiet window
   clearTimeout(loadingMaxTimer ?? undefined);
-  loadingMaxTimer = setTimeout(loadingMaxTick, LOADING_MAX_MS);
+  loadingMaxTimer = setTimeout(loadingMaxTick, maxWaitMs);
 }
 
-// Hard safety net: startup retries fit inside this window, but a broken
-// request chain must never leave the whole interface covered indefinitely.
+// Hard safety net: a broken request chain must never leave the whole
+// interface covered indefinitely (long session requests extend the window).
 function loadingMaxTick(): void {
   if (sessionLoading) endSessionLoading();
 }
@@ -3290,11 +3295,11 @@ let currentSessionPath: string | null = null;
 let switchingSession = false;
 
 /** Lock the complete UI before starting any session-changing operation. */
-function beginSessionTransition(): boolean {
+function beginSessionTransition(maxWaitMs = LOADING_MAX_MS): boolean {
   if (switchingSession) return false;
   switchingSession = true;
   els.sessionMenu.hidden = true;
-  beginSessionLoading();
+  beginSessionLoading(maxWaitMs);
   return true;
 }
 
@@ -3609,7 +3614,7 @@ function pollSessionTitle(attempts = 10, interval = 4000): void {
   }, interval);
 }
 
-async function refreshSessions(showResumeNotice = false): Promise<void> {
+async function refreshSessions(showResumeNotice = false): Promise<boolean> {
   // get_state can fail at startup (pi not ready yet in the webview):
   // retry until the process answers (short per-attempt timeout)
   for (let attempt = 0; attempt < 6; attempt++) {
@@ -3698,9 +3703,9 @@ async function refreshSessions(showResumeNotice = false): Promise<void> {
   await fetchThinkingSettings();
   syncThinkingChat();
   populateSessionMenu();
-  await loadHistory();
+  const historyLoaded = await loadHistory();
   updateSteerPlaceholder();
-  if (showResumeNotice && sessionHasMessages) {
+  if (showResumeNotice && historyLoaded && sessionHasMessages) {
     let info = currentSession();
     if (!info && currentSessionPath) {
       const infoRes = await ideRequest({
@@ -3712,29 +3717,56 @@ async function refreshSessions(showResumeNotice = false): Promise<void> {
     if (info) addSessionResumedStatus(info);
   }
   void fetchSlashCommands(); // extension commands for the palette (plan 0003)
+  return historyLoaded;
 }
 
-async function loadHistory(): Promise<void> {
+async function loadHistory(): Promise<boolean> {
   // a session switch/restart: no stale "waiting" state from the previous session
   disarmWaitingResponse();
+  // Large sessions can take longer to serialize over RPC. Keep the overlay up
+  // for the request instead of showing a blank conversation after 30 seconds.
+  if (sessionLoading) {
+    clearTimeout(loadingMaxTimer ?? undefined);
+    loadingMaxTimer = setTimeout(
+      loadingMaxTick,
+      SESSION_HISTORY_TIMEOUT_MS + LOADING_MAX_MS,
+    );
+  }
+  let loaded = false;
   try {
-    const res = await rpcRequest(rpc.getMessages());
+    const res = await rpcRequest(
+      rpc.getMessages(),
+      undefined,
+      SESSION_HISTORY_TIMEOUT_MS,
+    );
     const messages = (res.data as { messages?: unknown[] } | undefined)?.messages;
-    if (messages) {
-      // only the LAST historyLimit turns: the long history is
-      // truncated from the top (never the whole session)
-      renderHistory(messages.slice(-historyLimit));
-      seedMessageHistory(messages.slice(-historyLimit));
+    if (!res.success || !Array.isArray(messages)) {
+      throw new Error(
+        typeof res.error === "string" && res.error
+          ? res.error
+          : t("sessionSwitchUnknownError"),
+      );
     }
+    // only the LAST historyLimit turns: the long history is
+    // truncated from the top (never the whole session)
+    renderHistory(messages.slice(-historyLimit));
+    seedMessageHistory(messages.slice(-historyLimit));
     // welcome banner: only while the session has no real messages yet (new/
     // empty session) — checked on the DATA, not the DOM (loading logs are
     // flushed into the thread just below and would look like content)
-    sessionHasMessages = (messages ?? []).some((m) => {
+    sessionHasMessages = messages.some((m) => {
       const role = (m as { role?: string }).role;
       return role === "user" || role === "assistant" || role === "custom";
     });
-  } catch {
-    // no history available
+    loaded = true;
+  } catch (error) {
+    sessionHasMessages = false;
+    addSystemBox(
+      "error",
+      tpl(t("sessionHistoryFailed"), {
+        reason: error instanceof Error ? error.message : t("sessionSwitchUnknownError"),
+      }),
+    );
   }
   void fetchSessionStats(); // context gauge after every session change
   void fetchBalance(); // real provider balance (after currentModel is known)
@@ -3745,9 +3777,9 @@ async function loadHistory(): Promise<void> {
   loadingHistoryLoaded = true;
   flushLoadingLogs();
   if (sessionLoading) armLoadingQuiet();
-  // welcome banner only on empty sessions (checked inside); the header update
-  // button is refreshed on any session (resumed ones included)
-  void maybeShowStartupBanner();
+  // Only show the new-session banner if the history was actually loaded.
+  if (loaded) void maybeShowStartupBanner();
+  return loaded;
 }
 
 async function fetchThinkingSettings(): Promise<void> {
@@ -4174,27 +4206,54 @@ function persistSessionPath(): void {
   if (sessionSettingsNeedPersistence) persistCurrentSessionSettings();
 }
 
-async function performSwitchSession(path: string): Promise<boolean> {
-  let info = sessions.find((session) => session.path === path);
-  if (!info) {
-    const infoRes = await ideRequest({ type: "getSessionInfo", path });
-    if (infoRes?.ok) info = infoRes.data as SessionInfo;
-  }
-  const savedModel = info?.model;
+function reportSessionSwitchFailure(reason: unknown): void {
+  const detail =
+    typeof reason === "string" && reason
+      ? reason
+      : reason instanceof Error
+        ? reason.message
+        : t("sessionSwitchUnknownError");
+  addSystemBox("error", tpl(t("sessionSwitchFailed"), { reason: detail }));
+}
 
-  const res = await rpcRequest({ type: "switch_session", sessionPath: path });
-  if (!res.success) return false;
-  renderNativeQueues([], []);
-  currentSessionPath = path;
-  persistSessionPath();
-  els.thread.textContent = "";
-  // Refresh get_state after the switch. pi already restored the saved model.
-  await refreshSessions(true);
-  // A model removed from models.json cannot be restored by pi: the switch must
-  // still happen, falling back to the default model of new sessions.
-  if (savedModel) await fallbackResumeModel(savedModel);
-  updateDocumentTitle();
-  return true;
+async function performSwitchSession(path: string): Promise<boolean> {
+  try {
+    let info = sessions.find((session) => session.path === path);
+    if (!info) {
+      const infoRes = await ideRequest({ type: "getSessionInfo", path });
+      if (infoRes?.ok) info = infoRes.data as SessionInfo;
+    }
+    const savedModel = info?.model;
+
+    const res = await rpcRequest(
+      { type: "switch_session", sessionPath: path },
+      undefined,
+      SESSION_SWITCH_TIMEOUT_MS,
+    );
+    const outcome = sessionSwitchOutcome(res);
+    if (outcome === "cancelled") {
+      addSystemBox("warn", t("sessionSwitchCancelled"));
+      return false;
+    }
+    if (outcome === "failed") {
+      reportSessionSwitchFailure(res.error);
+      return false;
+    }
+    renderNativeQueues([], []);
+    currentSessionPath = path;
+    persistSessionPath();
+    els.thread.textContent = "";
+    // Refresh get_state after the switch. pi already restored the saved model.
+    if (!(await refreshSessions(true))) return false;
+    // A model removed from models.json cannot be restored by pi: the switch must
+    // still happen, falling back to the default model of new sessions.
+    if (savedModel) await fallbackResumeModel(savedModel);
+    updateDocumentTitle();
+    return true;
+  } catch (error) {
+    reportSessionSwitchFailure(error);
+    return false;
+  }
 }
 
 /** Default model of new sessions from the pi settings (host-side file). */
@@ -4262,13 +4321,16 @@ async function fallbackResumeModel(savedModel: {
 }
 
 function switchSession(path: string): void {
-  if (!path || path === currentSessionPath || !beginSessionTransition()) return;
+  if (
+    !path ||
+    path === currentSessionPath ||
+    !beginSessionTransition(SESSION_SWITCH_TIMEOUT_MS + LOADING_MAX_MS)
+  )
+    return;
   void (async () => {
     let historyLoaded = false;
     try {
       historyLoaded = await performSwitchSession(path);
-    } catch {
-      // switch failed: the current session stays
     } finally {
       finishSessionTransition(historyLoaded);
     }

@@ -185,8 +185,13 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   via `getConfig`/`setConfig`). Tutte le stringhe UI passano da `t()`
 - **Markdown**: risposte renderizzate con `marked` + `DOMPurify`
   (`src/web/markdown.ts`), streaming con re-render a rAF; blocchi codice
-  trasformati nel pattern `.code-block` con `Copia`. Il blocco pensiero è
-  SEMPRE prima del testo (slot dedicato nel DOM), loader + timer secondi
+  trasformati nel pattern `.code-block` con `Copia`. Anche il blocco pensiero
+  rende markdown (`renderThinkingBody`), ma in modo **pigro**: nessuna
+  formattazione se il blocco è chiuso, prima passata all'apertura, e durante
+  lo streaming si ridisegna solo il blocco visibile (`thinkingPaintDecision`
+  in `src/web/thinking-render.ts`). I blocchi pensiero consecutivi del provider
+  restano una card unica (l'accumulo ignora il `contentIndex`). Il blocco pensiero
+  è SEMPRE prima del testo (slot dedicato nel DOM), loader + timer secondi
   durante lo streaming, collassato per default (click per aprire)
 - **Agentic thinking**: raggruppa attività interne consecutive senza creare
   wrapper assistant vuoti. Testo visibile, `ask_user`, compaction e messaggi

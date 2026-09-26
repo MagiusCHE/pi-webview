@@ -1305,9 +1305,30 @@ header {
   color: var(--fg-tertiary);
   font-size: 12.5px;
   font-style: italic;
-  white-space: pre-wrap;
   word-break: break-word;
   padding: 1px 0 4px;
+}
+/* The thought body holds rendered markdown (real blocks, line breaks via <br>),
+   so the raw text no longer needs pre-wrap; blocks stay compact and code keeps
+   an upright, readable face inside the italic thought. */
+.thinking-content > :first-child {
+  margin-top: 0;
+}
+.thinking-content > :last-child {
+  margin-bottom: 0;
+}
+.thinking-content p,
+.thinking-content ul,
+.thinking-content ol {
+  margin: 0 0 0.5em;
+}
+.thinking-content ul,
+.thinking-content ol {
+  padding-left: 1.2em;
+}
+.thinking-content code,
+.thinking-content .code-block pre {
+  font-style: normal;
 }
 
 .spinner {

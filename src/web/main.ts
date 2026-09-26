@@ -77,6 +77,7 @@ import {
   sessionPickStrategy,
   sessionSwitchOutcome,
 } from "./session-routing.ts";
+import { thinkingPaintDecision } from "./thinking-render.ts";
 import {
   browserToolPermissionGranted,
   browserToolPermissionOrigin,
@@ -4354,7 +4355,11 @@ let thinkingStartedAt = 0;
 let thinkingTimer: number | null = null;
 let thinkingRenderFrame: number | null = null;
 let thinkingRenderedLength = 0;
-let thinkingTextNode: Text | null = null;
+// Raw text of every thinking body (live and resumed ones). The markdown is
+// rendered from this source only while the block is open: a collapsed thought
+// is never formatted, and never re-parsed, while its reasoning streams.
+const thinkingBodySources = new WeakMap<HTMLElement, () => string>();
+const thinkingBodyPainted = new WeakMap<HTMLElement, string>();
 // the STOP button lives in the STATUS BAR (right of the context):
 // red, visible only with an active turn, clickable independently
 function updateThinkingStopBtn(visible: boolean): void {
@@ -5201,7 +5206,6 @@ function prepareAssistantStream(): void {
   thinkingStartedAt = 0;
   thinkingAccum = "";
   thinkingRenderedLength = 0;
-  thinkingTextNode = null;
   thinkingContentRendered = false;
   toolsEl = null;
   toolsPre = null;
@@ -5281,6 +5285,8 @@ function thinkingBodies(): HTMLElement[] {
 
 function setThinkingBodyExpanded(body: HTMLElement, expanded: boolean): void {
   body.hidden = !expanded;
+  // The block became visible: this is the first moment its markdown is needed.
+  if (expanded) renderThinkingBody(body);
   const collapsible = body.parentElement;
   const footerBinding = collapsible ? collapseFooterBindings.get(collapsible) : undefined;
   if (footerBinding) {
@@ -5374,16 +5380,34 @@ function stopThinkingTimer(): void {
   }
 }
 
+/** Registers the raw text behind a thinking body (markdown is rendered on
+ *  demand from it, so a collapsed block keeps the source without formatting). */
+function bindThinkingBody(body: HTMLElement, source: () => string): void {
+  thinkingBodySources.set(body, source);
+}
+
+/** Formats one thinking body with markdown. A collapsed body is left
+ *  untouched: it is painted when the block is expanded. Returns true when the
+ *  rendered HTML changed. */
+function renderThinkingBody(body: HTMLElement): boolean {
+  const source = thinkingBodySources.get(body);
+  if (!source) return false;
+  const text = source().trim();
+  if (
+    thinkingPaintDecision(body.hidden, text, thinkingBodyPainted.get(body)) !== "paint"
+  ) {
+    return false; // collapsed until expanded, or already up to date
+  }
+  body.innerHTML = renderMarkdown(text);
+  enhanceCodeBlocks(body);
+  thinkingBodyPainted.set(body, text);
+  return true;
+}
+
 function renderThinkingContent(): void {
   thinkingRenderFrame = null;
   if (!thinkingContentEl || thinkingRenderedLength >= thinkingAccum.length) return;
-  if (!thinkingTextNode || thinkingTextNode.parentNode !== thinkingContentEl) {
-    thinkingContentEl.textContent = "";
-    thinkingTextNode = document.createTextNode(thinkingAccum);
-    thinkingContentEl.appendChild(thinkingTextNode);
-  } else {
-    thinkingTextNode.appendData(thinkingAccum.slice(thinkingRenderedLength));
-  }
+  if (!renderThinkingBody(thinkingContentEl)) return; // collapsed: painted on expand
   thinkingRenderedLength = thinkingAccum.length;
   scrollToBottom();
 }
@@ -5414,7 +5438,7 @@ function ensureThinkingLoader(): HTMLElement {
     thinkingContentEl = document.createElement("div");
     thinkingContentEl.className = "thinking-content";
     thinkingRenderedLength = 0;
-    thinkingTextNode = null;
+    bindThinkingBody(thinkingContentEl, () => thinkingAccum);
     activateThinkingCard(thinkingEl, thinkingContentEl, !!agenticBlock);
     if (!agenticBlock) wireThinkingHead(head, thinkingContentEl);
     thinkingEl.append(head, thinkingContentEl);
@@ -5439,7 +5463,8 @@ function finishThinking(): void {
   thinkingSpinnerEl = null;
   const content = thinkingAccum.trim();
   if (content) {
-    if (thinkingContentEl) thinkingContentEl.textContent = content;
+    // the final text is markdown too; a collapsed block is painted on expand
+    if (thinkingContentEl) renderThinkingBody(thinkingContentEl);
     setAgenticItemState(thinkingEl, "success");
     thinkingContentRendered = true;
   } else {
@@ -5463,7 +5488,7 @@ function interruptThinking(): void {
   thinkingSpinnerEl = null;
   const content = thinkingAccum.trim();
   if (content) {
-    if (thinkingContentEl) thinkingContentEl.textContent = content;
+    if (thinkingContentEl) renderThinkingBody(thinkingContentEl);
     setAgenticItemState(thinkingEl, "interrupted");
     thinkingContentRendered = true;
     return;
@@ -5592,7 +5617,7 @@ function promoteWaitingToThinking(): void {
   thinkingTimerEl = waitingTimerEl;
   thinkingContentEl = waitingContentEl;
   thinkingRenderedLength = 0;
-  thinkingTextNode = null;
+  if (thinkingContentEl) bindThinkingBody(thinkingContentEl, () => thinkingAccum);
   const agenticBlock = agenticThinking ? ensureLiveAgenticBlock() : null;
   if (agenticBlock && card.parentElement !== agenticBlock.body) {
     agenticBlock.body.appendChild(card);
@@ -5651,7 +5676,6 @@ function breakInternalActivityChain(): void {
   thinkingStartedAt = 0;
   thinkingAccum = "";
   thinkingRenderedLength = 0;
-  thinkingTextNode = null;
   thinkingContentRendered = true;
 }
 
@@ -6347,7 +6371,7 @@ function finalizeMessage(msg: FinalizedMessage): void {
       const { head } = makeThinkingHead(false);
       const body = document.createElement("div");
       body.className = "thinking-content";
-      body.textContent = msg.thinking.trim();
+      bindThinkingBody(body, () => msg.thinking);
       const agenticBlock = ensureLiveAgenticBlock();
       activateThinkingCard(card, body, !!agenticBlock);
       if (!agenticBlock) wireThinkingHead(head, body);
@@ -6720,7 +6744,7 @@ function buildThinkingCard(
   }
   const body = document.createElement("div");
   body.className = "thinking-content";
-  body.textContent = content;
+  bindThinkingBody(body, () => content);
   activateThinkingCard(card, body, insideAgenticBlock);
   if (!insideAgenticBlock) wireThinkingHead(head, body);
   card.append(head, body);
@@ -11550,7 +11574,7 @@ function renderDemo(): void {
   const { head } = makeThinkingHead(false);
   const tb = document.createElement("div");
   tb.className = "thinking-content";
-  tb.textContent = t("demoThought");
+  bindThinkingBody(tb, () => t("demoThought"));
   activateThinkingCard(thought, tb);
   wireThinkingHead(head, tb);
   thought.append(head, tb);

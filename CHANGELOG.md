@@ -4,6 +4,8 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+- Thinking blocks now render markdown (bold, lists, links, fenced code with the shared Copy block header) instead of showing the raw markers, and they do it lazily: nothing is formatted while the block is collapsed, the first pass happens when the block is expanded and a streaming thought is re-rendered on the visible block only. Consecutive thought blocks from the provider keep sharing one card, as before.
+
 ## [0.6.6] - 2026-09-25
 
 - Fixed the session picker appearing to do nothing on large sessions: switching and history loading now wait up to 90 seconds instead of the 10 second RPC timeout, so a session that takes longer to reload no longer drops back to the new-session screen mid-load.

@@ -4,6 +4,8 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-09-26
+
 - Unified the product icon on the terracotta tile everywhere the background is not known in advance: the VS Code companion (Extensions list, activity bar and view header), the Visual Studio companion (Extension Manager and "Other Windows" entry) and the standalone `piw` page (favicon and desktop notifications) no longer use a white glyph on transparency, which disappeared on light backgrounds exactly like the old Chrome Web Store icon did. Only the editor title bar command buttons keep their monochrome light/dark glyphs.
 
 - Thinking blocks now render markdown (bold, lists, links, fenced code with the shared Copy block header) instead of showing the raw markers, and they do it lazily: nothing is formatted while the block is collapsed, the first pass happens when the block is expanded and a streaming thought is re-rendered on the visible block only. Consecutive thought blocks from the provider keep sharing one card, as before.

@@ -70,7 +70,7 @@
     <Content Include="zPiWebview.ToolWindowName.pkgdef">
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>
-    <!-- extension icon (32x32, generated from media/icon-mark-128.png):
+    <!-- extension icon (32x32, the shared terracotta tile of media/icon.png):
          referenced by source.extension.vsixmanifest (<Icon>) -->
     <Content Include="icon.png">
       <IncludeInVSIX>true</IncludeInVSIX>

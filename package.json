@@ -27,7 +27,7 @@
         {
           "id": "pi-webview",
           "title": "pi",
-          "icon": "media/icon-mark-128.png"
+          "icon": "media/icon.png"
         }
       ]
     },
@@ -37,7 +37,7 @@
           "type": "webview",
           "id": "piWebview",
           "name": "pi",
-          "icon": "media/icon-mark-128.png"
+          "icon": "media/icon.png"
         }
       ]
     },

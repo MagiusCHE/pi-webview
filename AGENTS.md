@@ -178,6 +178,14 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   Loader spinner nel blocco pensiero durante l'elaborazione (niente status
   line ridondanti). Copia: un solo componente `.copy-btn` nei blocchi codice.
   Per verificare la grafica senza modello: `?demo=1` (+ `?theme=` `?lang=`)
+- **Icona di prodotto unica (tile terracotta)**: ovunque il fondo non sia noto,
+  il marchio è il tile terracotta opaco — `media/icon.png` (128×128) per favicon
+  standalone, notifiche desktop, icona estensione VS Code (activity bar e vista
+  comprese), vsix IDE e icona 32×32 del companion Visual Studio; il companion
+  Chrome usa `src/adapters/browser/chrome/icons/icon-{16,32,48,128}.png`.
+  Mai glifi chiari su trasparenza in questi punti: spariscono sul chiaro.
+  I glifi monocromatici `media/icon-light.png` / `media/icon-dark.png` restano
+  solo per i pulsanti della title bar dell'editor (VS Code `{light,dark}`)
 - **i18n (locale)**: pattern radv-2/client — JSON per lingua in
   `src/web/locale/{it,en}.json`, `src/web/i18n.ts` (`t()`, fallback it),
   lingua di sistema dal browser, preferenza salvata in localStorage

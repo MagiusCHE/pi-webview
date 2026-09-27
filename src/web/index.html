@@ -415,11 +415,12 @@
     <!-- steering panel: visible only when there are queued messages -->
     <div id="steer-panel" class="steer-panel" hidden></div>
 
-    <!-- editor selection block: one discreet row, appears only when there is
-         an evident selection (like the steering, between thread and composer) -->
-    <div id="selection-panel" class="selection-panel" hidden></div>
-
     <footer>
+      <!-- context block (editor selection or browser page): static row of the
+           composer, INSIDE the footer and therefore BELOW its top border. No
+           static element may sit above that divider: the area above it is the
+           scrolling chat. -->
+      <div id="selection-panel" class="selection-panel" hidden></div>
       <div id="connect-panel" class="connect-panel" hidden>
         <strong id="connect-title" class="connect-title">Connessione piw</strong>
         <span id="connect-error" class="connect-error" role="alert"></span>

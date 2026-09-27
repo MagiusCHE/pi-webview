@@ -2441,8 +2441,11 @@ footer {
 /* editor selection block: one discreet row between steer and composer; appears
    only when there is an evident selection, disappears when there is none */
 .selection-panel {
-  flex: 0 0 auto;
-  width: min(100% - 2rem, var(--thread-max-width));
+  /* Static composer row (editor selection OR browser page): it lives inside
+     <footer>, right below its top border, welded to the badge/input-box
+     geometry so nothing static floats above the chat/composer divider. */
+  width: 100%;
+  max-width: var(--thread-max-width);
   margin: 0 auto 8px;
   padding: 5px 12px;
   background: color-mix(in srgb, var(--accent) 8%, transparent);

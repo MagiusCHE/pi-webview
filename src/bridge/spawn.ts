@@ -117,7 +117,25 @@ function parseShimScript(shim: string): string | null {
   }
 }
 
-export function resolvePi(platform: NodeJS.Platform = process.platform): PiResolution {
+// `override` (piw's `--pi <command|path>`) wins over the default lookup: it may
+// be an absolute/relative path or a bare command name resolved in PATH.
+export function resolvePi(
+  platform: NodeJS.Platform = process.platform,
+  override?: string | undefined,
+): PiResolution {
+  const requested = (override ?? "").trim();
+  if (requested) {
+    if (requested.includes("/") || requested.includes("\\")) {
+      try {
+        accessSync(requested, constants.X_OK);
+        return { command: requested, found: true, path: requested };
+      } catch {
+        return { command: requested, found: false, path: null };
+      }
+    }
+    const onPath = findOnPath(requested, platform);
+    return { command: requested, found: onPath !== null, path: onPath };
+  }
   const bin = piBinName(platform);
   const path = findOnPath(bin, platform);
   return { command: bin, found: path !== null, path };

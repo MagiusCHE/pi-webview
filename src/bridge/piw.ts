@@ -372,19 +372,25 @@ async function main(): Promise<void> {
     ...(portArg ? ["--port", portArg] : []),
     "--ip",
     bindIp,
-    ...(piArg ? ["--pi", piArg] : []),
     ...(debug ? ["--debug"] : []),
     ...extra,
   ];
 
-  // resolves `pi` in the PATH and passes it explicitly to the bridge (portable:
-  // on Windows the shim is pi.cmd, with absolute path and possible spaces)
-  const pi = resolvePi();
+  // Resolves the pi command and passes it explicitly to the bridge (portable:
+  // on Windows the shim is pi.cmd, with absolute path and possible spaces).
+  // One single `--pi`: an explicit `--pi <command|path>` wins over the PATH
+  // lookup, and the bridge keeps the LAST occurrence, so pushing a second
+  // resolved value after it would silently override the user's choice.
+  const pi = resolvePi(process.platform, piArg);
   if (!pi.found) {
-    console.error("piw: comando 'pi' non trovato nel PATH.");
-    console.error(
-      "  Installa pi: npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
-    );
+    if (piArg) {
+      console.error(`piw: comando '${piArg}' (--pi) non trovato.`);
+    } else {
+      console.error("piw: comando 'pi' non trovato nel PATH.");
+      console.error(
+        "  Installa pi: npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
+      );
+    }
     process.exit(1);
   }
   bridgeArgs.push("--pi", pi.path ?? pi.command);

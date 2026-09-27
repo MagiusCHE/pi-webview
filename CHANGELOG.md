@@ -4,6 +4,8 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-09-27
+
 - Fixed `piw --pi <command|path>` being silently ignored: `resolvePi` now accepts the explicit override and the launcher passes a single `--pi` to the bridge (the previous duplicate let the PATH-resolved value win).
 
 - Moved the static context row (editor selection or browser page) inside the composer footer, below the divider that separates the scrolling chat from the input area: the row no longer hovers above that border as if it belonged to the chat, and it now shares the composer geometry.

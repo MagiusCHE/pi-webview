@@ -7369,9 +7369,18 @@ function renderRpcEvent(evt: RpcEvent): void {
       if ((msg as { customType?: string }).customType === "pi-webview-startup") {
         return;
       }
-      // message injected from ANOTHER session (e.g. session-control
-      // `send`): incoming bubble — the chat must show it
+      // A message injected from ANOTHER session (e.g. session-control
+      // `send`) is a visible boundary exactly like a user message: close the
+      // current thought/tool chain first, so its card lands after the finished
+      // Agentic block instead of next to a block that keeps growing, and the
+      // internal work that follows opens a new block. The resumed history
+      // splits the same way (finishHistoryAgenticBlock).
+      breakInternalActivityChain();
       renderCustomMessageBubble(msg);
+      // The run keeps going: restart the provider-wait clock after the
+      // boundary, exactly like an accepted user message does.
+      const restartedAt = waitingResponseRestartAt(working, performance.now());
+      if (restartedAt !== null) armWaitingResponse(true, restartedAt);
       return;
     }
     // toolResult and other local messages are persisted between turns but are

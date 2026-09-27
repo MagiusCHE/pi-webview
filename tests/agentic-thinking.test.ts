@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   AGENTIC_COUNT_PULSE_MS,
@@ -178,4 +179,27 @@ test("agentic tool categories collapse every other tool into tools", () => {
   assert.equal(agenticToolMetric("ask_user"), "tools");
   assert.equal(agenticToolMetric("web_explore"), "tools");
   assert.equal(agenticToolMetric("custom-extension-tool"), "tools");
+});
+
+// The live view and the resumed history must split the Agentic block at the
+// SAME boundaries: a custom message injected by another session is one of
+// them, exactly like a user message (otherwise the card lands next to a block
+// that keeps growing live and the two renderings disagree).
+test("a message injected by another session closes the live Agentic block", () => {
+  const web = readFileSync("src/web/main.ts", "utf8");
+  const live =
+    /role === "custom" && msg\.display !== false[\s\S]*?breakInternalActivityChain\(\);[\s\S]*?renderCustomMessageBubble\(msg\);/.exec(
+      web,
+    );
+  assert.ok(live, "the custom message must break the chain before its card");
+  // history already closes the block for the same message
+  assert.match(
+    web,
+    /finishHistoryAgenticBlock\(lastTs\);\s*\n\s*const wrapper = addMsg\("user"\);/,
+  );
+  // the provider wait is re-armed after the boundary, like a user message
+  assert.match(
+    web,
+    /renderCustomMessageBubble\(msg\);\s*\n[\s\S]{0,400}?armWaitingResponse\(true, restartedAt\);/,
+  );
 });

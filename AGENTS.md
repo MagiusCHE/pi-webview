@@ -57,8 +57,11 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   runtime attive, in particolare `--no-idle`. Eseguire `piw -k` e riavviare in
   background sulla stessa porta/bind passando il token precedente al nuovo
   launcher esclusivamente tramite la variabile interna `PIW_RESTART_TOKEN`. Il
-  vecchio URL autenticato deve continuare a funzionare. Verificare dopo il
-  riavvio che configurazione e token siano rimasti invariati. Se nessun bridge
+  riavvio usa **sempre `--background --no-open`**: durante l'aggiornamento degli
+  artefatti il browser NON si apre (nessuna tab nuova) e l'eventuale link
+  autenticato stampato da `piw` va filtrato o non riportato, perché contiene il
+  token. Il vecchio URL autenticato deve continuare a funzionare. Verificare
+  dopo il riavvio che configurazione e token siano rimasti invariati. Se nessun
   era attivo, non inventare una porta e non avviarne uno implicitamente:
   segnalarlo chiaramente nel riepilogo finale.
 - **Aggiornamento artefatti su Linux**: compilare il companion VS Code,
@@ -202,14 +205,18 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   è SEMPRE prima del testo (slot dedicato nel DOM), loader + timer secondi
   durante lo streaming, collassato per default (click per aprire)
 - **Agentic thinking**: raggruppa attività interne consecutive senza creare
-  wrapper assistant vuoti. Testo visibile, `ask_user`, compaction e messaggi
-  utente iniettati via steering chiudono sia il blocco Agentic sia l'eventuale
-  thought normale; l'attività interna successiva apre sempre un nuovo blocco.
-  Prima di attività reale, dopo 1 secondo dall'avvio dell'elaborazione, il live
-  shell mostra `Waiting for response`; diventa `Agentic thinking` solo al primo
-  thought/tool. Durante una compaction automatica l'outer agent run resta
-  attivo fino ad `agent_settled`: al `compaction_end` e al successivo
-  `turn_start` composer, steering e STOP devono quindi restare attivi
+  wrapper assistant vuoti. Testo visibile, `ask_user`, compaction, messaggi
+  utente iniettati via steering e messaggi `custom` arrivati da un'altra
+  sessione (`session-control send`) chiudono sia il blocco Agentic sia
+  l'eventuale thought normale; l'attività interna successiva apre sempre un
+  nuovo blocco. Live e history devono spezzare allo stesso punto: la card del
+  messaggio custom resta quindi FUORI dal blocco, come nella cronologia
+  ricostruita. Prima di attività reale, dopo 1 secondo dall'avvio
+  dell'elaborazione, il live shell mostra `Waiting for response`; diventa
+  `Agentic thinking` solo al primo thought/tool. Durante una compaction
+  automatica l'outer agent run resta attivo fino ad `agent_settled`: al
+  `compaction_end` e al successivo `turn_start` composer, steering e STOP
+  devono quindi restare attivi
 - **Tool result come risposta finale**: durante un agent run la Webview conserva
   l'ultima sequenza di tool result. Se `agent_settled` arriva senza contenuto
   assistant visibile successivo, quei risultati vengono promossi fuori dalle
@@ -316,6 +323,13 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   preferenze globali indipendenti. Gli slot `setStatus` sono identificati dal
   `statusKey` RPC: click con conferma per nasconderli, ripristino dai settings;
   le chiavi nascoste vivono in `hiddenStatusKeys` nella config utente
+- **Griglia del composer**: tutto ciò che è statico (riga del contesto editor/pagina
+  `#selection-panel`, badge di stato, input box, toolbar) vive DENTRO `<footer>`,
+  cioè sotto il suo bordo superiore, e con la stessa geometria
+  (`width: 100%` + `max-width: var(--thread-max-width)` centrata). Sopra il
+  divider c'è solo la chat scrollabile più la coda steering (contenuto di
+  conversazione, non contesto del composer): nessun elemento statico deve
+  flottare sopra il bordo, sembrerebbe appartenere alla chat
 - **Avvio standalone**: una nuova sessione aperta da `piw` usa il `cwd` della
   shell che ha invocato il comando, anche quando riutilizza un bridge già
   attivo; se il `cwd` non è leggibile usa la home dell'utente. Il path resta

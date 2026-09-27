@@ -4,6 +4,12 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+- Fixed `piw --pi <command|path>` being silently ignored: `resolvePi` now accepts the explicit override and the launcher passes a single `--pi` to the bridge (the previous duplicate let the PATH-resolved value win).
+
+- Moved the static context row (editor selection or browser page) inside the composer footer, below the divider that separates the scrolling chat from the input area: the row no longer hovers above that border as if it belonged to the chat, and it now shares the composer geometry.
+
+- Fixed a message injected by another pi session (`send_to_session`) landing next to the still-open Agentic thinking block and leaving it spanning across the conversation: a `custom` message is now a visible boundary exactly like a user message, so the block is closed before its card, the internal work that follows opens a new block and the live view matches the resumed history.
+
 ## [0.6.7] - 2026-09-26
 
 - Unified the product icon on the terracotta tile everywhere the background is not known in advance: the VS Code companion (Extensions list, activity bar and view header), the Visual Studio companion (Extension Manager and "Other Windows" entry) and the standalone `piw` page (favicon and desktop notifications) no longer use a white glyph on transparency, which disappeared on light backgrounds exactly like the old Chrome Web Store icon did. Only the editor title bar command buttons keep their monochrome light/dark glyphs.

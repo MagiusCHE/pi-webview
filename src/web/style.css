@@ -46,6 +46,11 @@
   --accent-fg: var(--vscode-button-foreground, #1b1d1f);
   --hover: var(--vscode-list-hoverBackground, rgb(255 255 255 / 0.07));
   --code-bg: var(--vscode-textCodeBlock-background, #0d0f11);
+  /* Inline code chip. VS Code injects the same rule into every webview from
+     its default styles (theme-driven); standalone and the Chrome panel need
+     it explicitly, so the tokens mirror those variables with coded fallbacks. */
+  --inline-code-fg: var(--vscode-textPreformat-foreground, #cc7d5e);
+  --inline-code-bg: var(--vscode-textPreformat-background, rgb(255 255 255 / 0.07));
   --ok: var(--vscode-charts-green, #7bd88f);
   --update-ok: var(--vscode-charts-blue, #5aa9e6);
   --warn: var(--vscode-charts-yellow, #f0c674);
@@ -97,6 +102,9 @@
   --accent-fg: var(--vscode-button-foreground, #1b1d1f);
   --hover: var(--vscode-list-hoverBackground, rgb(0 0 0 / 0.05));
   --code-bg: var(--vscode-textCodeBlock-background, rgb(0 0 0 / 0.03));
+  /* inline code chip: darker terracotta, AA (4.7:1) on the light surface */
+  --inline-code-fg: var(--vscode-textPreformat-foreground, #a8552f);
+  --inline-code-bg: var(--vscode-textPreformat-background, rgb(0 0 0 / 0.05));
   --ok: var(--vscode-charts-green, #2e8b57);
   --update-ok: var(--vscode-charts-blue, #2b7bb9);
   --warn: var(--vscode-charts-yellow, #b8860b);
@@ -991,6 +999,22 @@ header {
   content: "ℹ ";
   color: var(--fg-tertiary);
 }
+.startup-rpc-question {
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.startup-rpc-question-text {
+  margin-top: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.startup-rpc-question p {
+  margin: 12px 0 0;
+}
+.startup-rpc-question ul {
+  margin: 4px 0 0;
+  padding-left: 20px;
+}
 
 /* startup banner (new session): loaded resources pushed by the pi-side
    extension — Context/Skills/Extensions, one row per section (Themes are
@@ -1507,6 +1531,26 @@ header {
 .tool-card summary,
 .tool-card > .collapse-footer {
   min-width: 0;
+}
+
+/* Inline `code` in rendered markdown (assistant text, thinking bodies, dialog
+   titles): the VS Code webview styles it with the chip below, the standalone
+   page had no rule at all and showed plain monospace text. Same geometry as
+   the VS Code default stylesheet so both environments render identically. */
+code {
+  font-family: var(--font-mono);
+  color: var(--inline-code-fg);
+  background-color: var(--inline-code-bg);
+  padding: 1px 3px;
+  border-radius: 4px;
+}
+/* A code BLOCK owns its surface: the inline chip must not leak into the
+   <pre><code> of a fence, whose text keeps the block foreground. */
+pre code {
+  padding: 0;
+  border-radius: 0;
+  background-color: transparent;
+  color: inherit;
 }
 
 .code-block {
@@ -2125,11 +2169,9 @@ footer {
 .inline-dialog-title ol {
   padding-left: 20px;
 }
+/* the dialog title is bold: inline code stays upright, chip and color come
+   from the global `code` rule */
 .inline-dialog-title code:not(pre code) {
-  padding: 1px 4px;
-  border-radius: 3px;
-  background: var(--code-bg);
-  font-family: var(--font-mono);
   font-size: 0.92em;
 }
 .inline-dialog-title .code-block {

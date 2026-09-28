@@ -4,6 +4,16 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-09-28
+
+- Fixed a session load getting stuck when a pi extension asked for a confirmation during startup. pi installs its RPC response reader only after the first extension binding, so that dialog can never be answered: the loader stayed up, the question was unreachable and the history request timed out after 90 seconds. The question is now shown as an inert notice with the terminal instructions and the reload hint, the session stays locked instead of waiting, and every dialog arriving after RPC answered keeps working as before.
+
+- Inline code in the standalone page and in the Chrome panel now renders like inside the VS Code webview: the colored chip (theme preformat color, padding, radius and the monospace font) is defined in the UI itself, with the standalone palette as fallback, and fenced code blocks keep their own surface instead of inheriting the preformat color.
+
+- Collapsed Agentic thinking blocks no longer repaint their hidden content. Thought bodies, tool arguments, tool results and shell exit codes are retained as data and rendered the first time the block or the single tool is expanded, the per-tool timers suspend while their parent is collapsed, and the multi-second clocks tick once per second instead of once per frame. Headers, counts and final states stay current, so expanding a block always shows the latest complete state.
+
+- Picking a session that lives in another repository no longer asks what to do when the current session is still empty: an unstarted session has nothing to preserve or fork, so the standalone page resumes the selected session in its own workspace directly. Chrome already reloaded the original session and the fixed-workspace IDE companions keep their fork confirmation.
+
 ## [0.6.8] - 2026-09-27
 
 - Fixed `piw --pi <command|path>` being silently ignored: `resolvePi` now accepts the explicit override and the launcher passes a single `--pi` to the bridge (the previous duplicate let the PATH-resolved value win).

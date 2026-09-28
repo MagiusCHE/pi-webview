@@ -79,6 +79,10 @@ import {
 } from "./session-routing.ts";
 import { thinkingPaintDecision } from "./thinking-render.ts";
 import {
+  canFinishSessionLoading,
+  isUnanswerableStartupRequest,
+} from "./session-loading.ts";
+import {
   browserToolPermissionGranted,
   browserToolPermissionOrigin,
   grantBrowserPersistentPermission,
@@ -587,6 +591,18 @@ let loadingHistoryLoaded = false; // the chat history has been rendered
 let loadingQuietTimer: ReturnType<typeof setTimeout> | null = null;
 let loadingMaxTimer: ReturnType<typeof setTimeout> | null = null;
 let loadingAgentActive = false;
+// An extension can ask for input before pi finishes loading. The chat must be
+// visible for its inline dialog, but sessionLoading stays true until history
+// is ready so the composer cannot send to an uninitialized session.
+let loadingInteractivePending = false;
+let loadingInteractiveRequestId: string | undefined;
+let loadingHadInteractiveRequest = false;
+let rpcInputReady = false;
+let startupRpcBlocked = false;
+const startupRpcQuestionIds = new Set<string>();
+let interactiveHistoryRetryAvailable = false;
+let interactiveHistoryRetryInFlight = false;
+let historyLoadFailed = false;
 // logs collected while loading: flushed into the chat (at the END of the
 // resumed history) when the loading ends — never lost, never at the top
 const loadingLogs: { level: "error" | "warn" | "info"; text: string }[] = [];
@@ -599,12 +615,23 @@ const LOADING_MAX_MS = 30000; // default safety net, extended for large sessions
 const LOADING_LOG_CAP = 200; // lines kept in the box
 
 function beginSessionLoading(maxWaitMs = LOADING_MAX_MS): void {
+  // The extension may have asked before the transport finished initializing.
+  const awaitingInteractive = loadingInteractivePending;
+  const blockedAtStart = startupRpcBlocked;
   sessionLoading = true;
   updateSendButton();
   loadingAgentActive = false;
   loadingHistoryLoaded = false;
+  loadingInteractivePending = awaitingInteractive;
+  if (!awaitingInteractive) loadingInteractiveRequestId = undefined;
+  loadingHadInteractiveRequest = awaitingInteractive;
+  startupRpcBlocked = blockedAtStart;
+  if (!blockedAtStart) startupRpcQuestionIds.clear();
+  interactiveHistoryRetryAvailable = false;
+  interactiveHistoryRetryInFlight = false;
+  historyLoadFailed = false;
   loadingLogs.length = 0;
-  els.bootLoader.hidden = false;
+  els.bootLoader.hidden = awaitingInteractive || blockedAtStart;
   els.bootLoaderText.textContent = t("loading");
   els.bootLoaderLogs.hidden = true;
   els.bootLoaderLogs.textContent = "";
@@ -612,27 +639,93 @@ function beginSessionLoading(maxWaitMs = LOADING_MAX_MS): void {
   // has been rendered (loadHistory arms it) — get_state retries at boot can
   // take much longer than the quiet window
   clearTimeout(loadingMaxTimer ?? undefined);
-  loadingMaxTimer = setTimeout(loadingMaxTick, maxWaitMs);
+  loadingMaxTimer =
+    awaitingInteractive || blockedAtStart ? null : setTimeout(loadingMaxTick, maxWaitMs);
+}
+
+function revealInteractiveDuringLoading(id: string | undefined): void {
+  if (!sessionLoading && els.bootLoader.hidden) return;
+  loadingInteractivePending = true;
+  loadingInteractiveRequestId = id;
+  loadingHadInteractiveRequest = true;
+  clearTimeout(loadingMaxTimer ?? undefined);
+  loadingMaxTimer = null;
+  // Keep the session lock and any pending history request, but remove the
+  // overlay that would otherwise trap the question behind it.
+  hideBootLoader();
+}
+
+function scheduleInteractiveHistoryRetry(): void {
+  if (
+    !historyLoadFailed ||
+    !interactiveHistoryRetryAvailable ||
+    interactiveHistoryRetryInFlight
+  )
+    return;
+  interactiveHistoryRetryAvailable = false;
+  interactiveHistoryRetryInFlight = true;
+  queueMicrotask(() => {
+    // Refresh the header/session list as well as the history after pi has
+    // resumed from its startup confirmation. Never resurrect the overlay.
+    void refreshSessions(true).finally(() => {
+      interactiveHistoryRetryInFlight = false;
+      if (sessionLoading && loadingHistoryLoaded) armLoadingQuiet();
+    });
+  });
+}
+
+function answerStartupInteraction(id: string): void {
+  if (!loadingInteractivePending || loadingInteractiveRequestId !== id) return;
+  loadingInteractivePending = false;
+  loadingInteractiveRequestId = undefined;
+  interactiveHistoryRetryAvailable = true;
+  if (sessionLoading) {
+    clearTimeout(loadingMaxTimer ?? undefined);
+    loadingMaxTimer = setTimeout(
+      loadingMaxTick,
+      SESSION_HISTORY_TIMEOUT_MS + LOADING_MAX_MS,
+    );
+  }
+  scheduleInteractiveHistoryRetry();
+  if (sessionLoading && loadingHistoryLoaded && !interactiveHistoryRetryInFlight)
+    armLoadingQuiet();
 }
 
 // Hard safety net: a broken request chain must never leave the whole
 // interface covered indefinitely (long session requests extend the window).
 function loadingMaxTick(): void {
+  loadingMaxTimer = null;
+  // Waiting for an answer is not a failed boot: keep the question usable even
+  // when the user takes longer than the usual loading safety timeout.
+  if (loadingInteractivePending || startupRpcBlocked) return;
   if (sessionLoading) endSessionLoading();
 }
 
 function armLoadingQuiet(): void {
   clearTimeout(loadingQuietTimer ?? undefined);
   loadingQuietTimer = setTimeout(() => {
-    if (sessionLoading && loadingHistoryLoaded && !loadingAgentActive) {
+    if (
+      sessionLoading &&
+      !startupRpcBlocked &&
+      canFinishSessionLoading(
+        loadingHistoryLoaded,
+        loadingAgentActive,
+        loadingInteractivePending,
+        interactiveHistoryRetryInFlight,
+      )
+    ) {
       endSessionLoading();
     }
   }, LOADING_QUIET_MS);
 }
 
 function endSessionLoading(): void {
-  if (!sessionLoading) return;
+  if (!sessionLoading || startupRpcBlocked) return;
   sessionLoading = false;
+  loadingInteractivePending = false;
+  loadingInteractiveRequestId = undefined;
+  loadingHadInteractiveRequest = false;
+  interactiveHistoryRetryAvailable = false;
   clearTimeout(loadingQuietTimer ?? undefined);
   clearTimeout(loadingMaxTimer ?? undefined);
   loadingQuietTimer = null;
@@ -910,6 +1003,9 @@ function setupTransport(tr: Transport): void {
         }
       })();
     } else if (s.state === "closed") {
+      rpcInputReady = false;
+      startupRpcBlocked = false;
+      startupRpcQuestionIds.clear();
       endSessionLoading();
       hideBootLoader();
       const expectedHandoffClose =
@@ -978,6 +1074,9 @@ type RpcCommandLike = { type: string } & Record<string, unknown>;
 function handleFrame(frame: Frame): void {
   if (frame.channel === "rpc") {
     const payload = frame.payload as RpcEvent;
+    // Any RPC response proves pi's input reader is active; extension dialogs
+    // from this point onward can be answered normally, even during history.
+    if (payload.type === "response" && !piRestarting) rpcInputReady = true;
     if (payload.type === "response" && typeof payload.id === "string") {
       const cb = pendingRpc.get(payload.id);
       if (cb) {
@@ -3619,9 +3718,11 @@ async function refreshSessions(showResumeNotice = false): Promise<boolean> {
   // get_state can fail at startup (pi not ready yet in the webview):
   // retry until the process answers (short per-attempt timeout)
   for (let attempt = 0; attempt < 6; attempt++) {
+    if (startupRpcBlocked) return false;
     try {
       const state = await rpcRequest(rpc.getState(), `rpc-st-${attempt}`, 3000);
       if (state.success) {
+        rpcInputReady = true;
         const data = state.data as
           | {
               sessionFile?: string;
@@ -3675,8 +3776,10 @@ async function refreshSessions(showResumeNotice = false): Promise<boolean> {
     } catch {
       // pi not up yet: retry shortly
     }
+    if (startupRpcBlocked) return false;
     await new Promise((r) => setTimeout(r, 1500));
   }
+  if (startupRpcBlocked) return false;
   const trust = await ideRequest({ type: "getTrust" });
   if (trust?.ok) renderTrust(trust.data as TrustResult | null);
   // workspace first (instant, no reading of all session files)
@@ -3704,6 +3807,7 @@ async function refreshSessions(showResumeNotice = false): Promise<boolean> {
   await fetchThinkingSettings();
   syncThinkingChat();
   populateSessionMenu();
+  if (startupRpcBlocked) return false;
   const historyLoaded = await loadHistory();
   updateSteerPlaceholder();
   if (showResumeNotice && historyLoaded && sessionHasMessages) {
@@ -3722,6 +3826,7 @@ async function refreshSessions(showResumeNotice = false): Promise<boolean> {
 }
 
 async function loadHistory(): Promise<boolean> {
+  if (startupRpcBlocked) return false;
   // a session switch/restart: no stale "waiting" state from the previous session
   disarmWaitingResponse();
   // Large sessions can take longer to serialize over RPC. Keep the overlay up
@@ -3740,6 +3845,7 @@ async function loadHistory(): Promise<boolean> {
       undefined,
       SESSION_HISTORY_TIMEOUT_MS,
     );
+    if (startupRpcBlocked) return false;
     const messages = (res.data as { messages?: unknown[] } | undefined)?.messages;
     if (!res.success || !Array.isArray(messages)) {
       throw new Error(
@@ -3748,6 +3854,9 @@ async function loadHistory(): Promise<boolean> {
           : t("sessionSwitchUnknownError"),
       );
     }
+    historyLoadFailed = false;
+    loadingHadInteractiveRequest = false;
+    interactiveHistoryRetryAvailable = false;
     // only the LAST historyLimit turns: the long history is
     // truncated from the top (never the whole session)
     renderHistory(messages.slice(-historyLimit));
@@ -3761,7 +3870,9 @@ async function loadHistory(): Promise<boolean> {
     });
     loaded = true;
   } catch (error) {
+    if (startupRpcBlocked) return false;
     sessionHasMessages = false;
+    historyLoadFailed = true;
     addSystemBox(
       "error",
       tpl(t("sessionHistoryFailed"), {
@@ -3777,6 +3888,14 @@ async function loadHistory(): Promise<boolean> {
   // under the spinner are appended at the END of the resumed chat.
   loadingHistoryLoaded = true;
   flushLoadingLogs();
+  // Errors and startup logs must not push an unanswered question out of view.
+  if (loadingInteractivePending && inlineDialog?.el) {
+    els.thread.appendChild(inlineDialog.el);
+    scrollToBottom(true);
+  }
+  // A confirmation can outlive the original get_messages deadline. Retry
+  // once after the answer instead of leaving the chat with a stale timeout.
+  if (!loaded && loadingHadInteractiveRequest) scheduleInteractiveHistoryRetry();
   if (sessionLoading) armLoadingQuiet();
   // Only show the new-session banner if the history was actually loaded.
   if (loaded) void maybeShowStartupBanner();
@@ -5687,18 +5806,78 @@ function breakInternalActivityChain(): void {
 
 const statusSlots = new Map<string, string>();
 
-// UI requests of the pi extensions (ctx.ui.*): in VS Code the companion
-// handles them with native UI (select/confirm/input), here (standalone/piw)
-// the webview answers with its own modals. Never leave the extension waiting.
-function handleExtensionUiRequest(evt: RpcEvent): void {
+// During the first extension binding, pi.dev emits UI requests before its RPC
+// stdin reader is installed. An answer sent here cannot be consumed. Render
+// the question and terminal instructions without offering a fake answer.
+function showBlockedStartupQuestion(evt: RpcEvent): void {
   const id = evt.id as string | undefined;
+  if (id && startupRpcQuestionIds.has(id)) return;
+  if (id) startupRpcQuestionIds.add(id);
+  startupRpcBlocked = true;
+  sessionLoading = true;
+  clearTimeout(loadingMaxTimer ?? undefined);
+  clearTimeout(loadingQuietTimer ?? undefined);
+  loadingMaxTimer = null;
+  loadingQuietTimer = null;
+  hideBootLoader();
+  updateSendButton();
+
+  const wrapper = addMsg("status");
+  const panel = document.createElement("section");
+  panel.className = "status-line level-warn startup-rpc-question";
+  const heading = document.createElement("strong");
+  heading.textContent = t("startupRpcQuestionTitle");
+  panel.appendChild(heading);
+  const title = evt.title as string | undefined;
+  const message = evt.message as string | undefined;
+  const question = [title, message].filter(
+    (part) => typeof part === "string" && part.trim(),
+  );
+  if (question.length) {
+    const text = document.createElement("div");
+    text.className = "startup-rpc-question-text";
+    text.textContent = question.join("\n\n");
+    panel.appendChild(text);
+  }
+  const options = Array.isArray(evt.options)
+    ? evt.options.filter((value): value is string => typeof value === "string")
+    : [];
+  if (options.length) {
+    const label = document.createElement("div");
+    label.textContent = t("startupRpcQuestionOptions");
+    const list = document.createElement("ul");
+    for (const option of options) {
+      const item = document.createElement("li");
+      item.textContent = option;
+      list.appendChild(item);
+    }
+    panel.append(label, list);
+  }
+  const unavailable = document.createElement("p");
+  unavailable.textContent = t("startupRpcQuestionUnavailable");
+  const instructions = document.createElement("p");
+  instructions.textContent = t("startupRpcQuestionInstructions");
+  panel.append(unavailable, instructions);
+  wrapper.appendChild(panel);
+  scrollToBottom(true);
+}
+
+// Extension UI requests are answerable once pi's RPC reader is running.
+// Before then, show the startup question as an inert instruction instead.
+function handleExtensionUiRequest(evt: RpcEvent): void {
   const method = evt.method as string | undefined;
+  if (isUnanswerableStartupRequest(rpcInputReady, method)) {
+    showBlockedStartupQuestion(evt);
+    return;
+  }
+  const id = evt.id as string | undefined;
   const respond = (payload: Record<string, unknown>) => {
     if (!id || !transport) return;
     transport.send({
       channel: "rpc",
       payload: { type: "extension_ui_response", id, ...payload },
     });
+    answerStartupInteraction(id);
   };
   switch (method) {
     case "setStatus": {
@@ -5711,6 +5890,7 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       return;
     }
     case "select": {
+      revealInteractiveDuringLoading(id);
       // the command answered (dialog): a dialog is visible activity
       disarmWaitingResponse();
       const title = (evt.title as string | undefined) ?? "";
@@ -5728,12 +5908,14 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       return;
     }
     case "confirm": {
+      revealInteractiveDuringLoading(id);
       disarmWaitingResponse();
       const msg = (evt.message as string | undefined) ?? (evt.title as string) ?? "";
       void inlineConfirm(msg).then((ok) => respond({ confirmed: ok }));
       return;
     }
     case "input": {
+      revealInteractiveDuringLoading(id);
       disarmWaitingResponse();
       const title = (evt.title as string | undefined) ?? "";
       const prefill = (evt.prefill as string | undefined) ?? "";
@@ -5743,6 +5925,7 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
       return;
     }
     case "editor": {
+      revealInteractiveDuringLoading(id);
       // prefilled text (e.g. edit): same input block
       disarmWaitingResponse();
       const title = (evt.title as string | undefined) ?? "";
@@ -7405,7 +7588,10 @@ function renderRpcEvent(evt: RpcEvent): void {
     // provider request; do not guess that boundary from compaction completion.
   } else if (evt.type === "connection_closed") {
     trailingToolOutputs.clear();
+    rpcInputReady = false;
     if (evt.reason === "restart") {
+      startupRpcBlocked = false;
+      startupRpcQuestionIds.clear();
       // INTENTIONAL restart (Apply CLI flags): pi is restarting with the new
       // command line → no error; the re-init arrives with pi_restarted
       renderNativeQueues([], []);
@@ -7419,6 +7605,8 @@ function renderRpcEvent(evt: RpcEvent): void {
     // from a terminal (the real pi error is only visible by launching it by hand).
     // hideBootLoader: without it the loader stays until refreshSessions gives
     // up (get_state retries ≈ up to 27s) — the error must appear right away.
+    startupRpcBlocked = false;
+    startupRpcQuestionIds.clear();
     endSessionLoading(); // also clears the loading timers
     hideBootLoader();
     failRunningTools();
@@ -7441,6 +7629,9 @@ function renderRpcEvent(evt: RpcEvent): void {
     panelMode = evt.enabled === true;
     if (panelMode) clearEditorSelectionPanel();
   } else if (evt.type === "pi_restarted") {
+    rpcInputReady = false;
+    startupRpcBlocked = false;
+    startupRpcQuestionIds.clear();
     // restart completed: re-initialize WITHOUT reload (transparent): session
     // state + config; the current session is resumed by the companion with
     // --session, currentSessionPath is still in memory
@@ -8485,6 +8676,9 @@ function contentToText(content: unknown): string {
 
 // faithful history: text, thinking and CARDS of the used tools (like the live view)
 function renderHistory(messages: unknown[]): void {
+  // The history may arrive while a startup extension is still waiting for
+  // input. Rebuilding the thread must not silently discard its live dialog.
+  const pendingDialog = inlineDialog?.el;
   trailingToolOutputs.clear();
   finishRunningAgenticBlocks();
   els.thread.textContent = "";
@@ -8771,6 +8965,9 @@ function renderHistory(messages: unknown[]): void {
   }
   promoteHistoryTrailingOutputs();
   finishHistoryAgenticBlock(lastTs);
+  if (pendingDialog && inlineDialog?.el === pendingDialog) {
+    els.thread.appendChild(pendingDialog);
+  }
   updateThinkingBlocksButton();
   stickToBottom = true;
   scrollToBottom(true);
@@ -9016,8 +9213,8 @@ let currentModel: { provider?: string; name?: string; id?: string } | null = nul
 let noModelsWarned = false;
 
 function updateSendButton(): void {
-  // Session loading is a full interaction lock, including keyboard input
-  // beneath the fixed overlay. Model streaming alone still permits steering.
+  // Session loading locks normal interaction even when the overlay is hidden
+  // to show a startup extension dialog. Streaming still permits steering.
   const interactionLocked =
     statusState !== "open" || piRestarting || switchingSession || sessionLoading;
   els.send.innerHTML = sendIcon();
@@ -9026,6 +9223,7 @@ function updateSendButton(): void {
   els.send.disabled = interactionLocked;
   els.input.disabled = interactionLocked;
   els.sessionBtn.disabled = interactionLocked;
+  els.newChat.disabled = interactionLocked;
   if (interactionLocked && speechController?.active) speechController.stopSilently();
   renderSpeechButton();
 }
@@ -11262,7 +11460,7 @@ function proceedUpdate(): void {
 }
 
 els.updatePi.addEventListener("click", () => {
-  if (demoMode || updateChecking) return;
+  if (demoMode || updateChecking || sessionLoading || piRestarting) return;
   if (updateInfo) {
     openUpdateModal(); // yellow → review the available updates
     return;

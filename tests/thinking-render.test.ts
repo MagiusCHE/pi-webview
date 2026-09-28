@@ -9,6 +9,12 @@ test("a collapsed thought is never formatted", () => {
   assert.equal(thinkingPaintDecision(true, "**bold** text", "old text"), "collapsed");
 });
 
+test("an inner thought waits for its Agentic parent to open", () => {
+  assert.equal(thinkingPaintDecision(false, "**bold**", undefined, true), "collapsed");
+  assert.equal(thinkingPaintDecision(false, "**new**", "**old**", true), "collapsed");
+  assert.equal(thinkingPaintDecision(false, "**new**", "**old**", false), "paint");
+});
+
 test("an open thought is painted when its text changed", () => {
   assert.equal(thinkingPaintDecision(false, "**bold**", undefined), "paint");
   assert.equal(thinkingPaintDecision(false, "**bold** more", "**bold**"), "paint");
@@ -28,6 +34,9 @@ test("thinking bodies are rendered as markdown, not as plain text", () => {
   assert.doesNotMatch(web, /thinkingTextNode/);
   // expanding a block is what triggers its first render
   assert.match(web, /if \(expanded\) renderThinkingBody\(body\)/);
+  // Finished live thoughts keep an immutable source for later expansion, not
+  // the accumulator reused by the next provider stream.
+  assert.match(web, /bindThinkingBody\(thinkingContentEl, \(\) => content\)/);
   // consecutive provider thought blocks stay one card: the accumulation is
   // index-agnostic, so nothing splits them
   assert.match(web, /thinkingAccum \+= action\.delta/);

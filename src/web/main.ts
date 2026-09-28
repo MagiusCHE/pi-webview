@@ -121,6 +121,7 @@ import {
 } from "./tool-summary.ts";
 import {
   AgenticCountPulse,
+  deferAgenticToolBody,
   agenticHeaderLabelKey,
   agenticMetricVisualState,
   agenticToolMetric,
@@ -4471,7 +4472,7 @@ let thinkingContentEl: HTMLElement | null = null;
 let thinkingSpinnerEl: HTMLElement | null = null;
 let thinkingTimerEl: HTMLElement | null = null;
 let thinkingStartedAt = 0;
-let thinkingTimer: number | null = null;
+let thinkingTimer: ReturnType<typeof setInterval> | null = null;
 let thinkingRenderFrame: number | null = null;
 let thinkingRenderedLength = 0;
 // Raw text of every thinking body (live and resumed ones). The markdown is
@@ -5315,7 +5316,7 @@ function prepareAssistantStream(): void {
   thinkingSpinnerEl = null;
   thinkingTimerEl = null;
   if (thinkingTimer !== null) {
-    cancelAnimationFrame(thinkingTimer);
+    clearInterval(thinkingTimer);
     thinkingTimer = null;
   }
   if (thinkingRenderFrame !== null) {
@@ -5405,7 +5406,30 @@ function thinkingBodies(): HTMLElement[] {
 function setThinkingBodyExpanded(body: HTMLElement, expanded: boolean): void {
   body.hidden = !expanded;
   // The block became visible: this is the first moment its markdown is needed.
+  // An inner thought still waits for the Agentic parent to become visible.
   if (expanded) renderThinkingBody(body);
+  if (expanded && body.classList.contains("agentic-thinking-body")) {
+    for (const thought of body.querySelectorAll<HTMLElement>(
+      ".agentic-thinking-member > .thinking-content",
+    ))
+      renderThinkingBody(thought);
+    for (const tool of body.querySelectorAll<HTMLDetailsElement>(
+      "details.tool-card[open]",
+    )) {
+      hydrateToolBody(tool);
+    }
+    updateThinkingTimer();
+    if (waitingTimerEl && waitingCardEl?.closest(".agentic-thinking-body") === body) {
+      waitingTimerEl.textContent = `${Math.floor((performance.now() - waitingStartedAt) / 1000)}s`;
+    }
+  }
+  if (body.classList.contains("agentic-thinking-body")) {
+    for (const [card, state] of toolTimers) {
+      if (!body.contains(card)) continue;
+      if (expanded) resumeToolTimer(card, state);
+      else pauseToolTimer(state);
+    }
+  }
   const collapsible = body.parentElement;
   const footerBinding = collapsible ? collapseFooterBindings.get(collapsible) : undefined;
   if (footerBinding) {
@@ -5472,25 +5496,24 @@ function syncThinkingChat(): void {
 
 function updateThinkingTimer(now = performance.now()): void {
   if (!thinkingTimerEl || thinkingStartedAt <= 0) return;
+  if (thinkingTimerEl.closest<HTMLElement>(".agentic-thinking-body")?.hidden) return;
   const secs = Math.max(0, Math.floor((now - thinkingStartedAt) / 1000));
   const value = `${secs}s`;
   if (thinkingTimerEl.textContent !== value) thinkingTimerEl.textContent = value;
 }
 
 function startThinkingTimer(startedAt = performance.now()): void {
-  if (thinkingTimer !== null) cancelAnimationFrame(thinkingTimer);
+  if (thinkingTimer !== null) clearInterval(thinkingTimer);
   thinkingStartedAt = startedAt;
   updateThinkingTimer();
-  const tick = (now: number): void => {
-    updateThinkingTimer(now);
-    thinkingTimer = requestAnimationFrame(tick);
-  };
-  thinkingTimer = requestAnimationFrame(tick);
+  // The label displays whole seconds: one tick per second is sufficient,
+  // including while the parent is collapsed (where no DOM write is needed).
+  thinkingTimer = setInterval(() => updateThinkingTimer(), 1000);
 }
 
 function stopThinkingTimer(): void {
   if (thinkingTimer !== null) {
-    cancelAnimationFrame(thinkingTimer);
+    clearInterval(thinkingTimer);
     thinkingTimer = null;
   }
   if (thinkingTimerEl && thinkingStartedAt > 0) {
@@ -5512,8 +5535,18 @@ function renderThinkingBody(body: HTMLElement): boolean {
   const source = thinkingBodySources.get(body);
   if (!source) return false;
   const text = source().trim();
+  const member = body.parentElement?.classList.contains("agentic-thinking-member");
+  const parent = member ? body.closest<HTMLElement>(".agentic-thinking-body") : null;
+  // History cards are first built detached; live cards can remain mounted in
+  // a closed Agentic block. Neither case needs Markdown until it is visible.
+  const ancestorHidden = !!member && (!parent || parent.hidden);
   if (
-    thinkingPaintDecision(body.hidden, text, thinkingBodyPainted.get(body)) !== "paint"
+    thinkingPaintDecision(
+      body.hidden,
+      text,
+      thinkingBodyPainted.get(body),
+      ancestorHidden,
+    ) !== "paint"
   ) {
     return false; // collapsed until expanded, or already up to date
   }
@@ -5532,6 +5565,9 @@ function renderThinkingContent(): void {
 }
 
 function scheduleThinkingContentRender(): void {
+  if (!thinkingContentEl || thinkingContentEl.hidden) return;
+  const agenticBody = thinkingContentEl.closest<HTMLElement>(".agentic-thinking-body");
+  if (agenticBody?.hidden) return;
   if (thinkingRenderFrame !== null) return;
   thinkingRenderFrame = requestAnimationFrame(renderThinkingContent);
 }
@@ -5581,6 +5617,9 @@ function finishThinking(): void {
   thinkingSpinnerEl?.remove();
   thinkingSpinnerEl = null;
   const content = thinkingAccum.trim();
+  // A lazy body must not keep reading the global streaming accumulator: the
+  // next thought resets it before the user may expand this completed card.
+  if (thinkingContentEl) bindThinkingBody(thinkingContentEl, () => content);
   if (content) {
     // the final text is markdown too; a collapsed block is painted on expand
     if (thinkingContentEl) renderThinkingBody(thinkingContentEl);
@@ -5606,6 +5645,7 @@ function interruptThinking(): void {
   thinkingSpinnerEl?.remove();
   thinkingSpinnerEl = null;
   const content = thinkingAccum.trim();
+  if (thinkingContentEl) bindThinkingBody(thinkingContentEl, () => content);
   if (content) {
     if (thinkingContentEl) renderThinkingBody(thinkingContentEl);
     setAgenticItemState(thinkingEl, "interrupted");
@@ -5635,7 +5675,7 @@ let waitingLabelEl: HTMLElement | null = null;
 let waitingSpinnerEl: HTMLElement | null = null;
 let waitingContentEl: HTMLElement | null = null;
 let waitingStartedAt = 0;
-let waitingClock: number | null = null;
+let waitingClock: ReturnType<typeof setInterval> | null = null;
 let waitingTimeout: ReturnType<typeof setTimeout> | null = null;
 let initialAgentWaitStartedAt = 0;
 
@@ -5701,16 +5741,12 @@ function showWaitingBlock(): void {
   card.appendChild(content);
   destination.appendChild(card);
   if (!agenticBlock) applyToolChain();
-  const tick = (now: number): void => {
-    if (!waitingTimerEl) {
-      waitingClock = null;
-      return;
-    }
-    const secs = Math.floor((now - waitingStartedAt) / 1000);
+  waitingClock = setInterval(() => {
+    if (!waitingTimerEl) return;
+    if (waitingTimerEl.closest<HTMLElement>(".agentic-thinking-body")?.hidden) return;
+    const secs = Math.floor((performance.now() - waitingStartedAt) / 1000);
     waitingTimerEl.textContent = `${secs}s`;
-    waitingClock = requestAnimationFrame(tick);
-  };
-  waitingClock = requestAnimationFrame(tick);
+  }, 1000);
   scrollToBottom();
 }
 
@@ -5722,7 +5758,7 @@ function promoteWaitingToThinking(): void {
   if (!card) return;
   // Stop the waiting clock: the thinking clock takes over from the same start.
   if (waitingClock !== null) {
-    cancelAnimationFrame(waitingClock);
+    clearInterval(waitingClock);
     waitingClock = null;
   }
   if (waitingTimeout) {
@@ -5767,7 +5803,7 @@ function disarmWaitingResponse(preserveEmptyAgentic = false): void {
     waitingTimeout = null;
   }
   if (waitingClock !== null) {
-    cancelAnimationFrame(waitingClock);
+    clearInterval(waitingClock);
     waitingClock = null;
   }
   if (waitingCardEl) {
@@ -6556,10 +6592,11 @@ function finalizeMessage(msg: FinalizedMessage): void {
       body.className = "thinking-content";
       bindThinkingBody(body, () => msg.thinking);
       const agenticBlock = ensureLiveAgenticBlock();
+      card.append(head, body);
       activateThinkingCard(card, body, !!agenticBlock);
       if (!agenticBlock) wireThinkingHead(head, body);
-      card.append(head, body);
       (agenticBlock?.body ?? thinkingSlot)?.appendChild(card);
+      if (agenticBlock && !agenticBlock.body.hidden) renderThinkingBody(body);
       registerAgenticThought(card, "success");
       updateThinkingBlocksButton();
       thinkingContentRendered = true;
@@ -6587,19 +6624,11 @@ function finalizeMessage(msg: FinalizedMessage): void {
           );
           const lbl = toolsEl.querySelector(".code-label");
           if (lbl) lbl.textContent = first.name;
-          if (first.name === "read") {
-            renderReadToolArguments(toolsEl, first.args, true);
+          if (first.name === "ask_user") {
+            if (toolsPre) toolsPre.textContent = first.args;
+          } else {
+            paintOrDeferToolArguments(toolsEl, first.name, first.args, true);
             toolsPre = null;
-          } else if (first.name === "write") {
-            renderWriteToolArguments(toolsEl, first.args, true);
-          } else if (first.name === "edit") {
-            renderEditToolArguments(toolsEl, first.args);
-            toolsPre = null;
-          } else if (isShellTool(first.name)) {
-            renderShellToolArguments(toolsEl, first.args);
-            toolsPre = null;
-          } else if (toolsPre) {
-            toolsPre.textContent = first.args;
           }
           const header = toolsEl.querySelector<HTMLElement>(".code-header");
           if (header && !header.querySelector(".copy-btn"))
@@ -6646,7 +6675,8 @@ function finalizeMessage(msg: FinalizedMessage): void {
 }
 
 function createToolCard(tc: ToolCallInfo): void {
-  const card = buildToolCard(tc);
+  const lazy = agenticThinking && tc.name !== "ask_user";
+  const card = buildToolCard(tc, !lazy, lazy);
   if (tc.name === "ask_user") {
     breakAgenticChain();
     const wrapper = addMsg("assistant");
@@ -6859,8 +6889,92 @@ function renderStreamingToolArguments(
   return pre;
 }
 
-function buildToolCard(tc: ToolCallInfo, formatArguments = true): HTMLElement {
+interface DeferredToolBody {
+  args?: { name: string; text: string; final: boolean };
+  output?: { id: string; text: string; images: ImageContent[] };
+  exit?: { text: string; isError: boolean; code?: unknown };
+}
+
+const deferredToolBodies = new WeakMap<HTMLElement, DeferredToolBody>();
+
+function deferredToolBody(card: HTMLElement): DeferredToolBody {
+  let pending = deferredToolBodies.get(card);
+  if (!pending) {
+    pending = {};
+    deferredToolBodies.set(card, pending);
+  }
+  return pending;
+}
+
+function shouldDeferAgenticToolBody(card: HTMLElement): boolean {
+  const parent = card.closest<HTMLElement>(".agentic-thinking-body");
+  return deferAgenticToolBody(
+    !!parent,
+    parent?.hidden ?? false,
+    (card as HTMLDetailsElement).open,
+  );
+}
+
+function renderFinalToolArguments(card: HTMLElement, name: string, args: string): void {
+  if (name === "read") renderReadToolArguments(card, args, true);
+  else if (name === "write") renderWriteToolArguments(card, args, true);
+  else if (name === "edit") renderEditToolArguments(card, args);
+  else if (isShellTool(name)) renderShellToolArguments(card, args);
+  else renderStreamingToolArguments(card, args);
+}
+
+function paintOrDeferToolArguments(
+  card: HTMLElement,
+  name: string,
+  text: string,
+  final: boolean,
+): void {
+  if (shouldDeferAgenticToolBody(card)) {
+    deferredToolBody(card).args = { name, text, final };
+    return;
+  }
+  if (final) renderFinalToolArguments(card, name, text);
+  else renderStreamingToolArguments(card, text);
+}
+
+function hydrateToolBody(card: HTMLElement): void {
+  if (shouldDeferAgenticToolBody(card)) return;
+  const pending = deferredToolBodies.get(card);
+  if (!pending) return;
+  deferredToolBodies.delete(card);
+  if (pending.args) {
+    paintOrDeferToolArguments(
+      card,
+      pending.args.name,
+      pending.args.text,
+      pending.args.final,
+    );
+  }
+  if (pending.output) {
+    renderToolResultContent(card, pending.output.id, {
+      text: pending.output.text,
+      images: pending.output.images,
+    });
+  }
+  if (pending.exit) {
+    renderShellResultExitCode(
+      card,
+      pending.exit.text,
+      pending.exit.isError,
+      pending.exit.code,
+    );
+  }
+}
+
+function buildToolCard(
+  tc: ToolCallInfo,
+  formatArguments = true,
+  lazyAgenticBody = false,
+): HTMLElement {
   const d = document.createElement("details");
+  d.addEventListener("toggle", () => {
+    if (d.open) hydrateToolBody(d);
+  });
   d.className = "tool-card";
   d.dataset.toolName = tc.name;
   const s = document.createElement("summary");
@@ -6882,7 +6996,7 @@ function buildToolCard(tc: ToolCallInfo, formatArguments = true): HTMLElement {
   label.className = "code-label";
   label.textContent = tc.name;
   const pre = document.createElement("pre");
-  pre.textContent = tc.args;
+  pre.textContent = lazyAgenticBody ? "" : tc.args;
   header.append(label);
   addCopyButton(
     header,
@@ -6894,6 +7008,9 @@ function buildToolCard(tc: ToolCallInfo, formatArguments = true): HTMLElement {
   );
   body.append(header, pre);
   d.append(s, body);
+  if (lazyAgenticBody) {
+    deferredToolBody(d).args = { name: tc.name, text: tc.args, final: true };
+  }
   if (formatArguments) {
     if (tc.name === "read") renderReadToolArguments(d, tc.args);
     else if (tc.name === "write") renderWriteToolArguments(d, tc.args);
@@ -6928,9 +7045,9 @@ function buildThinkingCard(
   const body = document.createElement("div");
   body.className = "thinking-content";
   bindThinkingBody(body, () => content);
+  card.append(head, body);
   activateThinkingCard(card, body, insideAgenticBlock);
   if (!insideAgenticBlock) wireThinkingHead(head, body);
-  card.append(head, body);
   return card;
 }
 
@@ -6983,14 +7100,7 @@ const toolCardsById = new Map<string, HTMLElement>();
 
 // --- tool execution timers ---------------------------------------------------
 
-const toolTimers = new Map<
-  HTMLElement,
-  {
-    startedAt: number;
-    clock: ReturnType<typeof setInterval> | null;
-    el: HTMLElement | null;
-  }
->();
+const toolTimers = new Map<HTMLElement, ToolTimerState>();
 
 function fmtToolTime(ms: number): string {
   // below one second shows the real milliseconds (3ms, 142ms): the 0.0s
@@ -7000,19 +7110,41 @@ function fmtToolTime(ms: number): string {
   return s >= 10 ? `${Math.round(s)}s` : `${s.toFixed(1)}s`;
 }
 
+type ToolTimerState = {
+  startedAt: number;
+  clock: ReturnType<typeof setInterval> | null;
+  el: HTMLElement | null;
+};
+
+function pauseToolTimer(state: ToolTimerState): void {
+  if (state.clock) clearInterval(state.clock);
+  state.clock = null;
+}
+
+function resumeToolTimer(card: HTMLElement, state: ToolTimerState): void {
+  if (state.clock || !card.isConnected) return;
+  if (card.closest<HTMLElement>(".agentic-thinking-body")?.hidden) return;
+  if (state.el) state.el.textContent = fmtToolTime(performance.now() - state.startedAt);
+  state.clock = setInterval(() => {
+    if (!card.isConnected) {
+      stopToolTimer(card);
+      return;
+    }
+    if (card.closest<HTMLElement>(".agentic-thinking-body")?.hidden) {
+      pauseToolTimer(state);
+      return;
+    }
+    if (state.el) state.el.textContent = fmtToolTime(performance.now() - state.startedAt);
+  }, 200);
+}
+
 function startToolTimer(card: HTMLElement): void {
   if (toolTimers.has(card)) return;
   const el = card.querySelector<HTMLElement>(".tool-timer");
-  const state = {
-    startedAt: performance.now(),
-    clock: null as ReturnType<typeof setInterval> | null,
-    el,
-  };
+  const state: ToolTimerState = { startedAt: performance.now(), clock: null, el };
   if (el) el.textContent = "0s";
-  state.clock = setInterval(() => {
-    if (el) el.textContent = fmtToolTime(performance.now() - state.startedAt);
-  }, 200);
   toolTimers.set(card, state);
+  resumeToolTimer(card, state);
 }
 
 function stopToolTimer(card: HTMLElement): void {
@@ -7063,6 +7195,14 @@ function markToolOutputPromoted(output: PendingToolOutput): void {
   const registered = askUserInfoByTool.get(output.id)?.cards;
   const cards = registered?.length ? registered : [output.card];
   for (const card of cards) {
+    // The result has moved to the presented-output card. Do not resurrect a
+    // deferred copy inside the original tool when it is expanded later.
+    const pending = deferredToolBodies.get(card);
+    if (pending) {
+      delete pending.output;
+      delete pending.exit;
+      if (!pending.args) deferredToolBodies.delete(card);
+    }
     for (const result of Array.from(
       card.querySelectorAll<HTMLElement>(":scope > .tool-output"),
     )) {
@@ -7287,20 +7427,27 @@ function renderToolResultImages(card: HTMLElement, images: ImageContent[]): void
 function renderToolResultContent(
   card: HTMLElement,
   id: string,
-  content: DisplayMessageContent,
+  content: Pick<DisplayMessageContent, "text" | "images">,
 ): void {
+  if (shouldDeferAgenticToolBody(card)) {
+    deferredToolBody(card).output = { id, text: content.text, images: content.images };
+    return;
+  }
   const pre = ensureToolOutput(card, id);
   pre.textContent = content.text;
   pre.hidden = content.text.length === 0;
   renderToolResultImages(card, content.images);
 }
 
-function resetToolResultContent(card: HTMLElement, id: string): HTMLPreElement {
+function resetToolResultContent(card: HTMLElement, id: string): void {
+  if (shouldDeferAgenticToolBody(card)) {
+    deferredToolBody(card).output = { id, text: "", images: [] };
+    return;
+  }
   const pre = ensureToolOutput(card, id);
   pre.hidden = false;
   pre.textContent = "";
   renderToolResultImages(card, []);
-  return pre;
 }
 
 function renderShellResultExitCode(
@@ -7310,6 +7457,10 @@ function renderShellResultExitCode(
   explicitCode?: unknown,
 ): void {
   if (!isShellTool(card.dataset.toolName ?? "")) return;
+  if (shouldDeferAgenticToolBody(card)) {
+    deferredToolBody(card).exit = { text: output, isError, code: explicitCode };
+    return;
+  }
   const header = card.querySelector<HTMLElement>(
     ":scope > .tool-output > .tool-output-header",
   );
@@ -7425,10 +7576,17 @@ function handleToolExecution(evt: RpcEvent): void {
     const part = evt.partialResult as { content?: unknown } | undefined;
     const text = extractTextContent(part?.content);
     if (text) {
-      const pre = ensureToolOutput(card, id);
-      pre.hidden = false;
-      pre.textContent += text;
-      scrollToBottom();
+      if (shouldDeferAgenticToolBody(card)) {
+        const pending = deferredToolBody(card);
+        const previous = pending.output?.text ?? toolOutputPre.get(id)?.textContent ?? "";
+        pending.output = { id, text: previous + text, images: [] };
+      } else {
+        hydrateToolBody(card);
+        const pre = ensureToolOutput(card, id);
+        pre.hidden = false;
+        pre.textContent += text;
+        scrollToBottom();
+      }
     }
   } else if (evt.type === "tool_execution_end") {
     const isError = evt.isError === true;
@@ -7800,7 +7958,11 @@ function renderRpcEvent(evt: RpcEvent): void {
           // Raw cumulative JSON remains available while arguments are generated.
           // Preserve the user's collapsed/expanded state; the specialized
           // renderer replaces it only at tool_call completion.
-          toolsPre = renderStreamingToolArguments(card, "");
+          if (!shouldDeferAgenticToolBody(card)) {
+            toolsPre = renderStreamingToolArguments(card, "");
+          } else {
+            toolsPre = null;
+          }
           // the timer starts AS SOON AS the card is born (args generation
           // included), not at tool_execution_start: while the diff counters
           // scroll the timer already runs. startToolTimer is idempotent (the
@@ -7844,12 +8006,15 @@ function renderRpcEvent(evt: RpcEvent): void {
       startToolTimer(fallbackCard);
       setToolExecutionStatus(fallbackCard, "running");
       toolsText += action.delta;
-      // Keep the cumulative raw JSON visible for EVERY tool while the model
-      // generates arguments. Specialized visual formatting is intentionally
-      // deferred until the authoritative tool_call event.
+      // Keep cumulative raw JSON available for every tool. Paint it while
+      // the body is visible; otherwise retain only the latest value until
+      // expansion. Specialized formatting waits for the authoritative call.
       if (toolsEl) {
-        toolsPre = renderStreamingToolArguments(toolsEl, toolsText);
-        const tName = toolsEl.querySelector(".tool-name")?.textContent ?? "";
+        const tName = toolsEl.dataset.toolName ?? "";
+        paintOrDeferToolArguments(toolsEl, tName, toolsText, false);
+        toolsPre = shouldDeferAgenticToolBody(toolsEl)
+          ? null
+          : toolsEl.querySelector<HTMLPreElement>(".code-block:not(.tool-output) > pre");
         // write: LIVE line counter — here the deltas REALLY scroll (the
         // content is long) and the number rises in real time. The edits NO
         // (args in bursts): for them only the exact diff at execution end stays.
@@ -7913,19 +8078,16 @@ function renderRpcEvent(evt: RpcEvent): void {
         }
         const label = toolsEl.querySelector(".code-label");
         if (label) label.textContent = tcName;
-        if (tcName === "read") {
-          renderReadToolArguments(toolsEl, action.toolCall.args, true);
-          toolsPre = null;
-        } else if (tcName === "write") {
-          renderWriteToolArguments(toolsEl, action.toolCall.args, true);
-        } else if (tcName === "edit") {
-          renderEditToolArguments(toolsEl, action.toolCall.args);
-          toolsPre = null;
-        } else if (isShellTool(tcName)) {
-          renderShellToolArguments(toolsEl, action.toolCall.args);
-          toolsPre = null;
-        } else if (toolsPre) {
-          toolsPre.textContent = action.toolCall.args;
+        if (tcName === "ask_user") {
+          if (toolsPre) toolsPre.textContent = action.toolCall.args;
+        } else {
+          paintOrDeferToolArguments(toolsEl, tcName, action.toolCall.args, true);
+          // writeLinesFromArgs may need the rendered pre as a final fallback
+          // when the authoritative args arrive wrapped as a string.
+          toolsPre =
+            tcName === "write" && !shouldDeferAgenticToolBody(toolsEl)
+              ? toolsEl.querySelector<HTMLPreElement>(".code-block:not(.tool-output) pre")
+              : null;
         }
         if (action.toolCall.id)
           toolCardsById.set(action.toolCall.id, toolsEl as HTMLElement);
@@ -8782,11 +8944,11 @@ function renderHistory(messages: unknown[]): void {
           // same construction as the runtime; args can be a JSON string or an object
           const raw = b.arguments;
           const argsJson = typeof raw === "string" ? raw : JSON.stringify(raw ?? {});
-          const card = buildToolCard({
-            id: b.id ?? "",
-            name: b.name,
-            args: argsJson,
-          });
+          const card = buildToolCard(
+            { id: b.id ?? "", name: b.name, args: argsJson },
+            !(agenticThinking && b.name !== "ask_user"),
+            agenticThinking && b.name !== "ask_user",
+          );
           // registers the card by id: the next toolResult appends its
           // result (same display as the runtime)
           if (b.id) toolCardsById.set(b.id, card);
@@ -8965,6 +9127,13 @@ function renderHistory(messages: unknown[]): void {
   }
   promoteHistoryTrailingOutputs();
   finishHistoryAgenticBlock(lastTs);
+  // Cards created during history reconstruction were detached when their
+  // initial visibility was decided. Paint only those in an open parent.
+  for (const body of els.thread.querySelectorAll<HTMLElement>(".agentic-thinking-body")) {
+    if (!body.hidden) setThinkingBodyExpanded(body, true);
+  }
+  // The history may have arrived while a startup extension is still waiting
+  // for input: its live dialog goes back to the end of the rebuilt thread.
   if (pendingDialog && inlineDialog?.el === pendingDialog) {
     els.thread.appendChild(pendingDialog);
   }

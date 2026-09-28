@@ -2,6 +2,16 @@ export type AgenticMetric = "thought" | "read" | "write" | "bash" | "tools";
 
 export const WAITING_RESPONSE_DELAY_MS = 1000;
 
+// Outside Agentic thinking the existing tool presentation is unchanged.
+// Inside it, the detail body is needed only when BOTH levels are expanded.
+export function deferAgenticToolBody(
+  insideAgentic: boolean,
+  parentHidden: boolean,
+  toolOpen: boolean,
+): boolean {
+  return insideAgentic && (parentHidden || !toolOpen);
+}
+
 export function waitingResponseDelayRemaining(startedAt: number, now: number): number {
   return Math.max(0, WAITING_RESPONSE_DELAY_MS - (now - startedAt));
 }

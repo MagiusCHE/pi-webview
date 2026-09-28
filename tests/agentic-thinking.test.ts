@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   AGENTIC_COUNT_PULSE_MS,
   AgenticCountPulse,
+  deferAgenticToolBody,
   agenticHeaderLabelKey,
   agenticMetricVisualState,
   agenticToolMetric,
@@ -15,6 +16,14 @@ import {
   waitingResponseRestartAt,
   visibleThinkingContent,
 } from "../src/web/agentic-thinking.ts";
+
+test("tool bodies wait until both Agentic and the tool are open", () => {
+  assert.equal(deferAgenticToolBody(true, true, false), true);
+  assert.equal(deferAgenticToolBody(true, true, true), true);
+  assert.equal(deferAgenticToolBody(true, false, false), true);
+  assert.equal(deferAgenticToolBody(true, false, true), false);
+  assert.equal(deferAgenticToolBody(false, false, false), false);
+});
 
 test("agentic thinking starts with no visible counters", () => {
   assert.deepEqual(emptyAgenticCounts(), {
@@ -185,6 +194,54 @@ test("agentic tool categories collapse every other tool into tools", () => {
 // SAME boundaries: a custom message injected by another session is one of
 // them, exactly like a user message (otherwise the card lands next to a block
 // that keeps growing live and the two renderings disagree).
+test("hidden Agentic tool bodies retain results and paint on expansion", () => {
+  const web = readFileSync("src/web/main.ts", "utf8");
+  assert.match(web, /function paintOrDeferToolArguments\(/);
+  assert.match(
+    web,
+    /deferredToolBody\(card\)\.output = \{ id, text: content\.text, images: content\.images \}/,
+  );
+  assert.match(web, /pending\.output = \{ id, text: previous \+ text, images: \[\] \}/);
+  assert.match(
+    web,
+    /d\.addEventListener\("toggle", \(\) => \{\s*if \(d\.open\) hydrateToolBody\(d\)/,
+  );
+  assert.match(web, /details\.tool-card\[open\]/);
+  assert.match(web, /renderShellResultExitCode\(\s*card,\s*pending\.exit\.text/);
+  assert.match(web, /if \(!body\.hidden\) setThinkingBodyExpanded\(body, true\)/);
+  assert.match(
+    web,
+    /if \(expanded && body\.classList\.contains\("agentic-thinking-body"\)\)/,
+  );
+});
+
+test("running timers stop on completion and avoid hidden inner DOM writes", () => {
+  const web = readFileSync("src/web/main.ts", "utf8");
+  assert.match(
+    web,
+    /function stopThinkingTimer\(\)[\s\S]*?clearInterval\(thinkingTimer\)/,
+  );
+  assert.match(web, /function finishAgenticBlock\([\s\S]*?clearInterval\(block\.clock\)/);
+  assert.match(web, /function stopToolTimer\([\s\S]*?clearInterval\(state\.clock\)/);
+  assert.match(web, /function finishCompaction\([\s\S]*?clearInterval\(compactClock\)/);
+  assert.match(
+    web,
+    /thinkingTimerEl\.closest<HTMLElement>\("\.agentic-thinking-body"\)\?\.hidden/,
+  );
+  assert.match(
+    web,
+    /function resumeToolTimer\([\s\S]*?if \(card\.closest<HTMLElement>\("\.agentic-thinking-body"\)\?\.hidden\) return/,
+  );
+  assert.match(
+    web,
+    /if \(expanded\) resumeToolTimer\(card, state\);\s*else pauseToolTimer\(state\)/,
+  );
+  assert.match(
+    web,
+    /thinkingTimer = setInterval\(\(\) => updateThinkingTimer\(\), 1000\)/,
+  );
+});
+
 test("a message injected by another session closes the live Agentic block", () => {
   const web = readFileSync("src/web/main.ts", "utf8");
   const live =

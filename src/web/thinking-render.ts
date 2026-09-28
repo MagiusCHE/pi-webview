@@ -12,8 +12,9 @@ export function thinkingPaintDecision(
   hidden: boolean,
   source: string,
   painted: string | undefined,
+  ancestorHidden = false,
 ): ThinkingPaintDecision {
-  if (hidden) return "collapsed";
+  if (hidden || ancestorHidden) return "collapsed";
   if (painted === source) return "current";
   return "paint";
 }

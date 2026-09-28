@@ -2995,21 +2995,30 @@ async function forkSessionIntoCurrentWorkspace(path: string): Promise<void> {
 
 // Session pick: Chrome can move its bridge channel to the selected session's
 // original workspace, so it must never fork merely because All shows another
-// path. Standalone keeps its explicit resume/fork/new chooser, while IDEs have
-// a fixed host workspace and therefore retain their fork confirmation.
+// path. Standalone keeps its explicit resume/fork/new chooser, unless the
+// current session is still unstarted: there is nothing to preserve, so the
+// picked session opens directly in its own workspace. IDEs have a fixed host
+// workspace and therefore retain their fork confirmation.
 async function pickSession(path: string): Promise<void> {
   if (switchingSession) return;
   const session = sessions.find((candidate) => candidate.path === path);
   const crossWorkspace = Boolean(
     session?.cwd && workspacePath && !samePath(session.cwd, workspacePath),
   );
-  const strategy = sessionPickStrategy(runtime.mode, crossWorkspace);
+  // Same emptiness test as the folder button: no message means the session was
+  // never started, so a cross-workspace pick needs no decision.
+  const currentIsEmpty = !sessionHasMessages && isNewSession(currentSession());
+  const strategy = sessionPickStrategy(runtime.mode, crossWorkspace, currentIsEmpty);
   if (strategy === "switch") {
     switchSession(path);
     return;
   }
   if (strategy === "reload-original") {
     await reloadBrowserSession(path);
+    return;
+  }
+  if (strategy === "resume-original" && session?.cwd) {
+    await resumeSessionInWorkspace(path, session.cwd);
     return;
   }
   if (strategy === "choose-standalone-action" && session?.cwd) {

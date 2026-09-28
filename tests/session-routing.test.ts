@@ -24,6 +24,42 @@ test("standalone and fixed-workspace IDEs retain their distinct cross-workspace 
   assert.equal(sessionPickStrategy("ide", true), "confirm-ide-fork");
 });
 
+// An unstarted session (browser, "New session" still empty) has no
+// conversation to fork: picking a session from another repository must open it
+// directly instead of asking what to do. IDE hosts keep the question because
+// their workspace is fixed.
+test("an unstarted session resumes a cross-workspace pick without asking", () => {
+  assert.equal(sessionPickStrategy("standalone", true, true), "resume-original");
+  assert.equal(
+    sessionPickStrategy("standalone", true, false),
+    "choose-standalone-action",
+  );
+  assert.equal(sessionPickStrategy("vscode", true, true), "confirm-ide-fork");
+  assert.equal(sessionPickStrategy("ide", true, true), "confirm-ide-fork");
+  assert.equal(sessionPickStrategy("browser-extension", true, true), "reload-original");
+  assert.equal(sessionPickStrategy("standalone", false, true), "switch");
+});
+
+test("the empty-session shortcut uses the same test as the folder button", () => {
+  const web = readFileSync("src/web/main.ts", "utf8");
+  const emptiness = /!sessionHasMessages && isNewSession\(currentSession\(\)\)/g;
+  assert.equal(
+    (web.match(emptiness) ?? []).length,
+    2,
+    "pickSession and changeWorkspace must agree on what an empty session is",
+  );
+  const pick = /async function pickSession\(path: string\)[\s\S]*?\n}/.exec(web)?.[0];
+  assert.ok(pick, "pickSession not found");
+  assert.match(
+    pick,
+    /sessionPickStrategy\(runtime\.mode, crossWorkspace, currentIsEmpty\)/,
+  );
+  assert.match(
+    pick,
+    /strategy === "resume-original" && session\?\.cwd[\s\S]*?await resumeSessionInWorkspace\(path, session\.cwd\)/,
+  );
+});
+
 test("a large local session is given more than the default RPC timeout", () => {
   assert.ok(SESSION_SWITCH_TIMEOUT_MS > 10_000);
   const web = readFileSync("src/web/main.ts", "utf8");

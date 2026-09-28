@@ -25,14 +25,25 @@ export function sessionSwitchOutcome(response: {
 }
 
 export type SessionPickStrategy =
-  "switch" | "reload-original" | "choose-standalone-action" | "confirm-ide-fork";
+  | "switch"
+  | "reload-original"
+  | "resume-original"
+  | "choose-standalone-action"
+  | "confirm-ide-fork";
 
+// crossWorkspace picks need a strategy only when the picked session lives in
+// another folder. An UNSTARTED current session (nothing written yet) has no
+// conversation to fork or preserve, so the picked session is resumed in its
+// own workspace with no question; the fixed-workspace IDE hosts keep their
+// fork confirmation because they cannot move pi to another folder.
 export function sessionPickStrategy(
   mode: RuntimeMode,
   crossWorkspace: boolean,
+  currentSessionEmpty = false,
 ): SessionPickStrategy {
   if (!crossWorkspace) return "switch";
   if (mode === "browser-extension") return "reload-original";
-  if (mode === "standalone") return "choose-standalone-action";
+  if (mode === "standalone")
+    return currentSessionEmpty ? "resume-original" : "choose-standalone-action";
   return "confirm-ide-fork";
 }

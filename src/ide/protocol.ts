@@ -317,6 +317,12 @@ export interface SessionListResult {
   workspace?: string;
 }
 
+export interface DirectoryListing {
+  path: string;
+  parent: string | null;
+  dirs: Array<{ name: string; path: string }>;
+}
+
 export interface IdeResponse {
   id: string;
   ok: boolean;

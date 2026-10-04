@@ -119,6 +119,16 @@ test("Chrome permits confirmed HTTP(S) navigation from a restricted source page"
   );
 });
 
+test("Chrome full-page DOM injection never passes an undefined argument", () => {
+  const serviceWorker = readFileSync(
+    "src/adapters/browser/chrome/service-worker.ts",
+    "utf8",
+  );
+  assert.match(serviceWorker, /func: \(selector: string \| null\)/);
+  assert.match(serviceWorker, /args: \[request\.selector \?\? null\]/);
+  assert.doesNotMatch(serviceWorker, /args: \[request\.selector\]/);
+});
+
 test("Chrome page actions are structured and do not evaluate remote code", () => {
   const serviceWorker = readFileSync(
     "src/adapters/browser/chrome/service-worker.ts",

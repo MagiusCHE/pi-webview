@@ -31,3 +31,14 @@ prefix: the settings are unnecessary but harmless.
 
 The other files (`launch.json`, `tasks.json`) are the standard development
 configs (F5 Extension Development Host + `pnpm compile` task).
+
+## F5 and the installed companion
+
+The development extension has the ID `magiusche.pi-webview`, while the installed
+companion is `magiusche.pi-webview-ide`. Both contribute the same views and
+commands, so loading them together causes duplicate view/provider errors.
+
+`launch.json` passes `--disable-extension=magiusche.pi-webview-ide` to the
+Extension Development Host only. The installed companion stays enabled in
+normal VS Code windows; do not disable or uninstall it globally to debug.
+The debugger's `outFiles` matches the generated `.cjs` adapter bundle.

@@ -3328,22 +3328,35 @@ body.stats-bar-expanded .stats-slots {
   overflow-wrap: anywhere;
 }
 
-/* --- folder browse modal (standalone) --- */
+/* --- folder browse modal (standalone and browser companion) --- */
 .folder-modal {
   max-width: 460px;
   width: min(90vw, 460px);
 }
+.folder-path-label {
+  color: var(--fg-secondary);
+  font-size: 12.5px;
+}
+.folder-path-row {
+  display: flex;
+  gap: 8px;
+}
+.folder-path-row .btn {
+  flex-shrink: 0;
+}
 .folder-path {
+  min-width: 0;
+  flex: 1;
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--fg-secondary);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 6px 8px;
-  word-break: break-all;
-  max-height: 48px;
-  overflow-y: auto;
+}
+.folder-path[aria-invalid="true"] {
+  border-color: var(--err);
+}
+.folder-error {
+  color: var(--err);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
 }
 .folder-dirs {
   display: flex;

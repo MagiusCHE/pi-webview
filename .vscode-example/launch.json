@@ -5,8 +5,12 @@
       "name": "Extension Development Host",
       "type": "extensionHost",
       "request": "launch",
-      "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${workspaceFolder}"],
-      "outFiles": ["${workspaceFolder}/dist/extension/**/*.js"],
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--disable-extension=magiusche.pi-webview-ide",
+        "${workspaceFolder}"
+      ],
+      "outFiles": ["${workspaceFolder}/dist/extension/**/*.cjs"],
       "preLaunchTask": "build-extension"
     }
   ]

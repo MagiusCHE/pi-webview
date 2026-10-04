@@ -14,7 +14,6 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -64,6 +63,7 @@ import { fetchProviderBalance } from "./balance.ts";
 import { revealFileInSystemManager } from "./open-file.ts";
 import { clearLock } from "./lock.ts";
 import { normalizeLaunchCwd } from "./launch-context.ts";
+import { listDirectory } from "./folders.ts";
 import { openBrowser } from "./open-browser.ts";
 import { BrowserHandoffRegistry } from "./browser-handoff.ts";
 import {
@@ -785,19 +785,9 @@ function main(): void {
       }
       if (req.type === "listDir") {
         try {
-          const path = normalize(req.path);
-          const parentPath = dirname(path);
-          const dirs = readdirSync(path, { withFileTypes: true })
-            .filter((d) => d.isDirectory() && !d.name.startsWith("."))
-            .map((d) => ({ name: d.name, path: join(path, d.name) }))
-            .sort((a, b) => a.name.localeCompare(b.name));
           respond(req.id ?? "", {
             ok: true,
-            data: {
-              path,
-              parent: parentPath === path ? null : parentPath,
-              dirs,
-            },
+            data: listDirectory(req.path, workspaceDir),
           });
         } catch (err) {
           respond(req.id ?? "", {
@@ -808,6 +798,17 @@ function main(): void {
         return;
       }
       if (req.type === "setWorkspace") {
+        let targetPath: string;
+        try {
+          // Validate before stopping pi or moving/forking any session files.
+          targetPath = listDirectory(req.path, workspaceDir).path;
+        } catch (err) {
+          respond(req.id ?? "", {
+            ok: false,
+            error: `workspace folder unavailable: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          return;
+        }
         let sessionPath: string | undefined;
         // A move copies the session under the new workspace and removes the
         // original: pi must stop first so no write lands in the removed file.
@@ -822,10 +823,10 @@ function main(): void {
         if (moving) pi.dispose();
         try {
           if (req.action === "fork" && req.sessionPath) {
-            const res = forkSession(req.sessionPath, req.path);
+            const res = forkSession(req.sessionPath, targetPath);
             sessionPath = (res as { path?: string }).path;
           } else if (moving && req.sessionPath) {
-            const res = moveSession(req.sessionPath, req.path);
+            const res = moveSession(req.sessionPath, targetPath);
             sessionPath = (res as { path?: string }).path;
           } else if (req.action === "resume") {
             if (!req.sessionPath) {
@@ -853,11 +854,11 @@ function main(): void {
           return;
         }
         const startOn = moving || req.action === "resume" ? sessionPath : undefined;
-        void switchWorkspace(req.path, startOn)
+        void switchWorkspace(targetPath, startOn)
           .then(() =>
             respond(req.id ?? "", {
               ok: true,
-              data: { workspace: req.path, sessionPath },
+              data: { workspace: targetPath, sessionPath },
             }),
           )
           .catch((err: unknown) =>

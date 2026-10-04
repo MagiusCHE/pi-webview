@@ -112,7 +112,7 @@ test("the folder-change dialog moves a session into the new workspace", () => {
   assert.match(web, /choice !== "new" && currentSessionPath/);
   // the bridge stops pi first, then moves the file and starts on the copy
   assert.match(bridge, /req\.action === "move"/);
-  assert.match(bridge, /moveSession\(req\.sessionPath, req\.path\)/);
+  assert.match(bridge, /moveSession\(req\.sessionPath, targetPath\)/);
   assert.match(bridge, /workspace move requires a session path/);
   assert.equal(italian.ui.moveSessionHere, "Sposta la sessione nella nuova cartella");
   assert.equal(english.ui.moveSessionHere, "Move the session into the new folder");

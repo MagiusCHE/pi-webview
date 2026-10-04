@@ -114,8 +114,8 @@ interface ChromeApi {
           }
         | {
             target: { tabId: number };
-            func: (selector: string | undefined) => T;
-            args: [string | undefined];
+            func: (selector: string | null) => T;
+            args: [string | null];
           }
         | { target: { tabId: number }; files: string[] },
     ): Promise<Array<{ result?: T }>>;
@@ -460,7 +460,7 @@ async function executeBrowserTool(
     if (request.operation === "dom") {
       const [execution] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: (selector: string | undefined) => {
+        func: (selector: string | null) => {
           const element = selector
             ? document.querySelector(selector)
             : document.documentElement;
@@ -472,7 +472,8 @@ async function executeBrowserTool(
             selector,
           };
         },
-        args: [request.selector],
+        // Chrome requires JSON-serializable arguments, including for full-page DOM.
+        args: [request.selector ?? null],
       });
       const result = execution?.result;
       if (!result || typeof result.html !== "string") {

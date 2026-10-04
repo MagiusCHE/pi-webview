@@ -4,6 +4,14 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.6.10] - 2026-10-04
+
+- Fixed Chrome full-page DOM requests failing because the scripting API received an undefined argument; full-page requests now use a JSON-serializable null selector.
+
+- Fixed F5 development launches conflicting with the installed VS Code companion: the companion is now disabled only in the Extension Development Host, avoiding duplicate view and provider registrations while leaving normal VS Code windows unchanged.
+
+- Added an editable full-path field to the standalone and Chrome folder picker, so folder paths can be typed or pasted directly. Missing, non-directory or inaccessible paths show an inline error without changing the workspace or session.
+
 ## [0.6.9] - 2026-09-28
 
 - Fixed a session load getting stuck when a pi extension asked for a confirmation during startup. pi installs its RPC response reader only after the first extension binding, so that dialog can never be answered: the loader stayed up, the question was unreachable and the history request timed out after 90 seconds. The question is now shown as an inert notice with the terminal instructions and the reload hint, the session stays locked instead of waiting, and every dialog arriving after RPC answered keeps working as before.

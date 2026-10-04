@@ -11,6 +11,7 @@ import type {
   UserConfig,
   SessionInfo,
   SessionListResult,
+  DirectoryListing,
   CliFlags,
   CliFlagInfo,
   StartupInfo,
@@ -78,6 +79,7 @@ import {
   sessionSwitchOutcome,
 } from "./session-routing.ts";
 import { thinkingPaintDecision } from "./thinking-render.ts";
+import { openFolderBrowser } from "./folder-browser.ts";
 import {
   canFinishSessionLoading,
   isUnanswerableStartupRequest,
@@ -3940,141 +3942,10 @@ async function fetchCompactionSettings(): Promise<void> {
 
 // --- workspace change (standalone: folder browse + destination choice) -----
 
-interface DirectoryListing {
-  path: string;
-  parent: string | null;
-  dirs: Array<{ name: string; path: string }>;
-}
-
 async function listDirs(path: string): Promise<DirectoryListing | null> {
   const res = await ideRequest({ type: "listDir", path });
   if (!res?.ok) return null;
   return res.data as DirectoryListing;
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (c) => {
-    switch (c) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case '"':
-        return "&quot;";
-      default:
-        return "&#39;";
-    }
-  });
-}
-
-// folder navigation modal (bridge listDir): resolves with the chosen path
-function openFolderBrowser(start: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    let current = start;
-    const backdrop = document.createElement("div");
-    backdrop.className = "modal-backdrop";
-    const card = document.createElement("div");
-    card.className = "modal folder-modal";
-    const head = document.createElement("div");
-    head.className = "modal-head";
-    const title = document.createElement("span");
-    title.className = "modal-title";
-    title.textContent = t("chooseFolder");
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "icon-btn";
-    close.textContent = "✕";
-    close.title = t("cancel");
-    head.append(title, close);
-    const pathEl = document.createElement("div");
-    pathEl.className = "folder-path";
-    const dirsEl = document.createElement("div");
-    dirsEl.className = "folder-dirs";
-    const actions = document.createElement("div");
-    actions.className = "modal-actions";
-    const selectBtn = document.createElement("button");
-    selectBtn.type = "button";
-    selectBtn.className = "btn primary";
-    selectBtn.textContent = t("select");
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.className = "btn";
-    cancelBtn.textContent = t("cancel");
-    actions.append(selectBtn, cancelBtn);
-    card.append(head, pathEl, dirsEl, actions);
-    backdrop.appendChild(card);
-
-    const done = (val: string | null): void => {
-      backdrop.remove();
-      document.removeEventListener("keydown", esc);
-      resolve(val);
-    };
-    const esc = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") done(null);
-    };
-    document.addEventListener("keydown", esc);
-
-    async function load(): Promise<void> {
-      pathEl.textContent = current;
-      dirsEl.textContent = "";
-      const placeholder = document.createElement("div");
-      placeholder.className = "folder-dirs-empty";
-      placeholder.textContent = t("loading");
-      dirsEl.appendChild(placeholder);
-      const listing = await listDirs(current);
-      dirsEl.textContent = "";
-      if (!listing) {
-        const empty = document.createElement("div");
-        empty.className = "folder-dirs-empty";
-        empty.textContent = "—";
-        dirsEl.appendChild(empty);
-        return;
-      }
-      current = listing.path;
-      pathEl.textContent = current;
-      // Native path operations run in the bridge, on the target OS.
-      if (listing.parent) {
-        const up = document.createElement("button");
-        up.type = "button";
-        up.className = "folder-dir folder-up";
-        up.innerHTML = `${folderIcon()} <span>.. (${escapeHtml(t("parentFolder"))})</span>`;
-        up.addEventListener("click", () => {
-          current = listing.parent!;
-          void load();
-        });
-        dirsEl.appendChild(up);
-      }
-      if (listing.dirs.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "folder-dirs-empty";
-        empty.textContent = "—";
-        dirsEl.appendChild(empty);
-      }
-      for (const dir of listing.dirs) {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "folder-dir";
-        btn.innerHTML = `${folderIcon()} <span>${escapeHtml(dir.name)}</span>`;
-        btn.addEventListener("click", () => {
-          current = dir.path;
-          void load();
-        });
-        dirsEl.appendChild(btn);
-      }
-    }
-
-    selectBtn.addEventListener("click", () => done(current));
-    cancelBtn.addEventListener("click", () => done(null));
-    close.addEventListener("click", () => done(null));
-    backdrop.addEventListener("click", (e) => {
-      if (e.target === backdrop) done(null);
-    });
-
-    document.body.appendChild(backdrop);
-    void load();
-  });
 }
 
 type CrossWorkspaceSessionAction = "resume" | "fork" | "new";
@@ -4250,7 +4121,7 @@ function askWorkspaceAction(folder: string): Promise<"move" | "fork" | "new" | n
 
 async function changeWorkspace(): Promise<void> {
   if (!workspacePath) return;
-  const target = await openFolderBrowser(workspacePath);
+  const target = await openFolderBrowser(workspacePath, listDirs);
   if (!target) return;
   if (target === workspacePath) return; // same folder: no change
   // An empty session has nothing to preserve, fork or move: switch directly to
@@ -4268,7 +4139,10 @@ async function changeWorkspace(): Promise<void> {
         ? { sessionPath: currentSessionPath }
         : {}),
     });
-    if (!res?.ok) return;
+    if (!res?.ok) {
+      addSystemBox("error", t("workspaceChangeFailed"));
+      return;
+    }
     workspacePath = target;
     workspaceLabel = target.split(/[\\/]/).pop() ?? "";
     if (choice !== "new") {

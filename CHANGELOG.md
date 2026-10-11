@@ -4,6 +4,10 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.6.11] - 2026-10-11
+
+- Fixed non-compact status bars still clipping text inside individual extension slots on narrow screens. Each slot now wraps its full text, including ANSI-colored segments, long words and explicit line breaks, in every bar position; compact mode remains unchanged.
+
 ## [0.6.10] - 2026-10-04
 
 - Fixed Chrome full-page DOM requests failing because the scripting API received an undefined argument; full-page requests now use a JSON-serializable null selector.

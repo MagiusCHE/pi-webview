@@ -2991,8 +2991,8 @@ footer {
    (ctx.ui.setStatus). Width managed LIKE the inputbox: fluid, centered,
    max 56rem. Squared bottom corners and removed bottom border: it welds
    to the top border of the box (negative margin-bottom to avoid a double
-   border). When the window shrinks the extra components disappear
-   and an ellipsis (…) remains. */
+   border). Compact mode clips overflowing text; expanded mode wraps
+   both status sources and the text within each source. */
 .stats-badge {
   display: flex;
   align-items: center;
@@ -3052,7 +3052,7 @@ body.stats-bar-below .stats-badge {
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 /* topbar: free-standing box in the header (under the sessions/gear row),
-   full rounded corners, NO ellipsis: content wraps on multiple lines */
+   with full rounded corners; compactness is controlled independently. */
 body.stats-bar-topbar header {
   flex-wrap: wrap;
 }
@@ -3084,6 +3084,20 @@ body.stats-bar-expanded .stats-badge {
 body.stats-bar-expanded .stats-slots {
   flex-wrap: wrap;
   overflow: visible;
+}
+body.stats-bar-expanded .stats-slot {
+  /* Keep ANSI spans in normal text flow so a single source can also wrap. */
+  display: block;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  text-overflow: clip;
+}
+body.stats-bar-expanded .stats-slot + .stats-slot::before {
+  display: inline-block;
+  margin-inline-end: 6px;
+  vertical-align: middle;
 }
 /* compaction in progress: the gauge turns into a spinning loader.
    A full ring rotating would look static → hide the track and keep only

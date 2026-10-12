@@ -2,6 +2,7 @@
   "language": "English",
   "ui": {
     "abort": "Abort",
+    "agentStopped": "Processing interrupted by the user.",
     "agenticBash": "bash",
     "agenticCountHasErrors": "One or more items failed",
     "agenticRead": "read",
@@ -86,6 +87,8 @@
     "editReplace": "Replace",
     "shellTimeout": "Timeout",
     "toolExitCode": "exit code",
+    "toolOutputShowAll": "Show all",
+    "toolOutputShowLess": "Show less",
     "toolResultFrom": "Result from {tool}",
     "toolResultShownBelow": "Result shown as the final response below.",
     "compactAsk": "Start session compaction? The context will be summarized to free up space.",

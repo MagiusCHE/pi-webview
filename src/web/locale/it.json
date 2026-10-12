@@ -2,6 +2,7 @@
   "language": "Italiano",
   "ui": {
     "abort": "Interrompi",
+    "agentStopped": "Elaborazione interrotta dall’utente.",
     "agenticBash": "bash",
     "agenticCountHasErrors": "Uno o più elementi non sono riusciti",
     "agenticRead": "letture",
@@ -85,6 +86,8 @@
     "editReplace": "Sostituisci",
     "shellTimeout": "Timeout",
     "toolExitCode": "codice di uscita",
+    "toolOutputShowAll": "Mostra tutto",
+    "toolOutputShowLess": "Mostra meno",
     "toolResultFrom": "Risultato di {tool}",
     "toolResultShownBelow": "Risultato mostrato come risposta finale qui sotto.",
     "compactAsk": "Avviare la compattazione della sessione? Il contesto verrà riassunto per liberare spazio.",

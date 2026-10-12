@@ -220,8 +220,13 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
 - **Tool result come risposta finale**: durante un agent run la Webview conserva
   l'ultima sequenza di tool result. Se `agent_settled` arriva senza contenuto
   assistant visibile successivo, quei risultati vengono promossi fuori dalle
-  card e dall'Agentic thinking come risposta finale. La history ricostruisce la
-  stessa decisione dall'ordine dei messaggi. Il renderer è type-aware: testo,
+  card e dall'Agentic thinking come risposta finale. Dopo STOP o un run
+  `aborted`, invece, nessun risultato viene promosso (nemmeno quelli tardivi):
+  resta nelle card e compare un evento d'interruzione localizzato. L'estensione
+  persiste l'evento come entry `custom` non-context `pi-webview-agent-stop` a
+  `agent_settled`; la UI lo ricostruisce da `get_entries` nel branch attivo,
+  rispettando la compaction, e riconosce anche gli assistant `aborted` legacy.
+  La history ricostruisce la stessa decisione. Il renderer è type-aware: testo,
   JSON, code fence, immagini, file, media e resource link hanno presentazioni
   dedicate; un tipo sconosciuto usa sempre un fallback JSON e non viene perso
 - **Cambio cartella dalla dropdown sessioni**: standalone e Chrome mostrano il pulsante cartella (`changeWorkspace` → `askWorkspaceAction`) con tre scelte — **sposta la sessione** nella nuova cartella, **fork**, **nuova sessione** (`setWorkspace`, `action: "move" | "fork" | "new"`). `move` copia la conversazione con l'header del nuovo workspace e rimuove l'originale (nessun duplicato; la copia eredita il `parentSession` dell'originale per non lasciare un riferimento pendente): il bridge ferma pi prima della copia/rimozione, riparte sulla copia e, se la copia fallisce, riavvia pi sulla sessione intatta. Una sessione vuota salta il dialog e si sposta direttamente.

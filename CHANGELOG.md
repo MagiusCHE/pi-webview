@@ -4,6 +4,14 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.6.12] - 2026-10-12
+
+- Stopping a run now keeps tool results inside their cards instead of promoting them as the final response, including results received after STOP. A localized interruption event is shown live and preserved in resumed history without adding model-context messages.
+
+- Completion notifications no longer fall back to the chat when desktop notifications are unavailable, denied or fail, preventing duplicate assistant responses.
+
+- Promoted textual tool results now stay inside a box with a three-line preview and localized Show all / Show less controls, in both live chat and resumed history. JSON and code retain their full-content Copy action, while images, files and media keep their existing presentation.
+
 ## [0.6.11] - 2026-10-11
 
 - Fixed non-compact status bars still clipping text inside individual extension slots on narrow screens. Each slot now wraps its full text, including ANSI-colored segments, long words and explicit line breaks, in every bar position; compact mode remains unchanged.

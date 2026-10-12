@@ -178,6 +178,19 @@ import {
 } from "./composer-activity.ts";
 import { TrailingToolOutputResolver } from "./tool-output-resolver.ts";
 import {
+  isAbortedAssistantMessage,
+  isAgentStopEntry,
+  isAgentStopMessage,
+  stoppedHistoryMessages,
+  withAgentStopEntries,
+} from "../ide/agent-stop.ts";
+import {
+  discardToolOutputPreviews,
+  observeToolOutputPreviews,
+  refreshToolOutputPreviews,
+  wrapToolOutputPreview,
+} from "./tool-output-preview.ts";
+import {
   isKnownSlashCommand,
   normalizeExtensionCommands,
   shouldAttachImplicitEditorContext,
@@ -1908,6 +1921,9 @@ function applyUiStrings(): void {
   els.allowNpmInstallScriptsNote.textContent = t("settingsAllowNpmInstallScriptsDesc");
   els.allowNpmInstallScripts.checked = dangerouslyAllowAllNpmScripts;
   refreshAgenticThinkingSummaries();
+  for (const line of els.thread.querySelectorAll<HTMLElement>(".agent-stop-event")) {
+    line.textContent = t("agentStopped");
+  }
   // settings modal: 4 sections (Info / Webview / pi.dev / CLI flags)
   els.settingsInfoTitle.textContent = t("settingsSectionInfo");
   els.settingsWebviewTitle.textContent = t("settingsSectionWebview");
@@ -1979,6 +1995,7 @@ function applyUiStrings(): void {
   updateThemeButtons();
   populateSessionMenu();
   refreshCollapseFooters();
+  refreshToolOutputPreviews(els.thread);
   updateSettingsApplyState();
   // theme: inside the VS Code webview the IDE manages it — no choice
   if (runtime.isVsCode) {
@@ -3852,11 +3869,10 @@ async function loadHistory(): Promise<boolean> {
   }
   let loaded = false;
   try {
-    const res = await rpcRequest(
-      rpc.getMessages(),
-      undefined,
-      SESSION_HISTORY_TIMEOUT_MS,
-    );
+    const [res, entries] = await Promise.all([
+      rpcRequest(rpc.getMessages(), undefined, SESSION_HISTORY_TIMEOUT_MS),
+      rpcRequest(rpc.getEntries(), undefined, SESSION_HISTORY_TIMEOUT_MS),
+    ]);
     if (startupRpcBlocked) return false;
     const messages = (res.data as { messages?: unknown[] } | undefined)?.messages;
     if (!res.success || !Array.isArray(messages)) {
@@ -3871,7 +3887,11 @@ async function loadHistory(): Promise<boolean> {
     interactiveHistoryRetryAvailable = false;
     // only the LAST historyLimit turns: the long history is
     // truncated from the top (never the whole session)
-    renderHistory(messages.slice(-historyLimit));
+    const history = withAgentStopEntries(
+      messages,
+      entries.success ? entries.data : undefined,
+    );
+    renderHistory(history.slice(-historyLimit));
     seedMessageHistory(messages.slice(-historyLimit));
     // welcome banner: only while the session has no real messages yet (new/
     // empty session) — checked on the DATA, not the DOM (loading logs are
@@ -4376,6 +4396,8 @@ els.statsStop.title = t("stopWorking");
 
 function stopWorking(): Promise<void> {
   if (!transport || !working) return Promise.resolve();
+  // Suppress promotion before abort is sent: tools can finish while Pi stops.
+  trailingToolOutputs.stop();
   // dequeueSteering sends clear_queue synchronously before returning its
   // promise. Abort is sent right afterwards: no client-side delivery delay.
   const restored = dequeueSteering();
@@ -4783,8 +4805,12 @@ const chatBlockObserver = new MutationObserver((records) => {
       if (node.nodeType !== Node.ELEMENT_NODE) continue;
       elementAdded = true;
       enhanceCollapseFooters(node);
+      if (node instanceof HTMLElement) observeToolOutputPreviews(node);
     }
-    for (const node of record.removedNodes) discardCollapseFooters(node);
+    for (const node of record.removedNodes) {
+      discardCollapseFooters(node);
+      if (node instanceof HTMLElement) discardToolOutputPreviews(node);
+    }
   }
   if (elementAdded) scrollToBottom();
 });
@@ -6447,6 +6473,7 @@ function renderToolHeader(el: HTMLElement, summary: ToolSummary): void {
 let lastAssistantText = "";
 
 function finalizeMessage(msg: FinalizedMessage): void {
+  if (msg.aborted) trailingToolOutputs.stop();
   const hasVisibleText = msg.text.trim().length > 0;
   if (hasVisibleText || msg.images.length > 0) {
     trailingToolOutputs.assistantVisible(msg.text, msg.images.length > 0);
@@ -6480,10 +6507,11 @@ function finalizeMessage(msg: FinalizedMessage): void {
       if (!agenticBlock) wireThinkingHead(head, body);
       (agenticBlock?.body ?? thinkingSlot)?.appendChild(card);
       if (agenticBlock && !agenticBlock.body.hidden) renderThinkingBody(body);
-      registerAgenticThought(card, "success");
+      registerAgenticThought(card, msg.aborted ? "interrupted" : "success");
       updateThinkingBlocksButton();
       thinkingContentRendered = true;
     }
+    if (msg.aborted && thinkingEl) setAgenticItemState(thinkingEl, "interrupted");
     if (thinkingSlot && !thinkingSlot.hasChildNodes()) thinkingSlot.remove();
     // Some providers only expose the authoritative text at message_end. It is
     // still a visible-content boundary before any following tool calls.
@@ -7073,6 +7101,7 @@ interface PendingToolOutput {
 }
 
 const trailingToolOutputs = new TrailingToolOutputResolver<PendingToolOutput>();
+let runStopEventShown = false;
 
 function markToolOutputPromoted(output: PendingToolOutput): void {
   const registered = askUserInfoByTool.get(output.id)?.cards;
@@ -7517,9 +7546,17 @@ function handleToolExecution(evt: RpcEvent): void {
 }
 
 function renderRpcEvent(evt: RpcEvent): void {
+  if (
+    (evt.type === "agent_settled" && evt.aborted === true) ||
+    (evt.type === "message_end" && isAbortedAssistantMessage(evt.message)) ||
+    (evt.type === "entry_appended" && isAgentStopEntry(evt.entry))
+  ) {
+    trailingToolOutputs.stop();
+  }
   trackWorking(evt);
   if (evt.type === "agent_start") {
     trailingToolOutputs.beginRun();
+    runStopEventShown = false;
     finishRunningAgenticBlocks();
     activeAgenticBlock = null;
     agenticRunStartedAt = agenticThinking ? performance.now() : 0;
@@ -7532,7 +7569,13 @@ function renderRpcEvent(evt: RpcEvent): void {
     finishRunningAgenticBlocks();
     activeAgenticBlock = null;
     agenticRunStartedAt = 0;
-    if (evt.type === "agent_settled") promoteToolOutputs(trailingToolOutputs.settle());
+    if (evt.type === "agent_settled") {
+      promoteToolOutputs(trailingToolOutputs.settle());
+      if (trailingToolOutputs.wasStopped && !runStopEventShown) {
+        appendAgentStopEvent();
+        runStopEventShown = true;
+      }
+    }
   }
   if (evt.type === "queue_update") {
     const steering = Array.isArray(evt.steering)
@@ -8056,6 +8099,16 @@ function formatProviderError(text: string): string {
   return prefix ? `${prefix}. ${formatted}` : formatted;
 }
 
+function appendAgentStopEvent(): void {
+  const wrapper = addMsg("status");
+  const line = document.createElement("div");
+  line.className = "status-line agent-stop-event";
+  line.textContent = t("agentStopped");
+  line.setAttribute("role", "status");
+  wrapper.appendChild(line);
+  scrollToBottom();
+}
+
 // Appends a system box directly to the chat. History rendering uses this
 // lower-level function so persisted errors can never be mistaken for live
 // startup logs and routed under the loading spinner.
@@ -8112,17 +8165,12 @@ function requestNotifyPermission(): void {
 document.addEventListener("pointerdown", requestNotifyPermission, { once: true });
 document.addEventListener("keydown", requestNotifyPermission, { once: true });
 
-function handlePiNotify(title: string, body: string): void {
+function handlePiNotify(_title: string, body: string): void {
   // the EFFECTIVE notifications setting decides (per-session override first,
   // then the default; browser offers desktop/off only)
   if (effectiveNotifications() === "off") return;
   if (document.visibilityState !== "hidden" && document.hasFocus()) return;
-  const showBox = () => addSystemBox("info", title ? `${title} — ${body}` : body);
-  if (!("Notification" in window)) {
-    // no Notifications API (insecure context etc.): never lose the info
-    showBox();
-    return;
-  }
+  if (!("Notification" in window)) return;
   const show = () =>
     browserNotifyThrottled(() => {
       try {
@@ -8134,17 +8182,18 @@ function handlePiNotify(title: string, body: string): void {
           icon: runtime.isVsCode ? undefined : "/icon.png",
         });
       } catch {
-        showBox(); // creation failed: fall back to the chat box
+        // Completion notifications must never duplicate the response in chat.
       }
     });
   if (Notification.permission === "granted") show();
   else if (Notification.permission === "default") {
-    void Notification.requestPermission().then((p) => {
-      if (p === "granted") show();
-      else showBox(); // denied: never lose the info
-    });
-  } else {
-    showBox(); // denied previously: never lose the info
+    void Notification.requestPermission()
+      .then((p) => {
+        if (p === "granted") show();
+      })
+      .catch(() => {
+        // An unavailable permission prompt stays silent, like denied permission.
+      });
   }
 }
 
@@ -8750,6 +8799,14 @@ function renderHistory(messages: unknown[]): void {
   };
   const historyTrailingOutputs = new TrailingToolOutputResolver<PendingToolOutput>();
   historyTrailingOutputs.beginRun();
+  let historyStopShown = false;
+  const showHistoryStop = (endedAt: number): void => {
+    historyTrailingOutputs.stop();
+    finishHistoryAgenticBlock(endedAt);
+    // A persisted marker can follow an assistant with stopReason "aborted".
+    if (!historyStopShown) appendAgentStopEvent();
+    historyStopShown = true;
+  };
   const promoteHistoryTrailingOutputs = (): void => {
     const outputs = historyTrailingOutputs.settle();
     if (outputs.length === 0) return;
@@ -8757,6 +8814,7 @@ function renderHistory(messages: unknown[]): void {
     promoteToolOutputs(outputs);
   };
   let historyToolOutputSequence = 0;
+  const stoppedMessages = stoppedHistoryMessages(messages);
   toolCardsById.clear();
   clearToolTimers();
   toolOutputPre.clear();
@@ -8777,8 +8835,18 @@ function renderHistory(messages: unknown[]): void {
       isError?: boolean;
     };
     const ts = parseTs(msg);
+    const stoppedSegment = stoppedMessages.has(m);
+    if (stoppedSegment && msg.role !== "user") historyTrailingOutputs.stop();
+    if (isAgentStopMessage(msg)) {
+      showHistoryStop(ts || lastTs);
+      if (ts > 0) lastTs = ts;
+      continue;
+    }
     if (msg.role === "user") {
       promoteHistoryTrailingOutputs();
+      historyTrailingOutputs.beginRun();
+      if (stoppedSegment) historyTrailingOutputs.stop();
+      historyStopShown = false;
       finishHistoryAgenticBlock(lastTs);
       renderUserContent(msg.content);
     } else if (
@@ -8798,6 +8866,9 @@ function renderHistory(messages: unknown[]): void {
       const raw = contentToText(msg.content);
       const text = raw.replace(/<sender_info>[\s\S]*?<\/sender_info>/g, "").trim();
       if (!text) continue;
+      historyTrailingOutputs.beginRun();
+      if (stoppedSegment) historyTrailingOutputs.stop();
+      else historyStopShown = false;
       finishHistoryAgenticBlock(lastTs);
       const wrapper = addMsg("user");
       const card = buildSessionCard(
@@ -8807,6 +8878,8 @@ function renderHistory(messages: unknown[]): void {
       card.style.width = "100%";
       wrapper.appendChild(card);
     } else if (msg.role === "assistant") {
+      const aborted = isAbortedAssistantMessage(msg);
+      if (aborted) historyTrailingOutputs.stop();
       const blocks = Array.isArray(msg.content) ? (msg.content as HistoryBlock[]) : [];
       const assistantTs = parseTs(msg);
       // estimated thinking duration: gap from the previous message (last
@@ -8863,15 +8936,18 @@ function renderHistory(messages: unknown[]): void {
         images.length === 0 &&
         thinkingCards.length === 0 &&
         toolCards.length === 0
-      )
+      ) {
+        if (aborted) showHistoryStop(assistantTs || lastTs);
+        if (ts > 0) lastTs = ts;
         continue;
+      }
 
       if (agenticThinking) {
         if (thinkingCards.length > 0) {
           const agenticBlock = ensureHistoryAgenticBlock(lastTs);
           for (const card of thinkingCards) {
             agenticBlock.body.appendChild(card);
-            registerAgenticThought(card, "success");
+            registerAgenticThought(card, aborted ? "interrupted" : "success");
           }
         }
 
@@ -8933,7 +9009,9 @@ function renderHistory(messages: unknown[]): void {
       const errMsg =
         (msg as { errorMessage?: unknown }).errorMessage ??
         (msg as { message?: { errorMessage?: unknown } }).message?.errorMessage;
-      if (typeof errMsg === "string" && errMsg.length > 0) {
+      if (aborted) {
+        showHistoryStop(assistantTs || lastTs);
+      } else if (typeof errMsg === "string" && errMsg.length > 0) {
         appendSystemBox("error", errMsg);
       }
     } else if (msg.role === "toolResult" || msg.role === "bashExecution") {
@@ -9010,6 +9088,7 @@ function renderHistory(messages: unknown[]): void {
   }
   promoteHistoryTrailingOutputs();
   finishHistoryAgenticBlock(lastTs);
+  runStopEventShown = historyStopShown;
   // Cards created during history reconstruction were detached when their
   // initial visibility was decided. Paint only those in an open parent.
   for (const body of els.thread.querySelectorAll<HTMLElement>(".agentic-thinking-body")) {
@@ -9919,7 +9998,7 @@ function appendPresentedCode(container: HTMLElement, text: string, label: string
   header.appendChild(title);
   addCopyButton(header, text);
   block.append(header, pre);
-  container.appendChild(block);
+  container.appendChild(wrapToolOutputPreview(block, pre));
 }
 
 function appendPresentedFile(
@@ -9967,7 +10046,7 @@ function appendPresentedItem(container: HTMLElement, item: PresentedContentItem)
       const text = document.createElement("div");
       text.className = "presented-output-text";
       text.textContent = item.text;
-      container.appendChild(text);
+      container.appendChild(wrapToolOutputPreview(text));
     } else {
       appendPresentedCode(
         container,
@@ -10012,7 +10091,7 @@ function appendPresentedItem(container: HTMLElement, item: PresentedContentItem)
       const text = document.createElement("div");
       text.className = "presented-output-text";
       text.textContent = item.name ? `${item.name}: ${item.uri}` : item.uri;
-      container.appendChild(text);
+      container.appendChild(wrapToolOutputPreview(text));
     }
   }
 }

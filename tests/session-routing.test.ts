@@ -74,7 +74,11 @@ test("a large history is not silently treated as a new session on timeout", () =
   const web = readFileSync("src/web/main.ts", "utf8");
   assert.match(
     web,
-    /rpcRequest\(\s*rpc\.getMessages\(\),\s*undefined,\s*SESSION_HISTORY_TIMEOUT_MS,/,
+    /rpcRequest\(\s*rpc\.getMessages\(\),\s*undefined,\s*SESSION_HISTORY_TIMEOUT_MS,?\s*\)/,
+  );
+  assert.match(
+    web,
+    /rpcRequest\(\s*rpc\.getEntries\(\),\s*undefined,\s*SESSION_HISTORY_TIMEOUT_MS,?\s*\)/,
   );
   assert.match(web, /if \(loaded\) void maybeShowStartupBanner\(\)/);
   const italian = JSON.parse(readFileSync("src/web/locale/it.json", "utf8"));

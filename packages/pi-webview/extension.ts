@@ -52,6 +52,7 @@ import {
 import { checkPiUpdate, locatePi } from "./lib/update-check.ts";
 import type { UpdateAvailable } from "./lib/update-check.ts";
 import { registerBrowserTools, type BrowserToolPiApi } from "./lib/browser-tools.ts";
+import { registerAgentStopPersistence, type AgentStopPiApi } from "./lib/agent-stop.ts";
 import {
   formatReleaseReminder,
   ReleaseReminderStore,
@@ -129,7 +130,7 @@ type Notify = (message: string, kind: "info" | "warning" | "error") => void;
 
 // Minimal pi API used by the extension (typed locally to avoid depending on
 // @earendil-works/pi-coding-agent as a devDependency).
-interface PiApi extends BrowserToolPiApi {
+interface PiApi extends BrowserToolPiApi, AgentStopPiApi {
   on(
     event: string,
     handler: (event: unknown, ctx: unknown) => void | Promise<void>,
@@ -390,6 +391,7 @@ function compactExtensionLabel(si: SourceInfoLike): string {
 }
 
 export default async function (pi: PiApi): Promise<void> {
+  registerAgentStopPersistence(pi);
   // package root: extension.js lives in dist/, the companions vsix at
   // package ROOT level (companion/…) → go up one level
   const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");

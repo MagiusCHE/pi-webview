@@ -999,6 +999,10 @@ header {
   content: "ℹ ";
   color: var(--fg-tertiary);
 }
+.status-line.agent-stop-event::before {
+  content: "■ ";
+  color: var(--fg-tertiary);
+}
 .startup-rpc-question {
   font-size: 13.5px;
   line-height: 1.5;
@@ -3304,9 +3308,8 @@ body.stats-bar-expanded .stats-slot + .stats-slot::before {
   color: var(--fg-tertiary);
   font-size: 11.5px;
 }
-/* Promoted tool output shown as the chat response: the text must read exactly
-   like the rest of the chat (inherited base size and line-height), never
-   larger. Structured content keeps its own .code-block presentation. */
+/* Promoted textual results share a three-visual-line preview. Plain text
+   keeps the chat's base size; structured content keeps its code header. */
 .presented-output-text {
   width: 100%;
   color: var(--fg);
@@ -3315,6 +3318,35 @@ body.stats-bar-expanded .stats-slot + .stats-slot::before {
 }
 .presented-output-code {
   width: 100%;
+}
+.presented-output-preview {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--code-bg);
+  overflow: hidden;
+}
+.presented-output-preview > .presented-output-code {
+  border-top: 0;
+}
+.presented-output-preview .presented-output-preview-text {
+  width: auto;
+  margin: 8px 12px;
+  padding: 0;
+  line-height: 1.5;
+}
+.presented-output-preview:not(.is-expanded) .presented-output-preview-text {
+  max-height: 4.5em;
+  overflow: hidden;
+}
+.presented-output-toggle {
+  margin: 0 12px 8px;
+  padding: 4px 8px;
+}
+.presented-output-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .presented-output-file {
   display: flex;

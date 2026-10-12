@@ -132,6 +132,46 @@ test("un messaggio locale non azzera uno stream assistant attivo", () => {
   if (end.kind === "message_end") assert.equal(end.message.text, "testo");
 });
 
+test("an aborted assistant keeps partial content without surfacing a provider error", () => {
+  const s = emptyStream();
+  handleRpcEvent(s, { type: "message_start", message: { role: "assistant" } });
+  handleRpcEvent(s, {
+    type: "message_update",
+    assistantMessageEvent: {
+      type: "thinking_delta",
+      contentIndex: 0,
+      delta: "partial reasoning",
+    },
+  });
+  const end = handleRpcEvent(s, {
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "aborted",
+      errorMessage: "Request aborted",
+    },
+  });
+  assert.equal(end.kind, "message_end");
+  if (end.kind === "message_end") {
+    assert.equal(end.message.aborted, true);
+    assert.equal(end.message.thinking, "partial reasoning");
+    assert.equal(end.message.errorMessage, undefined);
+  }
+});
+
+test("a real provider failure remains an error rather than an interruption", () => {
+  const s = emptyStream();
+  handleRpcEvent(s, { type: "message_start", message: { role: "assistant" } });
+  const end = handleRpcEvent(s, {
+    type: "message_end",
+    message: { role: "assistant", stopReason: "error", errorMessage: "Provider failed" },
+  });
+  if (end.kind === "message_end") {
+    assert.equal(end.message.aborted, undefined);
+    assert.equal(end.message.errorMessage, "Provider failed");
+  } else assert.fail("the provider response must be finalized");
+});
+
 test("nuovo message_start azzera lo stato precedente", () => {
   const s = emptyStream();
   handleRpcEvent(s, { type: "message_start", message: {} });

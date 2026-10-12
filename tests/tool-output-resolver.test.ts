@@ -67,3 +67,37 @@ test("a repeated execution end replaces rather than duplicates its result", () =
   value.record({ id: "tool-1", value: "authoritative" });
   assert.deepEqual(value.settle(), [{ id: "tool-1", value: "authoritative" }]);
 });
+
+test("STOP discards the pending batch and blocks later successful or failed results", () => {
+  const value = resolver();
+  value.record({ id: "first", value: "finished before STOP" });
+  value.stop();
+  value.record({ id: "second", value: "finished after STOP" });
+  value.record({ id: "third", value: "abort error" });
+  assert.equal(value.wasStopped, true);
+  assert.deepEqual(value.settle(), []);
+  value.record({ id: "late", value: "late update" });
+  assert.deepEqual(value.settle(), []);
+});
+
+test("assistant activity and repeated settlements cannot undo interruption", () => {
+  const value = resolver();
+  value.stop();
+  value.assistantVisible("Here's the result.");
+  value.assistantToolCall();
+  value.stop();
+  value.record({ id: "late", value: "not a response" });
+  assert.deepEqual(value.settle(), []);
+  assert.equal(value.wasStopped, true);
+});
+
+test("only a new run or explicit reset allows promotion again after STOP", () => {
+  const value = resolver();
+  for (const reset of [() => value.beginRun(), () => value.clear()]) {
+    value.stop();
+    reset();
+    assert.equal(value.wasStopped, false);
+    value.record({ id: "next", value: "new response" });
+    assert.deepEqual(value.settle(), [{ id: "next", value: "new response" }]);
+  }
+});

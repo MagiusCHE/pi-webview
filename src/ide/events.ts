@@ -18,6 +18,8 @@ export interface FinalizedMessage {
   images: ImageContent[];
   /** provider/turn error (message stopReason "error"): shown as an error box */
   errorMessage?: string;
+  /** User interruption is a stop event, not a provider error. */
+  aborted?: boolean;
 }
 
 export interface StreamState {
@@ -94,8 +96,10 @@ export function handleRpcEvent(state: StreamState, evt: RpcEvent): UiAction {
       const rawMsg = evt.message as
         { content?: unknown; errorMessage?: unknown; stopReason?: unknown } | undefined;
       const images = imageContentBlocks(rawMsg?.content);
-      const errorMessage =
-        typeof rawMsg?.errorMessage === "string" && rawMsg.errorMessage.length > 0
+      const aborted = rawMsg?.stopReason === "aborted";
+      const errorMessage = aborted
+        ? undefined
+        : typeof rawMsg?.errorMessage === "string" && rawMsg.errorMessage.length > 0
           ? rawMsg.errorMessage
           : rawMsg?.stopReason === "error"
             ? "Unknown provider error"
@@ -103,7 +107,14 @@ export function handleRpcEvent(state: StreamState, evt: RpcEvent): UiAction {
       state.active = false;
       return {
         kind: "message_end",
-        message: { text, thinking, toolCalls, images, errorMessage },
+        message: {
+          text,
+          thinking,
+          toolCalls,
+          images,
+          errorMessage,
+          ...(aborted ? { aborted: true } : {}),
+        },
       };
     }
 

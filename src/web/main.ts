@@ -78,6 +78,11 @@ import {
   sessionPickStrategy,
   sessionSwitchOutcome,
 } from "./session-routing.ts";
+import {
+  createSessionItemText,
+  filterSessions,
+  sessionDirectoryName,
+} from "./session-picker.ts";
 import { thinkingPaintDecision } from "./thinking-render.ts";
 import { openFolderBrowser } from "./folder-browser.ts";
 import {
@@ -1900,6 +1905,7 @@ function applyUiStrings(): void {
   els.reload.title = t("reload");
   els.sessionBtn.title = t("sessions");
   els.sessionSearch.placeholder = t("searchSessions");
+  els.sessionSearch.title = t("searchSessionsHint");
   els.lang.title = t("language");
   els.bootLoaderText.textContent = t("loading");
   els.langLabel.textContent = t("language");
@@ -3456,7 +3462,7 @@ function sessionLabel(s: SessionInfo): string {
     const oneLine = s.firstMessage.replace(/\s+/g, " ");
     return oneLine.length > 48 ? oneLine.slice(0, 48) + "…" : oneLine;
   }
-  const cwd = s.cwd?.split(/[\\/]/).pop();
+  const cwd = sessionDirectoryName(s.cwd);
   const activity = s.lastActivity ?? s.mtime;
   const date = activity
     ? new Date(activity).toLocaleDateString(currentLocale === "it" ? "it-IT" : "en-US")
@@ -3609,15 +3615,12 @@ function populateSessionMenu(): void {
     ) {
       list.unshift({ path: currentSessionPath, name: t("newSession") });
     }
-    const query = els.sessionSearch.value.trim().toLocaleLowerCase(currentLocale);
-    const filtered = query
-      ? list.filter((s) => {
-          const directoryName = s.cwd?.split(/[\\/]/).filter(Boolean).pop() ?? "";
-          return [sessionLabel(s), directoryName].some((value) =>
-            value.toLocaleLowerCase(currentLocale).includes(query),
-          );
-        })
-      : list;
+    const filtered = filterSessions(
+      list,
+      els.sessionSearch.value,
+      sessionLabel,
+      currentLocale,
+    );
     if (filtered.length === 0) {
       const empty = document.createElement("div");
       empty.className = "session-empty";
@@ -3646,15 +3649,13 @@ function populateSessionMenu(): void {
       const main = document.createElement("button");
       main.type = "button";
       main.className = "session-item-main";
-      const label = document.createElement("span");
-      label.className = "session-item-label";
-      label.textContent = sessionDisplayLabel(s);
+      const text = createSessionItemText(s, sessionDisplayLabel(s), workspacePath);
       const meta = document.createElement("span");
       meta.className = "session-item-meta";
       const count = s.messageCount ?? 0;
       const rel = relativeTime(s.lastActivity ?? s.mtime);
       meta.textContent = [count > 0 ? `(${count})` : "", rel].filter(Boolean).join(" ");
-      main.append(label, meta);
+      main.append(text, meta);
       // actions for EVERY session: rename + delete (with confirmation)
       const rename = document.createElement("button");
       rename.type = "button";

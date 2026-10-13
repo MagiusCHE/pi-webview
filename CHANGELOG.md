@@ -4,6 +4,10 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.6.13] - 2026-10-13
+
+- Session picker search matches session titles and workspace directory names, requires all space- or comma-separated terms, and shows a muted directory subtitle for sessions outside the current workspace. Parent directories and full paths are not searched.
+
 ## [0.6.12] - 2026-10-12
 
 - Stopping a run now keeps tool results inside their cards instead of promoting them as the final response, including results received after STOP. A localized interruption event is shown live and preserved in resumed history without adding model-context messages.

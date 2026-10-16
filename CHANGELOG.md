@@ -4,6 +4,10 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-16
+
+- Fixed update checks silently failing on Windows when pi and npm are installed as `.cmd` shims. Core and extension version checks now use the Windows command processor, restoring startup update notices and the yellow header shield when updates are available.
+
 ## [0.6.13] - 2026-10-13
 
 - Session picker search matches session titles and workspace directory names, requires all space- or comma-separated terms, and shows a muted directory subtitle for sessions outside the current workspace. Parent directories and full paths are not searched.

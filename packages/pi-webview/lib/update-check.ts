@@ -24,7 +24,7 @@
 // All failures are silent (never throw): a broken network or a missing pi
 // binary must not break the extension load or the webview boot.
 
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import { readFileSync, mkdirSync, existsSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,6 +53,30 @@ export interface CheckOptions {
   projectDir?: string;
 }
 
+// --- cross-platform CLI execution -------------------------------------------
+
+function versionCommandOutput(
+  command: "pi" | "npm",
+  args: string[],
+  options: SpawnSyncOptionsWithStringEncoding,
+): string {
+  // npm installs pi/npm as .cmd shims on Windows. Direct spawnSync cannot
+  // execute them, even though the same commands work in the user's terminal.
+  // Only fixed commands and shell-safe tokens may reach the command processor.
+  if (args.some((arg) => !/^[a-z0-9@/_.-]+$/i.test(arg))) return "";
+  const result =
+    process.platform === "win32"
+      ? spawnSync(
+          process.env.ComSpec || "cmd.exe",
+          ["/d", "/s", "/c", command, ...args],
+          { ...options, windowsHide: true, windowsVerbatimArguments: true },
+        )
+      : spawnSync(command, args, options);
+  // Timeouts and spawn failures may carry partial stdout: never parse it as
+  // a successful version lookup.
+  return result.status === 0 && !result.error ? (result.stdout ?? "") : "";
+}
+
 // --- pi binary location ------------------------------------------------------
 
 /** locate the pi binary the session runs (cross-platform, best-effort,
@@ -75,12 +99,11 @@ export function locatePi(): Promise<string | null> {
     }
   }
   try {
-    const r = spawnSync("npm", ["root", "-g"], {
+    const root = versionCommandOutput("npm", ["root", "-g"], {
       encoding: "utf8",
       timeout: 10_000,
       stdio: ["ignore", "pipe", "ignore"],
-    });
-    const root = String(r.stdout ?? "").trim();
+    }).trim();
     if (root) {
       const p = join(root, PI_PACKAGE, "dist", "bundle", "cli.js");
       if (existsSync(p)) return Promise.resolve(p);
@@ -121,13 +144,12 @@ export function compareVersions(a: string, b: string): number {
 /** the very pi binary the session runs: `pi --version` on PATH */
 function currentVersion(): string | null {
   try {
-    const r = spawnSync("pi", ["--version"], {
+    const v = versionCommandOutput("pi", ["--version"], {
       encoding: "utf8",
       timeout: 10_000,
       stdio: ["ignore", "pipe", "ignore"],
-    });
-    const v = String(r.stdout ?? "").trim();
-    if (!v || r.status !== 0) return null;
+    }).trim();
+    if (!v) return null;
     // "pi 0.85.0" style → last token that looks version-ish
     const m = v.match(/v?(\d+\.\d+\.\d+[0-9A-Za-z.-]*)/);
     return m?.[1] ?? v;
@@ -144,6 +166,9 @@ function currentVersion(): string | null {
  * for a single field: ["0.85.1"]).
  */
 function latestVersion(pkg: string = PI_PACKAGE): string {
+  // Settings are project-controlled. Reject options and shell syntax before
+  // passing a package name to npm (especially through cmd.exe on Windows).
+  if (!/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i.test(pkg)) return "";
   try {
     // the neutral cwd MUST exist (spawnSync ENOENT otherwise) and be
     // outside any project: npm validates the local project's devEngines
@@ -152,14 +177,13 @@ function latestVersion(pkg: string = PI_PACKAGE): string {
     // would make the lookup fail with EBADDEVENGINES
     const cwd = join(tmpdir(), "pi-webview-uc");
     mkdirSync(cwd, { recursive: true });
-    const r = spawnSync("npm", ["view", pkg, "version", "--json"], {
+    return versionCommandOutput("npm", ["view", pkg, "version", "--json"], {
       encoding: "utf8",
       timeout: 15_000,
       stdio: ["ignore", "pipe", "ignore"],
       env: process.env,
       cwd,
     });
-    return r.stdout ?? "";
   } catch {
     return "";
   }

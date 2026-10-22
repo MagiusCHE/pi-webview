@@ -4,6 +4,10 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-22
+
+- Fixed copying selected chat history in VS Code moving focus back to the prompt and losing the selection. Keyboard and context-menu Copy now keep focus in the chat, including after the composer has been used.
+
 ## [0.7.0] - 2026-10-16
 
 - Fixed update checks silently failing on Windows when pi and npm are installed as `.cmd` shims. Core and extension version checks now use the Windows command processor, restoring startup update notices and the yellow header shield when updates are available.

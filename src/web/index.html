@@ -401,7 +401,10 @@
       </div>
     </div>
 
-    <main id="messages" aria-live="polite">
+    <!-- VS Code restores the last focused element before native copy/cut/paste.
+         Let text selection focus the chat instead of restoring the composer and
+         clearing the selection. A negative tabindex adds no extra Tab stop. -->
+    <main id="messages" aria-live="polite" tabindex="-1">
       <div id="thread" class="thread"></div>
       <button
         id="scroll-bottom"

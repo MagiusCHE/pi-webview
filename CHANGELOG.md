@@ -4,6 +4,10 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-26
+
+- Fixed the Chrome companion breaking on plain-http pages: the content script called `crypto.randomUUID()`, which does not exist outside a secure context, and the thrown error aborted the whole script. On LAN or tailnet addresses reached by IP this silently disabled page context, selection, DOM, screenshot and page actions. Ids now come from a shared helper with a `getRandomValues` fallback that also works over plain http.
+
 ## [0.7.1] - 2026-10-22
 
 - Fixed copying selected chat history in VS Code moving focus back to the prompt and losing the selection. Keyboard and context-menu Copy now keep focus in the chat, including after the composer has been used.

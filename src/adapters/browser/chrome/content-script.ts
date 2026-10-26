@@ -1,3 +1,5 @@
+import { randomId } from "../../../shared/random-id.ts";
+
 interface ChromeRuntime {
   sendMessage(message: unknown): Promise<unknown>;
 }
@@ -23,7 +25,7 @@ function initializeContentScript(): () => void {
   const DISCOVERY_RESPONSE = "pi-webview-browser-available";
   const HANDOFF_REQUEST = "pi-webview-browser-handoff";
   const HANDOFF_RESPONSE = "pi-webview-browser-handoff-result";
-  const documentId = crypto.randomUUID();
+  const documentId = randomId();
   let selectionTimer: ReturnType<typeof setTimeout> | undefined;
 
   function sendRuntimeMessage(message: unknown): Promise<unknown> {

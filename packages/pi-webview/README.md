@@ -15,9 +15,9 @@ A rich WebView UI for [pi](https://pi.dev), the coding agent — a modern altern
 - **VS Code**
 - **Visual Studio 2022**
 - **Visual Studio 2026**
-- **Google Chrome** — Side Panel companion; Chrome Web Store publication pending
+- **Google Chrome** — Side Panel companion from the Chrome Web Store
 
-The three IDE companions are included in the package and installed or updated automatically when the corresponding IDE is present. Chrome requires the installation confirmation imposed by the browser; `/piw install` opens the official Web Store flow when available, or the guided local installation during development.
+The three IDE companions are included in the package and installed or updated automatically when the corresponding IDE is present. Chrome requires the installation confirmation imposed by the browser; `/piw install` opens the official Web Store listing, or the guided local installation during development.
 
 ## Standalone (browser)
 
@@ -78,7 +78,7 @@ The agent gains nine browser tools while running through `piw`:
 
 Complete and targeted DOM reads share the DOM authorization. Screenshot access remains independent. Selector/visual/coordinate clicks, type/select/focus/scroll actions, reload/navigation and CSS-class/inline-style mutations share the page-action authorization. For each operation, the user can authorize the current pi session, the current website across sessions, or every website globally. The first page-action request shows its targets, coordinates and value previews and explains that later sequences run without another prompt within the selected scope. Session grants live inside the pi session; site and global grants live in piw config and can be reset from the Chrome-only settings. Navigation accepts only absolute HTTP/HTTPS URLs. Pointer actions are synthetic DOM events: the companion does not request Chrome's `debugger` permission or use CDP. Chrome-protected pages cannot be read, captured or controlled.
 
-Once the Web Store listing is approved, install it with:
+Install it from the Chrome Web Store with:
 
 ```bash
 piw --install-chrome
@@ -86,7 +86,7 @@ piw --install-chrome
 
 Chrome opens the Web Store listing and requires the normal browser confirmation. `piw --uninstall-chrome` opens Chrome’s extension manager for user-confirmed removal.
 
-Until the Web Store listing is approved, developers can run `pnpm package:chrome`, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select `dist/pi-webview-chrome`.
+For development, run `pnpm package:chrome`, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select `dist/pi-webview-chrome`.
 
 ### Browser-local attachments
 

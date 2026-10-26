@@ -35,6 +35,7 @@ import {
   type BrowserToolPayload,
 } from "../ide/browser-tools.ts";
 import { samePath } from "../ide/paths.ts";
+import { randomId } from "../shared/random-id.ts";
 import {
   displayMessageContent,
   historyToolResultContent,
@@ -889,30 +890,14 @@ function waitForWindowMessage(
   });
 }
 
-// crypto.randomUUID() exists only in a SecureContext: a page served over plain
-// http:// on a LAN or tailnet address (e.g. a phone reaching the bridge by IP)
-// does not have it, and a throw here would abort boot() before the bridge is
-// even contacted (silent red dot, no session). getRandomValues also works in
-// insecure contexts, so the discovery nonce never depends on https.
-function browserDiscoveryNonce(): string {
-  const webCrypto = typeof crypto === "undefined" ? undefined : crypto;
-  if (webCrypto && typeof webCrypto.randomUUID === "function") {
-    return webCrypto.randomUUID();
-  }
-  const bytes = new Uint8Array(16);
-  if (webCrypto && typeof webCrypto.getRandomValues === "function") {
-    webCrypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
-  }
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 function startBrowserCompanionDiscovery(): void {
   if (runtime.mode !== "standalone" || browserCompanionDiscovery) return;
   let nonce: string;
   try {
-    nonce = browserDiscoveryNonce();
+    // a page served over plain http:// has no crypto.randomUUID: a throw here
+    // would abort boot() before the bridge is even contacted (silent red dot,
+    // no session), so the nonce comes from the secure-context safe helper
+    nonce = randomId();
   } catch {
     // the companion handoff is optional: it must never abort the bridge boot
     browserCompanionDiscovery = Promise.resolve(null);

@@ -23,7 +23,7 @@ The terminal TUI of pi limits interaction: no rich markdown, no proper mouse/tex
 - **VS Code**
 - **Visual Studio 2022**
 - **Visual Studio 2026**
-- **Google Chrome** — Side Panel companion; Chrome Web Store publication pending
+- **Google Chrome** — Side Panel companion from the Chrome Web Store
 
 ### What works today
 
@@ -47,7 +47,7 @@ The terminal TUI of pi limits interaction: no rich markdown, no proper mouse/tex
 - **Extension UI protocol — remaining**: editor dialogs, notifications parity, lazy header/footer for extension UI (some require a small patch to the pi core — concept `docs/concept/0003`)
 - **Code highlighting** in markdown blocks, better diffs
 - **CI / test matrix** on Linux/macOS/Windows (VSIX build and release pipeline already in place: `pnpm release`)
-- **More locales**, the Firefox companion after Chrome Web Store publication, and more IDE adapters
+- **More locales**, the Firefox companion, and more IDE adapters
 
 ## Architecture
 

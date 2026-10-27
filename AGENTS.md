@@ -411,19 +411,80 @@ companion** — modello pi-x-ide, ognuno solo se l'IDE è presente:
   fork e senza duplicarla; soltanto gli host IDE a workspace fisso mantengono
   il flusso di fork cross-workspace.
   I tool `browser_page_dom`, `browser_page_element_dom`,
-  `browser_page_screenshot`, `browser_page_class`, `browser_page_style`,
-  `browser_page_click`, `browser_page_navigation`, `browser_page_scroll` e
-  `browser_page_action`
+  `browser_page_screenshot`, `browser_page_editor`, `browser_page_class`,
+  `browser_page_style`, `browser_page_click`, `browser_page_navigation`,
+  `browser_page_scroll` e `browser_page_action`
   usano un broker privato per-channel solo loopback. Il DOM completo e quello
   mirato condividono il consenso DOM; mutazioni di classi CSS/stili inline,
   click tramite selettore/hit-test visuale/coordinate, reload/navigazione
   HTTP(S) e azioni strutturate (`click`, `type`, `select`, `focus`, `scroll`)
-  condividono il consenso azioni; screenshot resta indipendente. Il click
+  condividono il consenso azioni; screenshot resta indipendente. Gli eventi
+  sintetici del click devono restare `cancelable: true` (non è il default del
+  costruttore `MouseEvent`/`PointerEvent`): altrimenti il `preventDefault()`
+  della pagina è inefficace e il browser esegue comunque l'attivazione (`submit`
+  GET, cambio hash, navigazione), duplicando o forzando l'azione predefinita. Il
+  risultato dell'azione riporta `defaultPrevented`, `outcome`
+  (`dispatched`/`canceled`/`suppressed`), il target realmente colpito, l'hash
+  risultante e a livello di payload `actionId` con URL prima/dopo. "Dispatched N
+  of M" conferma solo la consegna degli eventi, mai l'esito applicativo: un
+  timeout, un abort o un errore riportano `outcome: "unknown"` (la pagina può
+  aver agito) e nessun retry automatico è ammesso. Il default viene annullato
+  solo su richiesta esplicita dell'azione (`defaultAction: "suppress"`, riportato
+  come `defaultActionSuppressed`), applicata con un listener capture sul singolo
+  evento perché `dispatchEvent` azzera il canceled flag; serve per i controlli SPA
+  (`a[href="#"]`, submit il cui handler non chiama `preventDefault`) e non deve
+  diventare il comportamento predefinito. L'estensione non forza e non duplica
+  mai il default. Il click
   visuale usa `elementFromPoint` anche per overlay fratelli; le coordinate sono
   pixel CSS del viewport e costituiscono solo un fallback. Lo scroll supporta
   pagina/contenitore per delta e `scrollIntoView` mirato; la navigazione usa la
   Tabs API, mai script pagina. Gli eventi puntatore restano sintetici: il
   companion non richiede il permesso Chrome `debugger` e non usa CDP.
+  `browser_page_editor` legge e scrive il documento reale degli editor di codice
+  web tramite le API dell'editor, anche dentro gli iframe. Il riconoscimento è
+  per **forma di API**, mai per nome di libreria (`value-api`,
+  `offset-document`, `model-registry`). La scoperta è _shape-first e per elemento_:
+  nessun budget globale di oggetti (una pagina grande + expando dei framework lo
+  esaurirebbe prima del wrapper reale), chiavi `__react*`/`__vue*`/`__ngContext*`/
+  `__svelte*`/`__zone_symbol__*`/`jQuery*` ignorate, cap elementi 50000. Il click
+  attende i frame prima del dispatch con budget 250 ms: con rAF sospeso (finestra
+  occlusa/background) l'azione procede e riporta `rafTimedOut`, invece di finire
+  in timeout del bridge. pi e companion Chrome condividono
+  `COMPANION_PROTOCOL_VERSION` (in `src/ide/browser-tools.ts`, oggi 2): il
+  companion timbra ogni risultato e il tool rifiuta esplicitamente i payload di
+  un companion più vecchio, invece di mostrare campi mancanti come risultato
+  vuoto ma valido (un compact DOM risposto con HTML completo è un errore; id
+  duplicati sono rifiutati). Un editor nuovo che espone una di queste
+  forme funziona senza codice nuovo, e il ramo `dom-field` copre la sola pipeline
+  di editing standard dichiarando `verificationLevel: "dom-only"` (nessuna API
+  standard espone il modello: non si deve mai dichiarare più di quanto si può
+  verificare). Gli `editorId` devono essere univoci nel frame (indice per
+  posizione, mai per conteggio: il caso `f0:dom-field:0` duplicato era un bug
+  reale) e una richiesta che risolve più target va rifiutata; `filters`
+  `visibleOnly`/`editableOnly` servono a scartare i campi helper nascosti o
+  readonly. `browser_page_dom` restituisce di default una vista **compatta**
+  (controlli visibili con etichetta, valore, stato e selettore univoco; niente
+  `script`/`style`/`template`/`noscript`/`svg`/`iframe`; valori e attributi simili
+  a segreti redatti), con `mode: "full"` come lettura completa esplicita. Un
+  elemento visibile richiede anche `rect.right > 0 && rect.bottom > 0`: i widget
+  parcheggiati fuori schermo non sono visibili. Dettagli: iniezione di una funzione pacchettizzata in `world: "MAIN"` (unico modo
+  per raggiungere gli oggetti dell'editor), `list`/`read` con hash del contenuto,
+  scritture vincolate all'hash precedente e sempre rilette per verifica. La
+  modifica del documento è separata dal Salva dell'applicazione (nessun
+  salvataggio/invio automatico).
+  **JavaScript arbitrario — regola esplicita (decisione utente, 2026-10-26)**:
+  è ammesso SOLO tramite `browser_page_script`, che esegue il codice in
+  `world: "MAIN"` con privilegi della pagina, timeout (100–10000 ms) e limite di
+  output serializzato (~32 KB, troncato e segnalato). Richiede una classe di
+  consenso dedicata `script`, mai implicita nei grant `dom`/`action`/`screenshot`,
+  con i tre ambiti esistenti (sessione pi, sito, globale) e dialog che mostra il
+  codice e il timeout richiesti. Nessun altro punto del codice può valutare
+  codice dinamico: `new Function` esiste solo in
+  `src/adapters/browser/chrome/page-script.ts`. Restano vietati bypass di
+  login/OAuth/MFA/CAPTCHA, dump di credenziali/cookie o dati personali,
+  salvataggi/invii automatici e l'uso di Chrome debugger/CDP. Se il codice
+  ufficiale deve essere ridotto o rimosso (es. policy Chrome Web Store), va
+  aggiornata questa regola e la dichiarazione in `docs/chrome-web-store.md`.
   Ogni
   consenso ha tre ambiti: sessione pi corrente (salvato nel JSONL della
   sessione), origine in ogni sessione o globale (salvati nella config piw).

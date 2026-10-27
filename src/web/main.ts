@@ -27,10 +27,18 @@ import type {
 } from "../ide/protocol.ts";
 import { rpc } from "../ide/protocol.ts";
 import {
+  browserEditorConsentOperation,
+  normalizeBrowserEditorRequest,
+  normalizeBrowserExpectedHost,
   normalizeBrowserElementSelector,
   normalizeBrowserPageActions,
+  normalizeBrowserScriptRequest,
+  type BrowserDomMode,
+  type BrowserEditorRequest,
   type BrowserPageAction,
+  type BrowserPageToolOperation,
   type BrowserPersistentPermissions,
+  type BrowserScriptRequest,
   type BrowserToolOperation,
   type BrowserToolPayload,
 } from "../ide/browser-tools.ts";
@@ -1142,6 +1150,9 @@ let sessionNotificationsOverride: "desktop" | "vscode" | "off" | undefined;
 let currentSessionSettings: SessionSettings = {};
 let sessionSettingsNeedPersistence = false;
 let browserSessionPermissions: BrowserToolOperation[] = [];
+/** Requests the tool already abandoned: never grant, queue or execute them. */
+const cancelledBrowserToolRequests = new Set<string>();
+const browserToolDialogCancels = new Map<string, () => void>();
 let browserPersistentPermissions: BrowserPersistentPermissions = {};
 let browserSessionSettingsReady: Promise<void> = Promise.resolve();
 
@@ -8498,7 +8509,11 @@ function browserActionSummary(actions: BrowserPageAction[]): string {
             ? t("browserActionVisualClick")
             : t("browserActionClick")
           : t("browserActionFocus");
-      return `${index + 1}. ${label} ${selector}`;
+      const suppressed =
+        "defaultAction" in action && action.defaultAction === "suppress"
+          ? ` (${t("browserActionSuppressDefault")})`
+          : "";
+      return `${index + 1}. ${label} ${selector}${suppressed}`;
     })
     .join("\n");
 }
@@ -8506,15 +8521,24 @@ function browserActionSummary(actions: BrowserPageAction[]): string {
 function browserPermissionMessageKey(operation: BrowserToolOperation): string {
   if (operation === "dom") return "browserPermissionDomConsent";
   if (operation === "screenshot") return "browserPermissionScreenshotConsent";
+  if (operation === "script") return "browserPermissionScriptConsent";
   return "browserPermissionActionConsent";
 }
+
+type BrowserConsentDecision = "allowed" | "denied" | "consent";
+
+/** How long a request waits for the user to answer the authorization dialog. */
+const BROWSER_CONSENT_WAIT_MS = 20_000;
 
 async function allowBrowserToolOperation(
   origin: string,
   operation: BrowserToolOperation,
   actions?: BrowserPageAction[],
-): Promise<boolean> {
+  details?: string,
+  requestId?: string,
+): Promise<BrowserConsentDecision> {
   await browserSessionSettingsReady;
+  if (requestId && cancelledBrowserToolRequests.has(requestId)) return "denied";
   if (
     browserToolPermissionGranted(
       operation,
@@ -8523,9 +8547,12 @@ async function allowBrowserToolOperation(
       browserPersistentPermissions,
     )
   ) {
-    return true;
+    return "allowed";
   }
+  // never queue silently behind an open dialog: report the pending authorization
+  if (browserToolDialogCancels.size > 0) return "consent";
   return queueBrowserToolConfirm(async () => {
+    if (requestId && cancelledBrowserToolRequests.has(requestId)) return "denied";
     if (
       browserToolPermissionGranted(
         operation,
@@ -8534,13 +8561,17 @@ async function allowBrowserToolOperation(
         browserPersistentPermissions,
       )
     ) {
-      return true;
+      return "allowed";
     }
     const scope = await showBrowserPermissionDialog(
       `${tpl(t(browserPermissionMessageKey(operation)), { origin })}\n\n${t("browserPermissionScopeHelp")}`,
-      operation === "action" && actions ? browserActionSummary(actions) : undefined,
+      details ??
+        (operation === "action" && actions ? browserActionSummary(actions) : undefined),
+      requestId ? (cancel) => browserToolDialogCancels.set(requestId, cancel) : undefined,
     );
-    if (!scope) return false;
+    if (requestId) browserToolDialogCancels.delete(requestId);
+    if (scope === "timeout") return "consent";
+    if (!scope) return "denied";
     if (scope === "session") {
       browserSessionPermissions = grantBrowserSessionPermission(
         browserSessionPermissions,
@@ -8562,15 +8593,54 @@ async function allowBrowserToolOperation(
         browserToolPermissions: browserPersistentPermissions,
       });
     }
-    return true;
+    return "allowed";
   });
+}
+
+function browserEditorSummary(editor: BrowserEditorRequest): string | undefined {
+  if (editor.action === "list") return undefined;
+  const target = `${t("browserEditorTarget")}: ${editor.editorId}`;
+  if (editor.action === "read") return target;
+  if (editor.action === "replace") {
+    const preview = editor.text.slice(0, 400);
+    const lines = editor.text.split("\n").length;
+    return [
+      target,
+      `${t("browserEditorReplace")}: ${editor.text.length} ${t("browserEditorChars")}, ${lines} ${t("browserEditorLines")}`,
+      preview
+        ? `${t("browserEditorPreview")}:\n${preview}${editor.text.length > preview.length ? "\n…" : ""}`
+        : undefined,
+    ]
+      .filter((line): line is string => Boolean(line))
+      .join("\n");
+  }
+  const edits = editor.edits
+    .map(
+      (edit, index) =>
+        `${index + 1}. ${edit.fromLine}:${edit.fromColumn}-${edit.toLine}:${edit.toColumn} → ${edit.text.length} ${t("browserEditorChars")}`,
+    )
+    .join("\n");
+  return [target, `${t("browserEditorApply")}: ${editor.edits.length}`, edits].join("\n");
+}
+
+function browserScriptSummary(script: BrowserScriptRequest): string {
+  const preview = script.code.slice(0, 400);
+  return [
+    `${t("browserScriptTarget")}: ${t("browserScriptTargetValue")}`,
+    `${t("browserScriptTimeout")}: ${script.timeoutMs} ms`,
+    `${t("browserScriptCode")}:\n${preview}${script.code.length > preview.length ? "\n…" : ""}`,
+  ].join("\n");
 }
 
 async function handleBrowserToolRequest(
   requestId: string,
-  operation: BrowserToolOperation,
+  operation: BrowserPageToolOperation,
   requestedActions?: BrowserPageAction[],
   requestedSelector?: string,
+  requestedEditor?: BrowserEditorRequest,
+  requestedScript?: BrowserScriptRequest,
+  requestedDomMode?: BrowserDomMode,
+  requestedExpectedHost?: string,
 ): Promise<void> {
   const context = visibleBrowserContext();
   if (!context || !browserPanelConnection) {
@@ -8583,6 +8653,9 @@ async function handleBrowserToolRequest(
   }
   let actions: BrowserPageAction[] | undefined;
   let selector: string | undefined;
+  let editor: BrowserEditorRequest | undefined;
+  let script: BrowserScriptRequest | undefined;
+  let pinnedHost: string | undefined;
   let origin: string | null;
   let expectedOrigin: string | undefined;
   try {
@@ -8592,13 +8665,76 @@ async function handleBrowserToolRequest(
       operation === "dom" && requestedSelector !== undefined
         ? normalizeBrowserElementSelector(requestedSelector)
         : undefined;
+    editor =
+      operation === "editor" ? normalizeBrowserEditorRequest(requestedEditor) : undefined;
+    if (pinnedHost && new URL(context.url).host !== pinnedHost) {
+      // never act on another window's tab silently
+      await ideRequest({
+        type: "browserToolResponse",
+        requestId,
+        result: {
+          ok: false,
+          operation,
+          error: tpl(t("browserPageHostMismatch"), {
+            active: new URL(context.url).host,
+            expected: pinnedHost,
+          }),
+        },
+      });
+      return;
+    }
+    script =
+      operation === "script" ? normalizeBrowserScriptRequest(requestedScript) : undefined;
+    pinnedHost = normalizeBrowserExpectedHost(requestedExpectedHost);
+    // editor reads reuse DOM consent, editor writes reuse action consent: no new
+    // persistent permission category is introduced for page documents
+    // the script class is never implied by another grant
+    const consentOperation: BrowserToolOperation = editor
+      ? browserEditorConsentOperation(editor)
+      : operation === "editor"
+        ? "action"
+        : operation;
     origin = browserToolPermissionOrigin(
-      operation,
+      consentOperation,
       context.url,
       context.restricted,
       actions,
     );
     expectedOrigin = new URL(context.url).origin;
+    const decision: BrowserConsentDecision = origin
+      ? await allowBrowserToolOperation(
+          origin,
+          consentOperation,
+          actions,
+          editor
+            ? browserEditorSummary(editor)
+            : script
+              ? browserScriptSummary(script)
+              : undefined,
+          requestId,
+        )
+      : "denied";
+    if (decision === "consent") {
+      await ideRequest({
+        type: "browserToolResponse",
+        requestId,
+        result: {
+          ok: false,
+          operation,
+          outcome: "consent",
+          error: tpl(t("browserConsentPending"), { operation: consentOperation }),
+        },
+      });
+      return;
+    }
+    if (decision !== "allowed") {
+      await ideRequest({
+        type: "browserToolResponse",
+        requestId,
+        result: { ok: false, operation, error: t("browserPageToolDenied") },
+      });
+      return;
+    }
   } catch {
     await ideRequest({
       type: "browserToolResponse",
@@ -8607,7 +8743,8 @@ async function handleBrowserToolRequest(
     });
     return;
   }
-  if (!origin) {
+  if (!origin || cancelledBrowserToolRequests.has(requestId)) {
+    cancelledBrowserToolRequests.delete(requestId);
     await ideRequest({
       type: "browserToolResponse",
       requestId,
@@ -8615,21 +8752,16 @@ async function handleBrowserToolRequest(
     });
     return;
   }
-  const allowed = await allowBrowserToolOperation(origin, operation, actions);
-  if (!allowed) {
-    await ideRequest({
-      type: "browserToolResponse",
-      requestId,
-      result: { ok: false, operation, error: t("browserPageToolDenied") },
-    });
-    return;
-  }
+  cancelledBrowserToolRequests.delete(requestId);
   browserPanelConnection.send({
     type: "browser_tool_execute",
     requestId,
     operation,
     ...(actions ? { actions } : {}),
     ...(selector ? { selector } : {}),
+    ...(editor ? { editor } : {}),
+    ...(script ? { script } : {}),
+    ...(requestedDomMode ? { domMode: requestedDomMode } : {}),
     ...(expectedOrigin ? { expectedOrigin } : {}),
     expectedUrl: context.url,
     expectedDocumentId: context.documentId,
@@ -8676,12 +8808,22 @@ function renderIdeEvent(evt: IdeEvent): void {
     clearBrowserContextPanel();
     return;
   }
+  if (evt.type === "browser_tool_cancel") {
+    cancelledBrowserToolRequests.add(evt.requestId);
+    browserToolDialogCancels.get(evt.requestId)?.();
+    browserToolDialogCancels.delete(evt.requestId);
+    return;
+  }
   if (evt.type === "browser_tool_request") {
     void handleBrowserToolRequest(
       evt.requestId,
       evt.operation,
       evt.actions,
       evt.selector,
+      evt.editor,
+      evt.script,
+      evt.domMode,
+      evt.expectedHost,
     );
     return;
   }
@@ -10191,7 +10333,9 @@ function showConfirm(
 function showBrowserPermissionDialog(
   message: string,
   preview?: string,
-): Promise<BrowserPermissionScope | null> {
+  registerCancel?: (cancel: () => void) => void,
+  waitMs?: number,
+): Promise<BrowserPermissionScope | "timeout" | null> {
   return new Promise((resolve) => {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
@@ -10227,11 +10371,16 @@ function showBrowserPermissionDialog(
     backdrop.appendChild(card);
     document.body.appendChild(backdrop);
 
-    const close = (scope: BrowserPermissionScope | null) => {
+    const close = (scope: BrowserPermissionScope | "timeout" | null) => {
       backdrop.remove();
       document.removeEventListener("keydown", esc);
       resolve(scope);
     };
+    // the tool may give up while the dialog is open: it must not be executed later
+    registerCancel?.(() => close(null));
+    if (waitMs && waitMs > 0) {
+      setTimeout(() => close("timeout"), waitMs);
+    }
     const esc = (event: KeyboardEvent) => {
       if (event.key === "Escape") close(null);
     };

@@ -1,4 +1,76 @@
-export type BrowserToolOperation = "dom" | "screenshot" | "action";
+export type BrowserToolOperation = "dom" | "screenshot" | "action" | "script";
+
+/**
+ * Browser companion protocol. Bump whenever a payload shape changes meaning, so
+ * an older companion build can never be read as a valid (empty) result.
+ */
+export const COMPANION_PROTOCOL_VERSION = 2;
+
+/** Wire-level operation: the editor tool ships as its own structured operation. */
+export type BrowserPageToolOperation = BrowserToolOperation | "editor";
+
+/** `compact` lists visible controls with labels and selectors; `full` serializes HTML. */
+export type BrowserDomMode = "compact" | "full";
+export type BrowserDomOperation = BrowserDomMode;
+
+/**
+ * Capability shapes, not editor brands: any editor exposing one of these API
+ * forms is supported without new code. `dom-field` is the generic fallback that
+ * only knows the standard editing pipeline, so its changes are DOM-verified.
+ */
+export type BrowserEditorKind =
+  "value-api" | "offset-document" | "model-registry" | "dom-field";
+
+/** `model` means the editor document was re-read; `dom-only` means only the DOM. */
+export type BrowserEditorVerification = "model" | "dom-only";
+
+/** One targeted change inside an editor document. Lines and columns are 1-based. */
+export interface BrowserEditorEdit {
+  fromLine: number;
+  fromColumn: number;
+  toLine: number;
+  toColumn: number;
+  text: string;
+}
+
+export interface BrowserScriptRequest {
+  code: string;
+  timeoutMs: number;
+}
+
+export type BrowserEditorRequest =
+  | {
+      action: "list";
+      filters?: { visibleOnly?: boolean; editableOnly?: boolean };
+    }
+  | { action: "read"; editorId: string }
+  | {
+      action: "replace";
+      editorId: string;
+      text: string;
+      expectedHash: string;
+    }
+  | {
+      action: "apply";
+      editorId: string;
+      expectedHash: string;
+      edits: BrowserEditorEdit[];
+    };
+
+export interface BrowserEditorInfo {
+  editorId: string;
+  kind: BrowserEditorKind;
+  verificationLevel: BrowserEditorVerification;
+  frameUrl?: string;
+  label?: string;
+  modelUri?: string;
+  language?: string;
+  readOnly: boolean;
+  visible: boolean;
+  length: number;
+  lines: number;
+  hash: string;
+}
 
 export interface BrowserPersistentPermissions {
   global?: BrowserToolOperation[];
@@ -11,12 +83,34 @@ export interface BrowserInlineStyleValue {
   priority?: "important";
 }
 
+export type BrowserClickDefaultAction = "native" | "suppress";
+
+/**
+ * Selector actions refuse an ambiguous match (more than one element) unless the
+ * caller explicitly accepts "first match" with allowAmbiguous.
+ */
+export interface BrowserAmbiguousOptions {
+  allowAmbiguous?: boolean;
+}
+
 export type BrowserPageAction =
-  | { type: "click"; selector: string; target?: "selector" | "visual" }
-  | { type: "click_at"; x: number; y: number }
-  | { type: "type"; selector: string; text: string; clear?: boolean }
-  | { type: "select"; selector: string; value: string }
-  | { type: "focus"; selector: string }
+  | {
+      type: "click";
+      selector: string;
+      target?: "selector" | "visual";
+      defaultAction?: BrowserClickDefaultAction;
+      allowAmbiguous?: boolean;
+    }
+  | { type: "click_at"; x: number; y: number; defaultAction?: BrowserClickDefaultAction }
+  | {
+      type: "type";
+      selector: string;
+      text: string;
+      clear?: boolean;
+      allowAmbiguous?: boolean;
+    }
+  | { type: "select"; selector: string; value: string; allowAmbiguous?: boolean }
+  | { type: "focus"; selector: string; allowAmbiguous?: boolean }
   | {
       type: "scroll";
       selector?: string;
@@ -27,12 +121,19 @@ export type BrowserPageAction =
     }
   | { type: "reload" }
   | { type: "navigate"; url: string }
-  | { type: "class"; selector: string; add?: string[]; remove?: string[] }
+  | {
+      type: "class";
+      selector: string;
+      add?: string[];
+      remove?: string[];
+      allowAmbiguous?: boolean;
+    }
   | {
       type: "style";
       selector: string;
       set?: BrowserInlineStyleValue[];
       remove?: string[];
+      allowAmbiguous?: boolean;
     };
 
 export interface BrowserPageActionResult {
@@ -41,28 +142,79 @@ export interface BrowserPageActionResult {
   selector?: string;
   x?: number;
   y?: number;
+  /** Element that actually received the dispatched events. */
+  target?: string;
+  /** Hash fragment after the action, when the action was a click. */
+  hash?: string;
+  /** What the dispatch itself achieved (never the application outcome). */
+  outcome?: "dispatched" | "canceled" | "suppressed";
+  /** Selector target described from the requested element. */
+  requestedTarget?: string;
+  /** True when a visual hit-test landed on a different element. */
+  visualHitMismatch?: boolean;
+  /** True when the pre-dispatch frame wait was skipped (paused rAF). */
+  rafTimedOut?: boolean;
+  /** True when the click activation was canceled (by the page or by request). */
+  defaultPrevented?: boolean;
+  /** True when the default browser action was suppressed on request. */
+  defaultActionSuppressed?: boolean;
   ok: boolean;
   error?: string;
 }
 
 export interface BrowserToolPayload {
   ok: boolean;
-  operation?: BrowserToolOperation;
+  companionProtocol?: number;
+  operation?: BrowserPageToolOperation;
   url?: string;
   title?: string;
   documentId?: string;
   html?: string;
   selector?: string;
+  domMode?: BrowserDomMode;
+  nodes?: unknown;
+  nodeTotal?: number;
+  nodeOmitted?: number;
   imageDataUrl?: string;
   actionResults?: BrowserPageActionResult[];
+  actionId?: string;
+  urlBefore?: string;
+  urlAfter?: string;
+  /**
+   * `unknown` when the request failed after dispatch (timeout, abort, error);
+   * `consent` when it never reached the page because the user has not approved
+   * the authorization dialog yet.
+   */
+  outcome?: "unknown" | "consent";
+  editors?: BrowserEditorInfo[];
+  editorId?: string;
+  editorKind?: BrowserEditorKind;
+  content?: string;
+  contentLength?: number;
+  contentLines?: number;
+  contentHash?: string;
+  previousHash?: string;
+  changed?: boolean;
+  verified?: boolean;
+  editVerificationLevel?: BrowserEditorVerification;
+  editWarning?: string;
+  scriptValue?: string;
+  scriptType?: string;
+  scriptTruncated?: boolean;
+  scriptDurationMs?: number;
   error?: string;
 }
 
 export interface BrowserToolRequest {
   requestId: string;
-  operation: BrowserToolOperation;
+  operation: BrowserPageToolOperation;
   actions?: BrowserPageAction[];
   selector?: string;
+  editor?: BrowserEditorRequest;
+  script?: BrowserScriptRequest;
+  domMode?: BrowserDomMode;
+  /** Host the caller expects: a mismatch is an explicit error, never a silent other tab. */
+  expectedHost?: string;
 }
 
 const MAX_ACTIONS = 20;
@@ -76,6 +228,8 @@ const MAX_STYLE_CHANGES = 100;
 const MAX_STYLE_PROPERTY_LENGTH = 128;
 const MAX_STYLE_VALUE_LENGTH = 2_000;
 const MAX_NAVIGATION_URL_LENGTH = 8_192;
+const CLICK_DEFAULT_ACTIONS = new Set<BrowserClickDefaultAction>(["native", "suppress"]);
+
 const SCROLL_POSITIONS = new Set<ScrollLogicalPosition>([
   "start",
   "center",
@@ -94,6 +248,19 @@ function boundedString(
   }
   if (value.length > maxLength) throw new Error(`${name} is too long.`);
   return value;
+}
+
+export function normalizeBrowserExpectedHost(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "string" ||
+    !/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/i.test(value)
+  ) {
+    throw new Error(
+      "expectedHost must be a bare host name, for example one.example.com.",
+    );
+  }
+  return value.toLowerCase();
 }
 
 export function normalizeBrowserElementSelector(value: unknown): string {
@@ -181,6 +348,20 @@ function navigationUrl(value: unknown, name: string): string {
   return url.toString();
 }
 
+function clickDefaultAction(
+  value: unknown,
+  name: string,
+): BrowserClickDefaultAction | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "string" ||
+    !CLICK_DEFAULT_ACTIONS.has(value as BrowserClickDefaultAction)
+  ) {
+    throw new Error(`${name} must be native or suppress.`);
+  }
+  return value as BrowserClickDefaultAction;
+}
+
 function pointerCoordinate(value: unknown, name: string): number {
   if (
     typeof value !== "number" ||
@@ -244,6 +425,10 @@ export function normalizeBrowserPageActions(value: unknown): BrowserPageAction[]
             `actions[${index}].target must be selector or visual when provided.`,
           );
         }
+        const defaultAction = clickDefaultAction(
+          action.defaultAction,
+          `actions[${index}].defaultAction`,
+        );
         return {
           type: "click",
           selector: boundedString(
@@ -252,14 +437,22 @@ export function normalizeBrowserPageActions(value: unknown): BrowserPageAction[]
             MAX_SELECTOR_LENGTH,
           ),
           ...(action.target ? { target: action.target } : {}),
+          ...(defaultAction ? { defaultAction } : {}),
+          ...(action.allowAmbiguous === true ? { allowAmbiguous: true } : {}),
         };
       }
-      case "click_at":
+      case "click_at": {
+        const defaultAction = clickDefaultAction(
+          action.defaultAction,
+          `actions[${index}].defaultAction`,
+        );
         return {
           type: "click_at",
           x: pointerCoordinate(action.x, `actions[${index}].x`),
           y: pointerCoordinate(action.y, `actions[${index}].y`),
+          ...(defaultAction ? { defaultAction } : {}),
         };
+      }
       case "focus":
         return {
           type: "focus",
@@ -268,6 +461,7 @@ export function normalizeBrowserPageActions(value: unknown): BrowserPageAction[]
             `actions[${index}].selector`,
             MAX_SELECTOR_LENGTH,
           ),
+          ...(action.allowAmbiguous === true ? { allowAmbiguous: true } : {}),
         };
       case "type":
         return {
@@ -284,6 +478,7 @@ export function normalizeBrowserPageActions(value: unknown): BrowserPageAction[]
             true,
           ),
           ...(typeof action.clear === "boolean" ? { clear: action.clear } : {}),
+          ...(action.allowAmbiguous === true ? { allowAmbiguous: true } : {}),
         };
       case "select":
         return {
@@ -299,6 +494,7 @@ export function normalizeBrowserPageActions(value: unknown): BrowserPageAction[]
             MAX_TEXT_LENGTH,
             true,
           ),
+          ...(action.allowAmbiguous === true ? { allowAmbiguous: true } : {}),
         };
       case "scroll": {
         const selector =
@@ -365,6 +561,7 @@ export function normalizeBrowserPageActions(value: unknown): BrowserPageAction[]
           ),
           ...(add?.length ? { add } : {}),
           ...(remove?.length ? { remove } : {}),
+          ...(action.allowAmbiguous === true ? { allowAmbiguous: true } : {}),
         };
       }
       case "style": {
@@ -387,10 +584,193 @@ export function normalizeBrowserPageActions(value: unknown): BrowserPageAction[]
           ),
           ...(set?.length ? { set } : {}),
           ...(remove?.length ? { remove } : {}),
+          ...(action.allowAmbiguous === true ? { allowAmbiguous: true } : {}),
         };
       }
       default:
         throw new Error(`actions[${index}].type is not supported.`);
     }
   });
+}
+
+const MAX_SCRIPT_LENGTH = 20_000;
+const MIN_SCRIPT_TIMEOUT_MS = 100;
+const MAX_SCRIPT_TIMEOUT_MS = 10_000;
+const DEFAULT_SCRIPT_TIMEOUT_MS = 5_000;
+
+const EDITOR_KINDS: BrowserEditorKind[] = [
+  "value-api",
+  "offset-document",
+  "model-registry",
+  "dom-field",
+];
+const MAX_EDITOR_TEXT_LENGTH = 400_000;
+const MAX_EDITOR_EDITS = 50;
+const EDITOR_ID_PATTERN =
+  /^f\d{1,9}:(?:value-api|offset-document|model-registry|dom-field):\d{1,4}$/;
+const EDITOR_HASH_PATTERN = /^fnv1a32:[0-9a-f]{8}:\d{1,9}$/;
+const MAX_EDITOR_LINE = 5_000_000;
+const MAX_EDITOR_COLUMN = 1_000_000;
+
+export function isBrowserEditorKind(value: unknown): value is BrowserEditorKind {
+  return typeof value === "string" && EDITOR_KINDS.includes(value as BrowserEditorKind);
+}
+
+export function normalizeBrowserEditorHash(value: unknown, name = "hash"): string {
+  if (typeof value !== "string" || !EDITOR_HASH_PATTERN.test(value)) {
+    throw new Error(
+      `${name} must be an editor content hash reported by the editor tool.`,
+    );
+  }
+  return value;
+}
+
+function editorCoordinate(value: unknown, name: string, max: number): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > max) {
+    throw new Error(`${name} must be an integer between 1 and ${max}.`);
+  }
+  return value;
+}
+
+function normalizeEditorEdits(value: unknown): BrowserEditorEdit[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_EDITOR_EDITS) {
+    throw new Error(`edits must contain between 1 and ${MAX_EDITOR_EDITS} items.`);
+  }
+  return value.map((entry, index): BrowserEditorEdit => {
+    if (!entry || typeof entry !== "object") {
+      throw new Error(`edits[${index}] must be an object.`);
+    }
+    const edit = entry as Record<string, unknown>;
+    const fromLine = editorCoordinate(
+      edit.fromLine,
+      `edits[${index}].fromLine`,
+      MAX_EDITOR_LINE,
+    );
+    const fromColumn = editorCoordinate(
+      edit.fromColumn,
+      `edits[${index}].fromColumn`,
+      MAX_EDITOR_COLUMN,
+    );
+    const toLine = editorCoordinate(
+      edit.toLine,
+      `edits[${index}].toLine`,
+      MAX_EDITOR_LINE,
+    );
+    const toColumn = editorCoordinate(
+      edit.toColumn,
+      `edits[${index}].toColumn`,
+      MAX_EDITOR_COLUMN,
+    );
+    if (toLine < fromLine || (toLine === fromLine && toColumn < fromColumn)) {
+      throw new Error(`edits[${index}] end position precedes its start position.`);
+    }
+    return {
+      fromLine,
+      fromColumn,
+      toLine,
+      toColumn,
+      text: boundedString(
+        edit.text,
+        `edits[${index}].text`,
+        MAX_EDITOR_TEXT_LENGTH,
+        true,
+      ),
+    };
+  });
+}
+
+/**
+ * Validates an editor request before it reaches the page. Writes always carry
+ * the content hash they were planned against, so a document that changed in the
+ * meantime is rejected instead of overwritten.
+ */
+export function normalizeBrowserEditorRequest(value: unknown): BrowserEditorRequest {
+  if (!value || typeof value !== "object") {
+    throw new Error("editor must be an object.");
+  }
+  const request = value as Record<string, unknown>;
+  const action = request.action;
+  if (action === "list") {
+    const filters = request.filters;
+    if (filters === undefined) return { action: "list" };
+    if (!filters || typeof filters !== "object") {
+      throw new Error("editor.filters must be an object.");
+    }
+    const candidate = filters as Record<string, unknown>;
+    for (const key of ["visibleOnly", "editableOnly"]) {
+      if (candidate[key] !== undefined && typeof candidate[key] !== "boolean") {
+        throw new Error(`editor.filters.${key} must be a boolean.`);
+      }
+    }
+    return {
+      action: "list",
+      filters: {
+        ...(candidate.visibleOnly === true ? { visibleOnly: true } : {}),
+        ...(candidate.editableOnly === true ? { editableOnly: true } : {}),
+      },
+    };
+  }
+  if (action !== "read" && action !== "replace" && action !== "apply") {
+    throw new Error("editor.action must be list, read, replace or apply.");
+  }
+  const editorId = request.editorId;
+  if (typeof editorId !== "string" || !EDITOR_ID_PATTERN.test(editorId)) {
+    throw new Error(
+      "editor.editorId must be an editor identifier reported by this tool.",
+    );
+  }
+  if (action === "read") return { action: "read", editorId };
+  const expectedHash = normalizeBrowserEditorHash(
+    request.expectedHash,
+    "editor.expectedHash",
+  );
+  if (action === "replace") {
+    return {
+      action: "replace",
+      editorId,
+      text: boundedString(request.text, "editor.text", MAX_EDITOR_TEXT_LENGTH, true),
+      expectedHash,
+    };
+  }
+  return {
+    action: "apply",
+    editorId,
+    expectedHash,
+    edits: normalizeEditorEdits(request.edits),
+  };
+}
+
+/**
+ * Validates an arbitrary-JavaScript request. Execution is a separate, opt-in
+ * consent class (`script`): it is never implied by the DOM or action grants.
+ */
+export function normalizeBrowserScriptRequest(value: unknown): BrowserScriptRequest {
+  if (!value || typeof value !== "object") {
+    throw new Error("script must be an object.");
+  }
+  const request = value as Record<string, unknown>;
+  const code = boundedString(request.code, "script.code", MAX_SCRIPT_LENGTH);
+  if (code.trim().length === 0) {
+    throw new Error("script.code must contain JavaScript source.");
+  }
+  const timeoutMs =
+    request.timeoutMs === undefined ? DEFAULT_SCRIPT_TIMEOUT_MS : request.timeoutMs;
+  if (
+    typeof timeoutMs !== "number" ||
+    !Number.isInteger(timeoutMs) ||
+    timeoutMs < MIN_SCRIPT_TIMEOUT_MS ||
+    timeoutMs > MAX_SCRIPT_TIMEOUT_MS
+  ) {
+    throw new Error(
+      `script.timeoutMs must be an integer between ${MIN_SCRIPT_TIMEOUT_MS} and ${MAX_SCRIPT_TIMEOUT_MS}.`,
+    );
+  }
+  return { code, timeoutMs };
+}
+
+/** Read-only editor actions need DOM consent; document writes need action consent. */
+export function browserEditorConsentOperation(
+  request: BrowserEditorRequest,
+): BrowserToolOperation {
+  return request.action === "read" || request.action === "list" ? "dom" : "action";
 }

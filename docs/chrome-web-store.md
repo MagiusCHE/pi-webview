@@ -55,7 +55,7 @@ Required to show the active page title, URL and favicon, track tab changes, repl
 **scripting**
 
 ```text
-Required to read the current text selection, serialize the complete DOM or one selected element when explicitly requested, and perform only authorized structured selector/visual/coordinate clicks, type, select, focus, page/container scroll, scroll-into-view, CSS-class and inline-style changes. Pointer events are synthetic DOM events. The extension does not execute arbitrary JavaScript, accept stylesheet source code, request Chrome's debugger permission or use CDP.
+Required to read the current text selection, serialize the complete DOM or one selected element when explicitly requested, read and edit the document of a web code editor through the API shape the page exposes, and perform only authorized structured selector/visual/coordinate clicks, type, select, focus, page/container scroll, scroll-into-view, CSS-class and inline-style changes. Pointer events are synthetic DOM events. Reaching editor objects requires injecting one packaged function into the page's own JavaScript context. The user may additionally and explicitly authorize the agent to run JavaScript in the active page (`browser_page_script`): that code is written by the user's own AI agent, runs only with the page's privileges, is bounded by a timeout and an output limit, and is gated by its own consent class (current pi session, one site, or globally) with a dedicated confirmation showing the code. The extension ships every executable asset in the package, does not load remote code into the extension, does not accept stylesheet source code, and does not request Chrome's debugger permission or use CDP.
 ```
 
 **storage**
@@ -78,7 +78,8 @@ Answer according to the actual behavior rather than minimizing the declaration:
 - messages, attachments, selected text, requested complete/targeted DOM, requested screenshots and structured click, page-action, navigation or CSS-mutation instructions may be sent to the user-configured piw server, AI provider and other user-configured tools;
 - the developer does not receive, sell or use this data for advertising, analytics, credit decisions or unrelated purposes;
 - authentication information can be present in the configured server URL and is stored only in `storage.local`;
-- remote code execution is not used; every executable asset is included in the extension package.
+- every executable extension asset is included in the extension package and no code is loaded from the network into the extension;
+- the only caller-supplied evaluation is `browser_page_script`: the user's own pi agent may run JavaScript in the active page after granting the dedicated script consent, and nothing runs before that grant.
 
 Use this public privacy-policy URL:
 

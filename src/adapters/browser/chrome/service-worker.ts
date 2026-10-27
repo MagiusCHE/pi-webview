@@ -1,11 +1,22 @@
 import type { BrowserPageContext } from "../../../ide/protocol.ts";
 import {
+  COMPANION_PROTOCOL_VERSION,
   isolatedBrowserNavigationAction,
+  normalizeBrowserEditorRequest,
   normalizeBrowserPageActions,
+  normalizeBrowserScriptRequest,
+  type BrowserEditorRequest,
   type BrowserPageAction,
   type BrowserPageActionResult,
-  type BrowserToolOperation,
+  type BrowserPageToolOperation,
 } from "../../../ide/browser-tools.ts";
+import { executePageActions } from "./page-actions.ts";
+import { serializePageDomCompact } from "./page-dom.ts";
+import type { PageDomCompactRequest, PageDomCompactResult } from "./page-dom.ts";
+import { pageEditorOperation } from "./page-editor.ts";
+import type { PageEditorRequestInput } from "./page-editor.ts";
+import { pageScriptExecute } from "./page-script.ts";
+import type { PageScriptRequestInput, PageScriptResult } from "./page-script.ts";
 import { safeBrowserPageUrl } from "../context.ts";
 import {
   BROWSER_PANEL_PORT,
@@ -117,8 +128,26 @@ interface ChromeApi {
             func: (selector: string | null) => T;
             args: [string | null];
           }
+        | {
+            target: { tabId: number; allFrames?: boolean; frameIds?: number[] };
+            world?: "ISOLATED" | "MAIN";
+            func: (request: PageEditorRequestInput) => T;
+            args: [PageEditorRequestInput];
+          }
+        | {
+            target: { tabId: number };
+            world?: "ISOLATED" | "MAIN";
+            func: (request: PageScriptRequestInput) => T | Promise<T>;
+            args: [PageScriptRequestInput];
+          }
+        | {
+            target: { tabId: number };
+            world?: "ISOLATED" | "MAIN";
+            func: (request: PageDomCompactRequest) => T;
+            args: [PageDomCompactRequest];
+          }
         | { target: { tabId: number }; files: string[] },
-    ): Promise<Array<{ result?: T }>>;
+    ): Promise<Array<{ result?: T; frameId?: number }>>;
   };
   sidePanel: {
     setPanelBehavior(options: { openPanelOnActionClick: boolean }): Promise<void>;
@@ -181,239 +210,16 @@ async function isPiwPage(pageUrl: string): Promise<boolean> {
   }
 }
 
-async function executePageActions(
-  actions: BrowserPageAction[],
-): Promise<BrowserPageActionResult[]> {
-  const results: BrowserPageActionResult[] = [];
-  const eventOptions = { bubbles: true, composed: true };
-  const settlePageFrames = () =>
-    new Promise<void>((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-    );
-  const normalizedEditableText = (value: string) =>
-    value.replace(/[\u200b\u2060]/g, "").replace(/\u00a0/g, " ");
-  const dispatchPointerClick = (target: Element, clientX: number, clientY: number) => {
-    if (target instanceof HTMLElement) target.focus({ preventScroll: true });
-    const pointer = {
-      ...eventOptions,
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-      clientX,
-      clientY,
-      button: 0,
-    };
-    const mouse = { ...eventOptions, clientX, clientY, button: 0 };
-    target.dispatchEvent(new PointerEvent("pointerover", pointer));
-    target.dispatchEvent(new MouseEvent("mouseover", mouse));
-    target.dispatchEvent(new PointerEvent("pointerenter", pointer));
-    target.dispatchEvent(new MouseEvent("mouseenter", mouse));
-    target.dispatchEvent(new PointerEvent("pointerdown", { ...pointer, buttons: 1 }));
-    target.dispatchEvent(new MouseEvent("mousedown", { ...mouse, buttons: 1 }));
-    target.dispatchEvent(new PointerEvent("pointerup", { ...pointer, buttons: 0 }));
-    target.dispatchEvent(new MouseEvent("mouseup", { ...mouse, buttons: 0 }));
-    target.dispatchEvent(new MouseEvent("click", { ...mouse, buttons: 0 }));
-  };
-
-  for (let index = 0; index < actions.length; index += 1) {
-    const action = actions[index]!;
-    try {
-      if (action.type === "reload" || action.type === "navigate") {
-        throw new Error("Navigation actions must be handled by the browser host.");
-      }
-      const selector = "selector" in action ? action.selector : undefined;
-      const element = selector ? document.querySelector(selector) : undefined;
-      if (selector && !(element instanceof HTMLElement)) {
-        throw new Error(`No HTML element matches ${selector}`);
-      }
-      if (action.type === "click") {
-        const selected = element as HTMLElement;
-        selected.scrollIntoView({ block: "center", inline: "center" });
-        await settlePageFrames();
-        const rect = selected.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) {
-          throw new Error("The target element is not visible.");
-        }
-        const clientX = rect.left + rect.width / 2;
-        const clientY = rect.top + rect.height / 2;
-        const hit = document.elementFromPoint(clientX, clientY);
-        const target =
-          hit instanceof Element && (action.target === "visual" || selected.contains(hit))
-            ? hit
-            : selected;
-        dispatchPointerClick(target, clientX, clientY);
-      } else if (action.type === "click_at") {
-        if (action.x >= window.innerWidth || action.y >= window.innerHeight) {
-          throw new Error("The click coordinates are outside the current viewport.");
-        }
-        const target = document.elementFromPoint(action.x, action.y);
-        if (!(target instanceof Element)) {
-          throw new Error("No page element exists at the requested coordinates.");
-        }
-        dispatchPointerClick(target, action.x, action.y);
-      } else if (action.type === "focus") {
-        (element as HTMLElement).focus();
-      } else if (action.type === "type") {
-        const target = element as HTMLElement;
-        const clear = action.clear !== false;
-        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-          const current = clear ? "" : target.value;
-          const prototype =
-            target instanceof HTMLTextAreaElement
-              ? HTMLTextAreaElement.prototype
-              : HTMLInputElement.prototype;
-          const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
-          if (!setter) throw new Error("The field value cannot be changed.");
-          target.focus();
-          setter.call(target, current + action.text);
-          target.dispatchEvent(
-            new InputEvent("input", { ...eventOptions, data: action.text }),
-          );
-          target.dispatchEvent(new Event("change", eventOptions));
-        } else if (target.isContentEditable) {
-          const editable = target.closest<HTMLElement>('[contenteditable="true"]');
-          if (!editable) throw new Error("The editable root cannot be found.");
-          const beforeText = normalizedEditableText(editable.textContent ?? "");
-          const range = document.createRange();
-          range.selectNodeContents(clear ? editable : target);
-          if (!clear) range.collapse(false);
-          editable.focus({ preventScroll: true });
-          const selection = window.getSelection();
-          selection?.removeAllRanges();
-          selection?.addRange(range);
-          document.dispatchEvent(new Event("selectionchange", eventOptions));
-
-          const beforeInput = new InputEvent("beforeinput", {
-            ...eventOptions,
-            cancelable: true,
-            data: action.text,
-            inputType: "insertText",
-          });
-          if (typeof StaticRange === "function") {
-            const targetRange = new StaticRange({
-              startContainer: range.startContainer,
-              startOffset: range.startOffset,
-              endContainer: range.endContainer,
-              endOffset: range.endOffset,
-            });
-            Object.defineProperty(beforeInput, "getTargetRanges", {
-              value: () => [targetRange],
-            });
-          }
-          editable.dispatchEvent(beforeInput);
-
-          if (!beforeInput.defaultPrevented) {
-            const inserted = document.execCommand("insertText", false, action.text);
-            if (!inserted) {
-              range.deleteContents();
-              const text = document.createTextNode(action.text);
-              range.insertNode(text);
-              range.setStartAfter(text);
-              range.collapse(true);
-              selection?.removeAllRanges();
-              selection?.addRange(range);
-              editable.dispatchEvent(
-                new InputEvent("input", {
-                  ...eventOptions,
-                  data: action.text,
-                  inputType: "insertText",
-                }),
-              );
-            }
-          }
-
-          await settlePageFrames();
-          const afterText = normalizedEditableText(editable.textContent ?? "");
-          const expectedText = normalizedEditableText(action.text);
-          const changed = afterText !== beforeText;
-          const retained = clear
-            ? expectedText.length === 0
-              ? afterText.trim().length === 0
-              : afterText.includes(expectedText)
-            : expectedText.length === 0 ||
-              (changed && afterText.length >= beforeText.length + expectedText.length);
-          if (!retained) {
-            throw new Error("The contenteditable editor rejected the text insertion.");
-          }
-        } else {
-          throw new Error("The target is not an editable field.");
-        }
-      } else if (action.type === "select") {
-        if (!(element instanceof HTMLSelectElement)) {
-          throw new Error("The target is not a select element.");
-        }
-        if (![...element.options].some((option) => option.value === action.value)) {
-          throw new Error(`The select has no option with value ${action.value}`);
-        }
-        element.focus();
-        element.value = action.value;
-        element.dispatchEvent(new Event("input", eventOptions));
-        element.dispatchEvent(new Event("change", eventOptions));
-      } else if (action.type === "class") {
-        const target = element as HTMLElement;
-        if (action.remove?.length) target.classList.remove(...action.remove);
-        if (action.add?.length) target.classList.add(...action.add);
-      } else if (action.type === "style") {
-        const target = element as HTMLElement;
-        for (const property of action.remove ?? []) {
-          target.style.removeProperty(property);
-        }
-        for (const value of action.set ?? []) {
-          target.style.setProperty(value.property, value.value, value.priority ?? "");
-        }
-      } else {
-        const deltaX = action.deltaX;
-        const deltaY = action.deltaY;
-        if (element && deltaX === undefined && deltaY === undefined) {
-          element.scrollIntoView({
-            behavior: "auto",
-            block: action.block ?? "center",
-            inline: action.inline ?? "nearest",
-          });
-        } else if (element) {
-          element.scrollBy({
-            left: deltaX ?? 0,
-            top: deltaY ?? 0,
-            behavior: "auto",
-          });
-        } else {
-          window.scrollBy({
-            left: deltaX ?? 0,
-            top: deltaY ?? 0,
-            behavior: "auto",
-          });
-        }
-      }
-      results.push({
-        index,
-        type: action.type,
-        ...(selector ? { selector } : {}),
-        ...(action.type === "click_at" ? { x: action.x, y: action.y } : {}),
-        ok: true,
-      });
-    } catch (error) {
-      const selector = "selector" in action ? action.selector : undefined;
-      results.push({
-        index,
-        type: action.type,
-        ...(selector ? { selector } : {}),
-        ...(action.type === "click_at" ? { x: action.x, y: action.y } : {}),
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      break;
-    }
-  }
-  return results;
-}
-
 async function executeBrowserTool(
   port: ChromePort,
   request: {
     requestId: string;
-    operation: BrowserToolOperation;
+    operation: BrowserPageToolOperation;
     actions?: unknown;
     selector?: string;
+    editor?: unknown;
+    script?: unknown;
+    domMode?: unknown;
     expectedOrigin?: string;
     expectedUrl?: string;
     expectedDocumentId?: string;
@@ -453,10 +259,35 @@ async function executeBrowserTool(
     const base = {
       requestId: request.requestId,
       operation: request.operation,
+      companionProtocol: COMPANION_PROTOCOL_VERSION,
       url: safeBrowserPageUrl(tabUrl),
       title: tab.title,
       documentId,
     };
+    if (request.operation === "dom" && request.domMode !== "full") {
+      const [execution] = await chrome.scripting.executeScript<PageDomCompactResult>({
+        target: { tabId: tab.id },
+        world: "MAIN",
+        func: serializePageDomCompact,
+        args: [{ visibleOnly: true }],
+      });
+      const result = execution?.result;
+      if (!result || !result.ok) {
+        throw new Error(result?.error ?? "The page did not return a compact DOM view.");
+      }
+      port.postMessage({
+        type: "browser_tool_result",
+        result: {
+          ...base,
+          ok: true,
+          domMode: "compact",
+          nodes: result.nodes ?? [],
+          nodeTotal: result.total ?? 0,
+          ...(result.omitted ? { nodeOmitted: result.omitted } : {}),
+        },
+      });
+      return;
+    }
     if (request.operation === "dom") {
       const [execution] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
@@ -490,6 +321,7 @@ async function executeBrowserTool(
         result: {
           ...base,
           ok: true,
+          domMode: "full",
           html: result.html,
           url: safeBrowserPageUrl(result.url),
           title: result.title,
@@ -515,11 +347,15 @@ async function executeBrowserTool(
                 }
               : {}),
             ok: true,
+            actionId: crypto.randomUUID(),
+            urlBefore: base.url,
+            ...(updated.url ? { urlAfter: safeBrowserPageUrl(updated.url) } : {}),
             actionResults: [{ index: 0, type: navigation.type, ok: true }],
           },
         });
         return;
       }
+      const actionId = crypto.randomUUID();
       const [execution] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         world: "MAIN",
@@ -529,9 +365,154 @@ async function executeBrowserTool(
       if (!Array.isArray(execution?.result)) {
         throw new Error("The page did not return action results.");
       }
+      // the dispatch outcome is not the application outcome: report both URLs so
+      // the agent can compare them instead of trusting "completed"
+      const after = await chrome.tabs.get(tab.id).catch(() => undefined);
       port.postMessage({
         type: "browser_tool_result",
-        result: { ...base, ok: true, actionResults: execution.result },
+        result: {
+          ...base,
+          ok: true,
+          actionId,
+          urlBefore: base.url,
+          ...(after?.url ? { urlAfter: safeBrowserPageUrl(after.url) } : {}),
+          actionResults: execution.result,
+        },
+      });
+      return;
+    }
+    if (request.operation === "editor") {
+      const editorRequest = normalizeBrowserEditorRequest(request.editor);
+      if (editorRequest.action === "list") {
+        const executions = await chrome.scripting.executeScript({
+          target: { tabId: tab.id, allFrames: true },
+          world: "MAIN",
+          func: pageEditorOperation,
+          args: [{ action: "list" }],
+        });
+        const editors: Array<Record<string, unknown>> = [];
+        const failures: string[] = [];
+        for (const execution of executions) {
+          const result = execution.result;
+          if (!result) continue;
+          const frameId = execution.frameId ?? 0;
+          if (!result.ok) {
+            if (result.error) failures.push(result.error);
+            continue;
+          }
+          for (const editor of result.editors ?? []) {
+            editors.push({
+              ...editor,
+              editorId: `f${frameId}:${editor.editorId}`,
+              ...(result.url ? { frameUrl: result.url } : {}),
+            });
+          }
+        }
+        if (editors.length === 0) {
+          const frames = executions.length;
+          const answered = executions.filter((execution) => execution.result).length;
+          throw new Error(
+            failures[0] ??
+              (answered === 0
+                ? `The editor scan returned no result from ${frames} frame(s): the page may have blocked the injected script. Reload the page and retry.`
+                : `No supported JavaScript editor was found in this page (${answered} of ${frames} frame(s) reported a scan result).`),
+          );
+        }
+        port.postMessage({
+          type: "browser_tool_result",
+          result: { ...base, ok: true, editors },
+        });
+        return;
+      }
+      const frameId = Number(
+        editorRequest.editorId.slice(1, editorRequest.editorId.indexOf(":")),
+      );
+      if (!Number.isInteger(frameId) || frameId < 0) {
+        throw new Error("The editor identifier is invalid.");
+      }
+      const [execution] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id, frameIds: [frameId] },
+        world: "MAIN",
+        func: pageEditorOperation,
+        args: [
+          {
+            action: editorRequest.action,
+            editorId: editorRequest.editorId.slice(
+              editorRequest.editorId.indexOf(":") + 1,
+            ),
+            ...(editorRequest.action === "replace" ? { text: editorRequest.text } : {}),
+            ...(editorRequest.action === "replace" || editorRequest.action === "apply"
+              ? { expectedHash: editorRequest.expectedHash }
+              : {}),
+            ...(editorRequest.action === "apply" ? { edits: editorRequest.edits } : {}),
+          },
+        ],
+      });
+      const result = execution?.result;
+      if (!result) {
+        throw new Error(
+          "The editor frame is no longer accessible: it may have been removed or reloaded.",
+        );
+      }
+      port.postMessage({
+        type: "browser_tool_result",
+        result: {
+          ...base,
+          ...(result.url ? { url: safeBrowserPageUrl(result.url) } : {}),
+          ok: result.ok,
+          editorId: editorRequest.editorId,
+          ...(result.error ? { error: result.error } : {}),
+          ...(result.editorKind ? { editorKind: result.editorKind } : {}),
+          ...(result.verificationLevel
+            ? { editVerificationLevel: result.verificationLevel }
+            : {}),
+          ...(result.warning ? { editWarning: result.warning } : {}),
+          ...(typeof result.content === "string" ? { content: result.content } : {}),
+          ...(typeof result.contentLength === "number"
+            ? { contentLength: result.contentLength }
+            : {}),
+          ...(typeof result.contentLines === "number"
+            ? { contentLines: result.contentLines }
+            : {}),
+          ...(typeof result.contentHash === "string"
+            ? { contentHash: result.contentHash }
+            : {}),
+          ...(typeof result.previousHash === "string"
+            ? { previousHash: result.previousHash }
+            : {}),
+          ...(typeof result.changed === "boolean" ? { changed: result.changed } : {}),
+          ...(typeof result.verified === "boolean" ? { verified: result.verified } : {}),
+        },
+      });
+      return;
+    }
+    if (request.operation === "script") {
+      const scriptRequest = normalizeBrowserScriptRequest(request.script);
+      const [execution] = await chrome.scripting.executeScript<PageScriptResult>({
+        target: { tabId: tab.id },
+        world: "MAIN",
+        func: pageScriptExecute,
+        args: [scriptRequest],
+      });
+      const result = execution?.result;
+      if (!result) {
+        throw new Error("The page did not return a result for the executed script.");
+      }
+      port.postMessage({
+        type: "browser_tool_result",
+        result: {
+          ...base,
+          ok: result.ok,
+          ...(typeof result.value === "string" ? { scriptValue: result.value } : {}),
+          ...(typeof result.type === "string" ? { scriptType: result.type } : {}),
+          ...(typeof result.truncated === "boolean"
+            ? { scriptTruncated: result.truncated }
+            : {}),
+          ...(typeof result.durationMs === "number"
+            ? { scriptDurationMs: result.durationMs }
+            : {}),
+          ...(result.error ? { error: result.error } : {}),
+        },
       });
       return;
     }
@@ -547,13 +528,16 @@ async function executeBrowserTool(
       result: { ...base, ok: true, imageDataUrl },
     });
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     port.postMessage({
       type: "browser_tool_result",
       result: {
         requestId: request.requestId,
         operation: request.operation,
         ok: false,
-        error: error instanceof Error ? error.message : String(error),
+        // the page may have acted before the failure: never imply "not executed"
+        outcome: "unknown",
+        error: message,
       },
     });
   }
@@ -708,6 +692,9 @@ chrome.runtime.onConnect.addListener((port) => {
       expectedDocumentId?: unknown;
       actions?: unknown;
       selector?: unknown;
+      editor?: unknown;
+      script?: unknown;
+      domMode?: unknown;
     };
     if (data?.type === "panel_ready") {
       const windowId = typeof data.windowId === "number" ? data.windowId : undefined;
@@ -737,12 +724,17 @@ chrome.runtime.onConnect.addListener((port) => {
       typeof data.requestId === "string" &&
       (data.operation === "dom" ||
         data.operation === "screenshot" ||
-        data.operation === "action")
+        data.operation === "action" ||
+        data.operation === "editor" ||
+        data.operation === "script")
     ) {
       void executeBrowserTool(port, {
         requestId: data.requestId,
         operation: data.operation,
         ...(data.operation === "action" ? { actions: data.actions } : {}),
+        ...(data.operation === "editor" ? { editor: data.editor } : {}),
+        ...(data.operation === "script" ? { script: data.script } : {}),
+        ...(data.domMode === "full" ? { domMode: "full" as const } : {}),
         ...(data.operation === "dom" && typeof data.selector === "string"
           ? { selector: data.selector }
           : {}),

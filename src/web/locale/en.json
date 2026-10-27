@@ -371,6 +371,20 @@
     "unitH": "h",
     "unitM": "m",
     "untrusted": "Untrusted project",
-    "waitingResponse": "Waiting for response…"
+    "waitingResponse": "Waiting for response…",
+    "browserEditorTarget": "Editor",
+    "browserEditorReplace": "Replace the whole document",
+    "browserEditorApply": "Targeted changes",
+    "browserEditorChars": "characters",
+    "browserEditorLines": "lines",
+    "browserEditorPreview": "New content preview",
+    "browserPermissionScriptConsent": "Allow the agent to run arbitrary JavaScript in {origin}? The code runs with the page's own privileges and can read or modify everything the page sees, including its network calls and any data present in the DOM. The requested code is shown below. After authorization, all future executions are allowed without further confirmation within the selected scope.",
+    "browserScriptTarget": "JavaScript execution",
+    "browserScriptTargetValue": "main context of the active page",
+    "browserScriptTimeout": "Timeout",
+    "browserScriptCode": "Code",
+    "browserActionSuppressDefault": "browser default action suppressed",
+    "browserConsentPending": "Authorization required ({operation}) is not granted yet: approve the dialog in the pi-webview side panel and retry. Nothing was executed and the page was not modified.",
+    "browserPageHostMismatch": "The active page is {active}, not {expected}. Activate the intended tab in the same window as the panel (or open the panel in that window) and retry: no action was executed."
   }
 }

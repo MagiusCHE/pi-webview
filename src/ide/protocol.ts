@@ -1,6 +1,10 @@
 import type {
+  BrowserDomMode,
+  BrowserEditorRequest,
   BrowserPageAction,
+  BrowserPageToolOperation,
   BrowserPersistentPermissions,
+  BrowserScriptRequest,
   BrowserToolOperation,
   BrowserToolPayload,
 } from "./browser-tools.ts";
@@ -481,10 +485,16 @@ export type IdeEvent =
   | {
       type: "browser_tool_request";
       requestId: string;
-      operation: BrowserToolOperation;
+      operation: BrowserPageToolOperation;
       actions?: BrowserPageAction[];
       selector?: string;
+      editor?: BrowserEditorRequest;
+      script?: BrowserScriptRequest;
+      domMode?: BrowserDomMode;
+      expectedHost?: string;
     }
+  /** the tool already gave up: the panel must drop the request, never run it later */
+  | { type: "browser_tool_cancel"; requestId: string }
   | { type: "at_mentioned"; filePath?: string; rangeText?: string };
 
 export interface BrowserSelectionRange {

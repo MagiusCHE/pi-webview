@@ -138,27 +138,34 @@ test("Chrome page actions are structured and do not evaluate remote code", () =>
     "src/adapters/browser/chrome/content-script.ts",
     "utf8",
   );
-  assert.match(serviceWorker, /function executePageActions/);
-  assert.match(serviceWorker, /action\.type === "click"/);
-  assert.match(serviceWorker, /action\.target === "visual"/);
-  assert.match(serviceWorker, /action\.type === "click_at"/);
-  assert.match(serviceWorker, /document\.elementFromPoint\(action\.x, action\.y\)/);
-  assert.match(serviceWorker, /new PointerEvent\("pointerdown"/);
-  assert.match(serviceWorker, /new MouseEvent\("click"/);
-  assert.match(serviceWorker, /action\.type === "type"/);
-  assert.match(serviceWorker, /action\.type === "class"/);
-  assert.match(serviceWorker, /classList\.add/);
-  assert.match(serviceWorker, /action\.type === "style"/);
-  assert.match(serviceWorker, /style\.setProperty/);
-  assert.match(serviceWorker, /scrollIntoView/);
+  // page actions live in their own injected module, referenced by the worker
+  const pageActions = readFileSync("src/adapters/browser/chrome/page-actions.ts", "utf8");
+  assert.match(
+    serviceWorker,
+    /import \{ executePageActions \} from "\.\/page-actions\.ts"/,
+  );
+  assert.match(pageActions, /export async function executePageActions/);
+  assert.match(pageActions, /action\.type === "click"/);
+  assert.match(pageActions, /action\.target === "visual"/);
+  assert.match(pageActions, /action\.type === "click_at"/);
+  assert.match(pageActions, /document\.elementFromPoint\(action\.x, action\.y\)/);
+  assert.match(pageActions, /new PointerEvent\("pointerdown"/);
+  assert.match(pageActions, /new MouseEvent\("click"/);
+  assert.match(pageActions, /action\.type === "type"/);
+  assert.match(pageActions, /action\.type === "class"/);
+  assert.match(pageActions, /classList\.add/);
+  assert.match(pageActions, /action\.type === "style"/);
+  assert.match(pageActions, /style\.setProperty/);
+  assert.match(pageActions, /scrollIntoView/);
+  assert.match(pageActions, /new InputEvent\("beforeinput"/);
+  assert.match(pageActions, /getTargetRanges/);
+  assert.match(pageActions, /execCommand\("insertText"/);
+  assert.match(pageActions, /document\.querySelector\(selector\)/);
+  assert.match(pageActions, /rejected the text insertion/);
   assert.match(serviceWorker, /chrome\.tabs\.reload/);
   assert.match(serviceWorker, /chrome\.tabs\.update/);
-  assert.match(serviceWorker, /new InputEvent\("beforeinput"/);
-  assert.match(serviceWorker, /getTargetRanges/);
-  assert.match(serviceWorker, /execCommand\("insertText"/);
-  assert.match(serviceWorker, /document\.querySelector\(selector\)/);
   assert.match(serviceWorker, /world: "MAIN"/);
-  assert.match(serviceWorker, /rejected the text insertion/);
+  assert.doesNotMatch(pageActions, /\beval\s*\(|new Function\s*\(/);
   assert.doesNotMatch(serviceWorker, /\beval\s*\(|new Function\s*\(/);
   assert.doesNotMatch(serviceWorker, /chrome\.debugger/);
   assert.match(contentScript, /"page-action"/);

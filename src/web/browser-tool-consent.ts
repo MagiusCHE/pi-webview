@@ -7,7 +7,13 @@ import {
 
 export type BrowserPermissionScope = "session" | "site" | "global";
 
-const OPERATIONS: BrowserToolOperation[] = ["dom", "screenshot", "action"];
+const OPERATIONS: BrowserToolOperation[] = [
+  "dom",
+  "screenshot",
+  "action",
+  // arbitrary page JavaScript: its own consent class, never implied by others
+  "script",
+];
 
 /**
  * Determines the origin shown in a browser-tool consent dialog. A navigation

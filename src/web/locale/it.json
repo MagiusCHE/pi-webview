@@ -370,6 +370,20 @@
     "unitH": "h",
     "unitM": "m",
     "untrusted": "Progetto non attendibile",
-    "waitingResponse": "Attesa risposta…"
+    "waitingResponse": "Attesa risposta…",
+    "browserEditorTarget": "Editor",
+    "browserEditorReplace": "Sostituzione completa del documento",
+    "browserEditorApply": "Modifiche puntuali",
+    "browserEditorChars": "caratteri",
+    "browserEditorLines": "righe",
+    "browserEditorPreview": "Anteprima del nuovo contenuto",
+    "browserPermissionScriptConsent": "Consentire all’agente di eseguire JavaScript arbitrario in {origin}? Il codice gira con i privilegi della pagina e può leggere o modificare tutto ciò che la pagina vede, incluse le sue chiamate di rete e i dati eventualmente presenti nel DOM. Il codice richiesto è mostrato sotto. Dopo l’autorizzazione, tutte le future esecuzioni saranno autorizzate senza nuove conferme nell’ambito scelto.",
+    "browserScriptTarget": "Esecuzione JavaScript",
+    "browserScriptTargetValue": "contesto principale della pagina attiva",
+    "browserScriptTimeout": "Timeout",
+    "browserScriptCode": "Codice",
+    "browserActionSuppressDefault": "azione predefinita del browser soppressa",
+    "browserConsentPending": "Autorizzazione richiesta ({operation}) non ancora concessa: approva il dialog nel pannello pi-webview e riprova. Nulla è stato eseguito e la pagina non è stata modificata.",
+    "browserPageHostMismatch": "La pagina attiva è {active}, non {expected}. Attiva la scheda desiderata nella stessa finestra del pannello (o apri il pannello in quella finestra) e riprova: nessuna azione è stata eseguita."
   }
 }

@@ -71,15 +71,18 @@ import {
   browserNewSessionWorkspace,
 } from "./browser-workspace.ts";
 import { redactDebugFrame } from "./debug-log.ts";
+import { BrowserToolBroker, type BrowserToolPayload } from "./browser-control.ts";
 import {
-  BrowserToolBroker,
-  type BrowserToolOperation,
-  type BrowserToolPayload,
-} from "./browser-control.ts";
-import {
+  normalizeBrowserEditorRequest,
   normalizeBrowserElementSelector,
   normalizeBrowserPageActions,
+  normalizeBrowserExpectedHost,
+  normalizeBrowserScriptRequest,
+  type BrowserDomMode,
+  type BrowserEditorRequest,
   type BrowserPageAction,
+  type BrowserPageToolOperation,
+  type BrowserScriptRequest,
 } from "../ide/browser-tools.ts";
 import {
   LOOPBACK_IP,
@@ -326,17 +329,23 @@ function main(): void {
         let body = "";
         for await (const chunk of req) {
           body += chunk.toString();
-          if (body.length > 256 * 1024) throw new Error("request too large");
+          if (body.length > 2 * 1024 * 1024) throw new Error("request too large");
         }
         const data = JSON.parse(body) as {
           operation?: unknown;
           actions?: unknown;
           selector?: unknown;
+          editor?: unknown;
+          script?: unknown;
+          domMode?: unknown;
+          expectedHost?: unknown;
         };
         if (
           data.operation !== "dom" &&
           data.operation !== "screenshot" &&
-          data.operation !== "action"
+          data.operation !== "action" &&
+          data.operation !== "editor" &&
+          data.operation !== "script"
         ) {
           res.writeHead(400).end("invalid browser operation");
           return;
@@ -349,6 +358,24 @@ function main(): void {
           data.operation === "dom" && data.selector !== undefined
             ? normalizeBrowserElementSelector(data.selector)
             : undefined;
+        const editor =
+          data.operation === "editor"
+            ? normalizeBrowserEditorRequest(data.editor)
+            : undefined;
+        const script =
+          data.operation === "script"
+            ? normalizeBrowserScriptRequest(data.script)
+            : undefined;
+        if (
+          data.domMode !== undefined &&
+          data.domMode !== "compact" &&
+          data.domMode !== "full"
+        ) {
+          res.writeHead(400).end("invalid dom mode");
+          return;
+        }
+        const domMode = data.domMode as BrowserDomMode | undefined;
+        const expectedHost = normalizeBrowserExpectedHost(data.expectedHost);
         const controller = new AbortController();
         req.once("aborted", () => controller.abort());
         res.once("close", () => {
@@ -359,6 +386,10 @@ function main(): void {
           controller.signal,
           actions,
           selector,
+          editor,
+          script,
+          domMode,
+          expectedHost,
         );
         if (res.destroyed) return;
         res.writeHead(result.ok ? 200 : 502, {
@@ -477,10 +508,14 @@ function main(): void {
     pi: PiProcess;
     controlCapability: string;
     requestBrowserTool: (
-      operation: BrowserToolOperation,
+      operation: BrowserPageToolOperation,
       signal?: AbortSignal,
       actions?: BrowserPageAction[],
       selector?: string,
+      editor?: BrowserEditorRequest,
+      script?: BrowserScriptRequest,
+      domMode?: BrowserDomMode,
+      expectedHost?: string,
     ) => Promise<BrowserToolPayload>;
     attach: (ws: WebSocket) => void;
     dispose: () => void;
@@ -1166,10 +1201,14 @@ function main(): void {
     };
 
     const requestBrowserTool = (
-      operation: BrowserToolOperation,
+      operation: BrowserPageToolOperation,
       signal?: AbortSignal,
       actions?: BrowserPageAction[],
       selector?: string,
+      editor?: BrowserEditorRequest,
+      script?: BrowserScriptRequest,
+      domMode?: BrowserDomMode,
+      expectedHost?: string,
     ) =>
       browserToolBroker.request(
         operation,
@@ -1178,6 +1217,10 @@ function main(): void {
           operation: requested,
           actions: requestedActions,
           selector: requestedSelector,
+          editor: requestedEditor,
+          script: requestedScript,
+          domMode: requestedDomMode,
+          expectedHost: requestedExpectedHost,
         }) => {
           send({
             channel: "ide",
@@ -1187,6 +1230,10 @@ function main(): void {
               operation: requested,
               ...(requestedActions ? { actions: requestedActions } : {}),
               ...(requestedSelector ? { selector: requestedSelector } : {}),
+              ...(requestedEditor ? { editor: requestedEditor } : {}),
+              ...(requestedScript ? { script: requestedScript } : {}),
+              ...(requestedDomMode ? { domMode: requestedDomMode } : {}),
+              ...(requestedExpectedHost ? { expectedHost: requestedExpectedHost } : {}),
             },
           });
         },
@@ -1194,6 +1241,15 @@ function main(): void {
         undefined,
         actions,
         selector,
+        editor,
+        script,
+        domMode,
+        (cancelledId) =>
+          send({
+            channel: "ide",
+            payload: { type: "browser_tool_cancel", requestId: cancelledId },
+          }),
+        expectedHost,
       );
     channel = {
       ws,

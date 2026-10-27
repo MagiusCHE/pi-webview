@@ -64,7 +64,10 @@ test("browser tool broker abort and disconnect settle pending requests", async (
   const controller = new AbortController();
   const abortedRequest = aborted.request("screenshot", () => {}, controller.signal);
   controller.abort();
-  assert.equal((await abortedRequest).error, "Browser tool was aborted.");
+  const abortError = (await abortedRequest).error ?? "";
+  // a failed request must never claim the page did nothing
+  assert.match(abortError, /was aborted/);
+  assert.match(abortError, /may have applied the request/);
 
   const disconnected = new BrowserToolBroker();
   const disconnectedRequest = disconnected.request("dom", () => {});
@@ -180,6 +183,7 @@ test("browser screenshot becomes a typed image result", () => {
 test("browser action result reports each structured action", () => {
   const result = actionToolResult({
     ok: true,
+    companionProtocol: 2,
     operation: "action",
     url: "https://example.test/",
     title: "Example",
@@ -188,7 +192,9 @@ test("browser action result reports each structured action", () => {
       { index: 1, type: "click", selector: "button", ok: false, error: "missing" },
     ],
   });
-  assert.match(result.content[0]?.text ?? "", /Completed 1 of 2 actions/);
+  // dispatch != application outcome, and the wording must say so
+  assert.match(result.content[0]?.text ?? "", /Dispatched 1 of 2 actions/);
+  assert.match(result.content[0]?.text ?? "", /event delivery only/);
   assert.match(result.content[0]?.text ?? "", /Action 2 \(click\): missing/);
 });
 
@@ -205,6 +211,8 @@ test("browser tools register structured page actions without JavaScript", () => 
       "browser_page_dom",
       "browser_page_element_dom",
       "browser_page_screenshot",
+      "browser_page_editor",
+      "browser_page_script",
       "browser_page_class",
       "browser_page_style",
       "browser_page_click",
@@ -214,12 +222,17 @@ test("browser tools register structured page actions without JavaScript", () => 
     ],
   );
   assert.match(definitions[1]!.description, /one element/i);
-  assert.match(definitions[3]!.description, /CSS class/i);
-  assert.match(definitions[4]!.description, /inline CSS/i);
-  assert.match(definitions[5]!.description, /visual element/i);
-  assert.match(definitions[6]!.description, /Reload/i);
-  assert.match(definitions[7]!.description, /bring a selected element into view/i);
-  const action = definitions[8]!;
+  const editor = definitions[3]!;
+  assert.match(editor.description, /recognised by API shape/i);
+  assert.match(editor.description, /DOM-verified only/i);
+  assert.match(editor.description, /content-hash guard/i);
+  assert.match(definitions[4]!.description, /Execute JavaScript/i);
+  assert.match(definitions[5]!.description, /CSS class/i);
+  assert.match(definitions[6]!.description, /inline CSS/i);
+  assert.match(definitions[7]!.description, /visual element/i);
+  assert.match(definitions[8]!.description, /Reload/i);
+  assert.match(definitions[9]!.description, /bring a selected element into view/i);
+  const action = definitions[10]!;
   assert.match(action.description, /click, type, select, focus and scroll/);
   assert.match(action.description, /does not execute arbitrary JavaScript/i);
   assert.match(action.description, /Chrome debugger/i);

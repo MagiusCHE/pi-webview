@@ -6,7 +6,15 @@ import { zipDirectory } from "./zip-directory.mjs";
 const outputDir = "dist/pi-webview-chrome";
 const outputZip = "dist/pi-webview-chrome.zip";
 
-execFileSync("pnpm", ["build"], { stdio: "inherit" });
+if (process.platform === "win32") {
+  execFileSync(
+    process.env.ComSpec ?? "cmd.exe",
+    ["/d", "/s", "/c", "pnpm.cmd", "build"],
+    { stdio: "inherit" },
+  );
+} else {
+  execFileSync("pnpm", ["build"], { stdio: "inherit" });
+}
 rmSync(outputDir, { recursive: true, force: true });
 rmSync(outputZip, { force: true });
 mkdirSync(outputDir, { recursive: true });

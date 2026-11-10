@@ -7,9 +7,13 @@ import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const TIMEOUT_MS = 30_000;
+const TIMEOUT_MS = 60_000;
+const RPC_ATTEMPT_TIMEOUT_MS = 3_000;
+const RPC_RETRY_DELAY_MS = 500;
 
-const bridge = spawn("node", ["src/bridge/index.ts"], { cwd: root });
+const bridge = spawn("node", ["src/bridge/index.ts", "--no-extensions", "--no-mcp"], {
+  cwd: root,
+});
 bridge.stderr.on("data", (buf) => process.stderr.write(`[bridge] ${buf}`));
 
 const timeout = setTimeout(() => {
@@ -33,8 +37,13 @@ function waitForReady() {
   });
 }
 
-function rpc(ws, command, id) {
+function rpc(ws, command, id, timeoutMs = 10_000) {
   return new Promise((resolve, reject) => {
+    const finish = (callback, value) => {
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      callback(value);
+    };
     const onMessage = (data) => {
       const frame = JSON.parse(data.toString());
       if (frame.channel !== "rpc") return;
@@ -44,16 +53,38 @@ function rpc(ws, command, id) {
         msg.command === command.type &&
         (!id || msg.id === id)
       ) {
-        ws.off("message", onMessage);
-        resolve(msg);
+        finish(resolve, msg);
       }
     };
+    const timer = setTimeout(
+      () => finish(reject, new Error(`nessuna risposta a ${command.type}`)),
+      timeoutMs,
+    );
     ws.on("message", onMessage);
     ws.send(
       JSON.stringify({ channel: "rpc", payload: { ...command, ...(id ? { id } : {}) } }),
     );
-    setTimeout(() => reject(new Error(`nessuna risposta a ${command.type}`)), 10_000);
   });
+}
+
+async function waitForRpcReady(ws) {
+  const deadline = Date.now() + 30_000;
+  let attempt = 0;
+  let lastError = new Error("pi RPC non pronto");
+  while (Date.now() < deadline) {
+    try {
+      return await rpc(
+        ws,
+        { type: "get_state" },
+        `smoke-state-${attempt++}`,
+        RPC_ATTEMPT_TIMEOUT_MS,
+      );
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, RPC_RETRY_DELAY_MS));
+    }
+  }
+  throw lastError;
 }
 
 try {
@@ -67,7 +98,7 @@ try {
   });
   console.log("smoke: connesso");
 
-  const state = await rpc(ws, { type: "get_state" });
+  const state = await waitForRpcReady(ws);
   if (!state.success) throw new Error("get_state fallito");
   console.log(`smoke: get_state ok → model=${state.data?.model?.id ?? "nessuno"}`);
 

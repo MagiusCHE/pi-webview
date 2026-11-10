@@ -72,15 +72,18 @@ export class PiProcess {
   start(): void {
     this.spawnError = false;
     const args = ["--mode", "rpc", ...(this.opts.args ?? [])];
-    const childOpts = {
-      stdio: ["pipe", "pipe", "pipe"] as ["pipe", "pipe", "pipe"],
-      ...(this.opts.env ? { env: this.opts.env } : {}),
-      ...(this.opts.cwd ? { cwd: this.opts.cwd } : {}),
-    };
     // Windows: spawning the .cmd shim through `cmd /c` with piped stdio
     // kills pi's RPC stdin (boot ok, no requests ever read, verified 0.84.3)
     // → spawn node + cli.js directly (pi's own RpcClient pattern).
     const direct = resolveDirectNode(this.command);
+    const childEnv = direct?.env
+      ? { ...(this.opts.env ?? process.env), ...direct.env }
+      : this.opts.env;
+    const childOpts = {
+      stdio: ["pipe", "pipe", "pipe"] as ["pipe", "pipe", "pipe"],
+      ...(childEnv ? { env: childEnv } : {}),
+      ...(this.opts.cwd ? { cwd: this.opts.cwd } : {}),
+    };
     const child = direct
       ? spawn(direct.node, [direct.script, ...args], childOpts)
       : process.platform === "win32"

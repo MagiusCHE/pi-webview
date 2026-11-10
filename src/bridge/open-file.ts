@@ -4,15 +4,21 @@
 
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { posix, win32 } from "node:path";
 
 export interface FileManagerCommand {
   command: string;
   args: string[];
 }
 
+function usesWindowsPaths(value: string): boolean {
+  return /^(?:[a-z]:[\\/]|\\\\)/i.test(value);
+}
+
 export function resolveOpenFilePath(filePath: string, workspace: string): string {
-  return isAbsolute(filePath) ? filePath : resolve(workspace, filePath);
+  if (posix.isAbsolute(filePath) || win32.isAbsolute(filePath)) return filePath;
+  const pathApi = usesWindowsPaths(workspace) ? win32 : posix;
+  return pathApi.resolve(workspace, filePath);
 }
 
 export function fileManagerCommand(
@@ -23,7 +29,7 @@ export function fileManagerCommand(
   if (platform === "win32") {
     return { command: "explorer.exe", args: [`/select,${filePath}`] };
   }
-  return { command: "xdg-open", args: [dirname(filePath)] };
+  return { command: "xdg-open", args: [posix.dirname(filePath)] };
 }
 
 export function revealFileInSystemManager(

@@ -5,7 +5,7 @@
 // The file is config.json. Serves the UI and the future IDE adapter.
 
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import type {
   CompactionSettings,
@@ -84,16 +84,23 @@ export function readThinkingSettings(
 export function userConfigDir(platform: NodeJS.Platform = process.platform): string {
   const home = homedir();
   switch (platform) {
-    case "win32":
+    case "win32": {
+      const windowsHome = process.env.USERPROFILE ?? home;
       return process.env.APPDATA
-        ? join(process.env.APPDATA, "pi-webview")
-        : join(home, "AppData", "Roaming", "pi-webview");
+        ? win32.join(process.env.APPDATA, "pi-webview")
+        : win32.join(windowsHome, "AppData", "Roaming", "pi-webview");
+    }
     case "darwin":
-      return join(home, "Library", "Application Support", "pi-webview");
+      return posix.join(
+        process.env.HOME ?? home,
+        "Library",
+        "Application Support",
+        "pi-webview",
+      );
     default:
       return process.env.XDG_CONFIG_HOME
-        ? join(process.env.XDG_CONFIG_HOME, "pi-webview")
-        : join(home, ".config", "pi-webview");
+        ? posix.join(process.env.XDG_CONFIG_HOME, "pi-webview")
+        : posix.join(process.env.HOME ?? home, ".config", "pi-webview");
   }
 }
 

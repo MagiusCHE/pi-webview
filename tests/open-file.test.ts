@@ -8,6 +8,10 @@ test("resolveOpenFilePath: relative paths use the active workspace", () => {
     "/workspace/project/src/file.ts",
   );
   assert.equal(resolveOpenFilePath("/tmp/file.ts", "/workspace/project"), "/tmp/file.ts");
+  assert.equal(
+    resolveOpenFilePath("src\\file.ts", "C:\\workspace\\project"),
+    "C:\\workspace\\project\\src\\file.ts",
+  );
 });
 
 test("fileManagerCommand: reveals the file with each platform file manager", () => {

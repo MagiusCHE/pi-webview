@@ -114,6 +114,11 @@ export function settingsIcon(): string {
   return `<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" aria-hidden="true">${SETTINGS}</svg>`;
 }
 
+// Material "search": find text in the loaded chat.
+export function searchIcon(): string {
+  return '<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M9.5 3a6.5 6.5 0 1 0 3.98 11.64L19.84 21 21 19.84l-6.36-6.36A6.5 6.5 0 0 0 9.5 3zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9z"/></svg>';
+}
+
 // Material "refresh" (full reload: restart the pi process + reload the
 // webview page)
 const RELOAD =

@@ -4,6 +4,12 @@ import type { RuntimeMode } from "./environment.ts";
 // Windows. The default 10s RPC timeout is too short for this operation.
 export const SESSION_SWITCH_TIMEOUT_MS = 90_000;
 export const SESSION_HISTORY_TIMEOUT_MS = 90_000;
+export const STARTUP_RPC_ATTEMPT_TIMEOUT_MS = 3_000;
+export const STARTUP_RPC_RETRY_DELAY_MS = 1_500;
+export const STARTUP_RPC_MAX_ATTEMPTS = Math.ceil(
+  (SESSION_HISTORY_TIMEOUT_MS + STARTUP_RPC_RETRY_DELAY_MS) /
+    (STARTUP_RPC_ATTEMPT_TIMEOUT_MS + STARTUP_RPC_RETRY_DELAY_MS),
+);
 
 export function sessionSwitchOutcome(response: {
   type?: unknown;

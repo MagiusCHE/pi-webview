@@ -297,7 +297,11 @@ public static class IdeBridge
                             // missing or malformed file → info stays null
                         }
                     }
-                    host.PostIdeResponse(Ok(req, new Dictionary<string, object?> { ["info"] = info ?? null }));
+                    host.PostIdeResponse(Ok(req, new Dictionary<string, object?>
+                    {
+                        ["info"] = info ?? null,
+                        ["statusSnapshot"] = host.StatusSnapshot(),
+                    }));
                     return;
                 }
                 case "restartPi":

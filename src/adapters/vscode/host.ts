@@ -15,6 +15,7 @@ import {
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { PiProcess } from "../../bridge/pi-process.ts";
+import { ExtensionUiState } from "../../ide/extension-ui-state.ts";
 import { shouldRestartPiForNewSession } from "../../bridge/rpc-recovery.ts";
 import { resolvePi, findPiFallback, findPiViaShell } from "../../bridge/spawn.ts";
 import { samePath } from "../../ide/paths.ts";
@@ -191,6 +192,7 @@ export interface PiHostCallbacks {
 
 export abstract class PiWebviewHost {
   protected pi: PiProcess | null = null;
+  private readonly extensionUiState = new ExtensionUiState();
   /** command line pi was launched with (for error messages) */
   protected piCommand = "";
   protected webview: vscode.Webview | null = null;
@@ -308,6 +310,7 @@ export abstract class PiWebviewHost {
     flagsOverride?: CliFlags,
     modelArgsOverride?: string[],
   ): void {
+    this.extensionUiState.clear();
     logLine(`startPi session=${sessionPath ?? ""} pid=${process.pid}`);
     let piCmd = piOverride
       ? { command: piOverride, found: true, path: piOverride }
@@ -411,7 +414,7 @@ export abstract class PiWebviewHost {
     ].join(" ");
 
     this.pi = new PiProcess(
-      piCmd.command,
+      piCmd.path ?? piCmd.command,
       {
         onEvent: (evt) => {
           // ALL extension_ui_request (select/confirm/input/editor/notify/
@@ -423,7 +426,10 @@ export abstract class PiWebviewHost {
           // "cancelled".
           this.post({ channel: "rpc", payload: evt as RpcEvent });
         },
-        onBoot: () => this.modelFallback.reset(),
+        onBoot: () => {
+          this.modelFallback.reset();
+          this.extensionUiState.clear();
+        },
         onStderr: (line) => {
           console.warn("[pi]", line);
           // debug: raw stderr → companion.log (does the OSC 777 arrive here?)
@@ -567,6 +573,7 @@ export abstract class PiWebviewHost {
   }
 
   protected post(frame: Frame): void {
+    if (frame.channel === "rpc") this.extensionUiState.record(frame.payload as RpcEvent);
     this.webview?.postMessage(frame);
   }
 
@@ -771,7 +778,10 @@ export abstract class PiWebviewHost {
       case "getStartupInfo":
         // new-session welcome banner: NON-persistent (per-process file written
         // by the pi-side extension at session_start — never in the session jsonl)
-        this.respond(req.id, true, { info: readStartupInfo(this.pi?.pid) });
+        this.respond(req.id, true, {
+          info: readStartupInfo(this.pi?.pid),
+          statusSnapshot: this.extensionUiState.statuses(),
+        });
         return;
       case "forkSession":
         try {

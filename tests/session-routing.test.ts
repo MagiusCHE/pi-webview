@@ -4,6 +4,9 @@ import test from "node:test";
 import {
   SESSION_HISTORY_TIMEOUT_MS,
   SESSION_SWITCH_TIMEOUT_MS,
+  STARTUP_RPC_ATTEMPT_TIMEOUT_MS,
+  STARTUP_RPC_MAX_ATTEMPTS,
+  STARTUP_RPC_RETRY_DELAY_MS,
   sessionPickStrategy,
   sessionSwitchOutcome,
 } from "../src/web/session-routing.ts";
@@ -66,6 +69,24 @@ test("a large local session is given more than the default RPC timeout", () => {
   assert.match(
     web,
     /rpcRequest\(\s*\{ type: "switch_session", sessionPath: path \},\s*undefined,\s*SESSION_SWITCH_TIMEOUT_MS,/,
+  );
+});
+
+test("startup waits for RPC readiness before requesting session history", () => {
+  assert.ok(
+    STARTUP_RPC_MAX_ATTEMPTS * STARTUP_RPC_ATTEMPT_TIMEOUT_MS +
+      (STARTUP_RPC_MAX_ATTEMPTS - 1) * STARTUP_RPC_RETRY_DELAY_MS >=
+      SESSION_HISTORY_TIMEOUT_MS,
+  );
+  const web = readFileSync("src/web/main.ts", "utf8");
+  assert.match(
+    web,
+    /for \(let attempt = 0; attempt < STARTUP_RPC_MAX_ATTEMPTS; attempt\+\+\)/,
+  );
+  assert.match(web, /if \(startupRpcBlocked \|\| !startupRpcReady\) return false/);
+  assert.ok(
+    web.indexOf("if (startupRpcBlocked || !startupRpcReady) return false") <
+      web.indexOf("rpcRequest(rpc.getMessages()"),
   );
 });
 

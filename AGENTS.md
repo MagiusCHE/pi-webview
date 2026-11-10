@@ -310,6 +310,13 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   esecuzione con un `!` rosso accanto. Lo stato vive nell'host
   (`TrustRuntime` in `src/bridge/trust.ts`, mirror C#
   `PiWebview.Vs.Core/Platform/TrustRuntime.cs`), mai nel JSONL di sessione
+- **Recupero readiness sessione**: `SessionRecovery` nella UI ritenta solo letture
+  dopo avvii lenti, senza sovrapporre tentativi né ricostruire history durante
+  un run attivo. `getStartupInfo` aggiunge lo snapshot opzionale `statusSnapshot`
+  (ultimi `setStatus`, clear inclusi), volatile per processo e coerente nei tre
+  host. Snapshot tardivi non sovrascrivono eventi live più recenti. Mai ritentare
+  automaticamente `new_session`, prompt o steering dopo un timeout: riconciliare
+  con `get_state`. Vedi `docs/concept/0006-session-readiness-recovery.md`.
 - **Riconnessione standalone**: la pagina browser ritenta la connessione al
   bridge ogni 5 s solo con `document.visibilityState === "visible"` e tenta
   subito quando torna visibile; quando il bridge è di nuovo su, la spia torna

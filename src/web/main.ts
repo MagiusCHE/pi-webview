@@ -15,6 +15,7 @@ import type {
   CliFlags,
   CliFlagInfo,
   StartupInfo,
+  StartupInfoResponse,
   ThinkingSettings,
   PiSetting,
   PiSettingsResult,
@@ -85,6 +86,9 @@ import { runtime } from "./environment.ts";
 import {
   SESSION_HISTORY_TIMEOUT_MS,
   SESSION_SWITCH_TIMEOUT_MS,
+  STARTUP_RPC_ATTEMPT_TIMEOUT_MS,
+  STARTUP_RPC_MAX_ATTEMPTS,
+  STARTUP_RPC_RETRY_DELAY_MS,
   sessionPickStrategy,
   sessionSwitchOutcome,
 } from "./session-routing.ts";
@@ -129,6 +133,9 @@ import {
   setBrowserServerUrl,
 } from "../adapters/browser/runtime.ts";
 import { renderMarkdown } from "./markdown.ts";
+import { ChatSearch } from "./chat-search.ts";
+import { SessionRecovery } from "./session-recovery.ts";
+import { recoverableStatuses } from "../ide/extension-ui-state.ts";
 import { renderAnsiToHtml, stripAnsi } from "./ansi.ts";
 import {
   streamedToolFilePath,
@@ -618,6 +625,42 @@ function hideBootLoader(): void {
 // pi exposes no "extensions done" event, the quiet period is the only
 // reliable signal. A max wait is the safety net against endless loading.
 let sessionLoading = false;
+let sessionEpoch = 0;
+let sessionMetadataReady = false;
+let sessionStatsReady = false;
+let sessionRefresh: { epoch: number; promise: Promise<boolean> } | null = null;
+let recoveryNotice: HTMLElement | null = null;
+
+function isCurrentSession(epoch: number): boolean {
+  return epoch === sessionEpoch && statusState === "open" && !piRestarting;
+}
+
+function showSessionRecovery(): void {
+  if (startupRpcBlocked || recoveryNotice) return;
+  recoveryNotice = document.createElement("div");
+  recoveryNotice.className = "session-recovery-notice";
+  recoveryNotice.setAttribute("role", "status");
+  const text = document.createElement("span");
+  text.textContent = t("sessionRecovering");
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "btn";
+  retry.textContent = t("sessionRetryNow");
+  retry.addEventListener("click", () => sessionRecovery.retryNow());
+  recoveryNotice.append(text, retry);
+  els.messages.before(recoveryNotice);
+}
+
+function hideSessionRecovery(): void {
+  recoveryNotice?.remove();
+  recoveryNotice = null;
+}
+
+function invalidateSessionRecovery(): void {
+  sessionEpoch++;
+  sessionRecovery.reset();
+  hideSessionRecovery();
+}
 let loadingHistoryLoaded = false; // the chat history has been rendered
 let loadingQuietTimer: ReturnType<typeof setTimeout> | null = null;
 let loadingMaxTimer: ReturnType<typeof setTimeout> | null = null;
@@ -646,6 +689,10 @@ const LOADING_MAX_MS = 30000; // default safety net, extended for large sessions
 const LOADING_LOG_CAP = 200; // lines kept in the box
 
 function beginSessionLoading(maxWaitMs = LOADING_MAX_MS): void {
+  invalidateSessionRecovery();
+  sessionMetadataReady = false;
+  sessionStatsReady = false;
+  chatSearch.close();
   // The extension may have asked before the transport finished initializing.
   const awaitingInteractive = loadingInteractivePending;
   const blockedAtStart = startupRpcBlocked;
@@ -729,6 +776,13 @@ function loadingMaxTick(): void {
   // Waiting for an answer is not a failed boot: keep the question usable even
   // when the user takes longer than the usual loading safety timeout.
   if (loadingInteractivePending || startupRpcBlocked) return;
+  if (!loadingHistoryLoaded || historyLoadFailed || !sessionMetadataReady) {
+    // Expose a recovery notice, not an apparently ready but empty composer.
+    hideBootLoader();
+    showSessionRecovery();
+    sessionRecovery.start();
+    return;
+  }
   if (sessionLoading) endSessionLoading();
 }
 
@@ -865,7 +919,11 @@ const reconnect = new ReconnectLoop({
 
 // becoming visible again is the moment to try immediately (no 5s wait)
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") reconnect.retryNow();
+  if (document.visibilityState === "visible") {
+    reconnect.retryNow();
+    if (statusState === "open" && !demoMode && !startupRpcBlocked)
+      sessionRecovery.retryNow();
+  }
 });
 
 let browserCompanionOffered = false;
@@ -1018,6 +1076,7 @@ function setupTransport(tr: Transport): void {
         }
       })();
     } else if (s.state === "closed") {
+      invalidateSessionRecovery();
       rpcInputReady = false;
       startupRpcBlocked = false;
       startupRpcQuestionIds.clear();
@@ -1874,6 +1933,11 @@ function setThemePref(pref: ThemePreference): void {
 }
 
 function applyUiStrings(): void {
+  if (recoveryNotice) {
+    hideSessionRecovery();
+    showSessionRecovery();
+  }
+  chatSearch.refreshLocale();
   els.input.placeholder = "";
   setStandardPlaceholder();
   els.connectUrl.placeholder = runtime.isBrowserExtension
@@ -2979,11 +3043,29 @@ async function deleteSessionFlow(path: string): Promise<void> {
 
 // new session: closes the dropdown and reloads with the fresh session
 async function startNewSession(): Promise<void> {
-  if (!beginSessionTransition()) return;
+  const previousHistoryLoaded = loadingHistoryLoaded;
+  if (!beginSessionTransition(SESSION_SWITCH_TIMEOUT_MS + LOADING_MAX_MS)) return;
+  const epoch = sessionEpoch;
   let historyLoaded = false;
   try {
-    const res = await rpcRequest({ type: "new_session" });
-    if (!res.success) return;
+    const res = await rpcRequest(
+      { type: "new_session" },
+      undefined,
+      SESSION_SWITCH_TIMEOUT_MS,
+    );
+    if (!isCurrentSession(epoch)) return;
+    const outcome = sessionSwitchOutcome(res);
+    if (outcome === "cancelled") {
+      loadingHistoryLoaded = previousHistoryLoaded;
+      addSystemBox("warn", t("sessionCreationCancelled"));
+      return;
+    }
+    if (outcome === "failed") {
+      loadingHistoryLoaded = previousHistoryLoaded;
+      throw new Error(
+        typeof res.error === "string" ? res.error : t("sessionSwitchUnknownError"),
+      );
+    }
     currentSessionPath = null;
     refreshSessionNotificationOverride();
     renderNativeQueues([], []);
@@ -2991,14 +3073,29 @@ async function startNewSession(): Promise<void> {
     sessionHasMessages = false;
     // refreshSessions → loadHistory renders the welcome banner (Context/
     // Skills/Extensions) while the new session chat is still empty.
-    await refreshSessions();
-    historyLoaded = true;
+    historyLoaded = await refreshSessions();
     // pi may assign the name late: update box and title when it arrives
-    pollSessionTitle();
-  } catch {
-    // new_session failed: the current session stays
+    if (historyLoaded && isCurrentSession(epoch)) pollSessionTitle();
+  } catch (error) {
+    if (isCurrentSession(epoch)) {
+      addSystemBox(
+        "warn",
+        tpl(t("sessionCreationFailed"), {
+          reason: error instanceof Error ? error.message : t("sessionSwitchUnknownError"),
+        }),
+      );
+    }
+    // A timed-out mutation may still have succeeded. Read state; never resend it.
   } finally {
-    finishSessionTransition(historyLoaded);
+    if (isCurrentSession(epoch)) {
+      if (!historyLoaded && !loadingHistoryLoaded && !startupRpcBlocked) {
+        switchingSession = false;
+        hideBootLoader();
+        showSessionRecovery();
+        updateSendButton();
+      } else finishSessionTransition(historyLoaded);
+      sessionRecovery.start();
+    }
   }
 }
 
@@ -3696,12 +3793,14 @@ function updateDocumentTitle(): void {
 
 // re-reads the current session data (name assigned by pi, first message,
 // count) and updates box + browser title
-async function refreshSessionTitle(): Promise<void> {
-  if (!currentSessionPath) return;
+async function refreshSessionTitle(): Promise<boolean> {
+  const epoch = sessionEpoch;
+  if (!currentSessionPath) return true;
   // 1) name assigned by pi (e.g. auto-title) via get_state
   let named = false;
   try {
     const state = await rpcRequest(rpc.getState());
+    if (!isCurrentSession(epoch)) return false;
     const name = (state.data as { sessionName?: string } | undefined)?.sessionName;
     if (name && currentSessionPath) {
       const s = sessions.find((x) => x.path === currentSessionPath);
@@ -3720,6 +3819,7 @@ async function refreshSessionTitle(): Promise<void> {
   }
   // 2) fresh data from the file (first message, count, name in session_info)
   const res = await ideRequest({ type: "getSessionInfo", path: currentSessionPath });
+  if (!isCurrentSession(epoch)) return false;
   if (res?.ok) {
     const info = res.data as SessionInfo;
     const idx = sessions.findIndex((x) => x.path === currentSessionPath);
@@ -3728,6 +3828,7 @@ async function refreshSessionTitle(): Promise<void> {
   }
   if (named || res?.ok) populateSessionMenu();
   if (res?.ok) void persistBrowserSessionUrl();
+  return res?.ok === true || !!currentSession()?.name || !sessionHasMessages;
 }
 
 // after a new session pi may assign the name late: short polling
@@ -3741,77 +3842,168 @@ function pollSessionTitle(attempts = 10, interval = 4000): void {
   }, interval);
 }
 
-async function refreshSessions(showResumeNotice = false): Promise<boolean> {
+function applySessionState(value: unknown): void {
+  if (!value || typeof value !== "object") return;
+  const data = value as {
+    sessionFile?: string;
+    sessionName?: string;
+    model?: { provider?: string; name?: string; id?: string; input?: string[] } | null;
+    thinkingLevel?: string;
+    steeringMode?: string;
+    followUpMode?: string;
+    autoCompactionEnabled?: boolean;
+  };
+  sessionMetadataReady = true;
+  if (data.sessionFile) {
+    currentSessionPath = data.sessionFile;
+    persistSessionPath();
+    void persistBrowserSessionUrl();
+    refreshSessionNotificationOverride();
+  }
+  if (data.model) {
+    currentModel = data.model;
+    modelSupportsVision =
+      Array.isArray(data.model.input) && data.model.input.includes("image");
+    const label = data.model.name ?? data.model.id;
+    modelInfoText = label ? [data.model.provider, label].filter(Boolean).join(" · ") : "";
+    renderModelInfo();
+  }
+  if (typeof data.thinkingLevel === "string") {
+    thinkingLevel = data.thinkingLevel;
+    renderThinkingInfo();
+  }
+  if (data.steeringMode === "one-at-a-time" || data.steeringMode === "all")
+    steeringMode = data.steeringMode;
+  if (data.followUpMode === "one-at-a-time" || data.followUpMode === "all")
+    followUpMode = data.followUpMode;
+  if (typeof data.autoCompactionEnabled === "boolean")
+    autoCompactionEnabled = data.autoCompactionEnabled;
+  if (data.sessionName && currentSessionPath) {
+    const entry = sessions.find((item) => item.path === currentSessionPath);
+    if (entry) entry.name = data.sessionName;
+    else sessions.unshift({ path: currentSessionPath, name: data.sessionName });
+  }
+}
+
+async function recoverSessionData(isCurrent: () => boolean): Promise<boolean> {
+  const epoch = sessionEpoch;
+  const current = () => isCurrent() && isCurrentSession(epoch) && !startupRpcBlocked;
+  if (!current() || switchingSession || sessionRefresh?.epoch === epoch) return false;
+  const state = await rpcRequest(
+    rpc.getState(),
+    undefined,
+    STARTUP_RPC_ATTEMPT_TIMEOUT_MS,
+  ).catch(() => null);
+  if (!current() || !state?.success) return false;
+  rpcInputReady = true;
+  applySessionState(state.data);
+  const revision = statusSlotVersion;
+  const [snapshot, statsReady] = await Promise.all([
+    ideRequest({ type: "getStartupInfo" }),
+    fetchSessionStats(),
+  ]);
+  if (!current()) return false;
+  const data = snapshot?.ok
+    ? (snapshot.data as StartupInfoResponse | undefined)
+    : undefined;
+  for (const status of recoverableStatuses(
+    data?.statusSnapshot,
+    statusSlotVersions,
+    revision,
+  )) {
+    if ((statusSlots.get(status.statusKey) ?? "") !== status.statusText) {
+      handleExtensionUiRequest({
+        type: "extension_ui_request",
+        method: "setStatus",
+        ...status,
+      });
+    }
+  }
+  if (!loadingHistoryLoaded || historyLoadFailed) {
+    // A metadata retry must never tear down a live assistant/tool renderer.
+    if (
+      working ||
+      compacting ||
+      (state.data as { isStreaming?: boolean } | undefined)?.isStreaming
+    )
+      return false;
+    if (!(await refreshSessions(true)) || !current()) return false;
+  }
+  if (!current()) return false;
+  const titleReady = await refreshSessionTitle();
+  if (!current()) return false;
+  populateSessionMenu();
+  void fetchCompactionSettings();
+  void fetchBalance();
+  if (!currentModel) void warnWhenNoModelsAvailable();
+  const ready =
+    sessionMetadataReady &&
+    titleReady &&
+    sessionStatsReady &&
+    statsReady &&
+    snapshot?.ok === true &&
+    loadingHistoryLoaded &&
+    !historyLoadFailed;
+  if (ready) {
+    hideSessionRecovery();
+    if (sessionLoading && !loadingInteractivePending) armLoadingQuiet();
+  } else showSessionRecovery();
+  return ready;
+}
+
+function refreshSessions(showResumeNotice = false): Promise<boolean> {
+  const epoch = sessionEpoch;
+  if (sessionRefresh?.epoch === epoch) return sessionRefresh.promise;
+  const promise = refreshSessionsOnce(showResumeNotice, epoch)
+    .catch(() => false)
+    .finally(() => {
+      if (sessionRefresh?.promise === promise) sessionRefresh = null;
+      if (isCurrentSession(epoch) && !startupRpcBlocked) sessionRecovery.start();
+    });
+  sessionRefresh = { epoch, promise };
+  return promise;
+}
+
+async function refreshSessionsOnce(
+  showResumeNotice: boolean,
+  epoch: number,
+): Promise<boolean> {
   // get_state can fail at startup (pi not ready yet in the webview):
-  // retry until the process answers (short per-attempt timeout)
-  for (let attempt = 0; attempt < 6; attempt++) {
-    if (startupRpcBlocked) return false;
+  // keep probing for the complete history timeout and never send history
+  // commands until one response proves that the RPC input reader is active.
+  let startupRpcReady = false;
+  for (let attempt = 0; attempt < STARTUP_RPC_MAX_ATTEMPTS; attempt++) {
+    if (startupRpcBlocked || !isCurrentSession(epoch)) return false;
     try {
-      const state = await rpcRequest(rpc.getState(), `rpc-st-${attempt}`, 3000);
+      const state = await rpcRequest(
+        rpc.getState(),
+        undefined,
+        STARTUP_RPC_ATTEMPT_TIMEOUT_MS,
+      );
+      if (!isCurrentSession(epoch)) return false;
       if (state.success) {
+        startupRpcReady = true;
         rpcInputReady = true;
-        const data = state.data as
-          | {
-              sessionFile?: string;
-              model?: unknown;
-              thinkingLevel?: string;
-              steeringMode?: string;
-              followUpMode?: string;
-              autoCompactionEnabled?: boolean;
-            }
-          | undefined;
-        if (data?.sessionFile) {
-          currentSessionPath = data.sessionFile;
-          persistSessionPath(); // resume the same session on IDE reloads
-          void persistBrowserSessionUrl(); // refresh resumes this standalone channel
-          refreshSessionNotificationOverride(); // per-session select follows it
-        }
-        if (data?.model) {
-          const m = data.model as {
-            provider?: string;
-            name?: string;
-            id?: string;
-            input?: string[];
-          };
-          currentModel = m;
-          modelSupportsVision = Array.isArray(m.input) && m.input.includes("image");
-          const label = m.name ?? m.id;
-          modelInfoText = label ? [m.provider, label].filter(Boolean).join(" · ") : "";
-          renderModelInfo();
-        }
-        if (typeof data?.thinkingLevel === "string") {
-          thinkingLevel = data.thinkingLevel;
-          renderThinkingInfo();
-        }
-        if (
-          typeof data?.steeringMode === "string" &&
-          (data.steeringMode === "one-at-a-time" || data.steeringMode === "all")
-        ) {
-          steeringMode = data.steeringMode;
-        }
-        if (
-          typeof data?.followUpMode === "string" &&
-          (data.followUpMode === "one-at-a-time" || data.followUpMode === "all")
-        ) {
-          followUpMode = data.followUpMode;
-        }
-        if (typeof data?.autoCompactionEnabled === "boolean") {
-          autoCompactionEnabled = data.autoCompactionEnabled;
-        }
+        applySessionState(state.data);
         break; // pi ready
       }
     } catch {
       // pi not up yet: retry shortly
     }
     if (startupRpcBlocked) return false;
-    await new Promise((r) => setTimeout(r, 1500));
+    if (attempt + 1 < STARTUP_RPC_MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, STARTUP_RPC_RETRY_DELAY_MS));
+    }
   }
-  if (startupRpcBlocked) return false;
+  if (startupRpcBlocked || !startupRpcReady) return false;
+  if (!isCurrentSession(epoch)) return false;
   const trust = await ideRequest({ type: "getTrust" });
+  if (!isCurrentSession(epoch)) return false;
   if (trust?.ok) renderTrust(trust.data as TrustResult | null);
   // workspace first (instant, no reading of all session files)
   if (!workspacePath) {
     const wr = await ideRequest({ type: "getWorkspace" });
+    if (!isCurrentSession(epoch)) return false;
     if (wr?.ok) {
       const w = (wr.data as { workspace?: string } | undefined)?.workspace;
       if (w) {
@@ -3825,6 +4017,7 @@ async function refreshSessions(showResumeNotice = false): Promise<boolean> {
     type: "listSessions",
     ...(ws ? { workspace: ws } : {}),
   });
+  if (!isCurrentSession(epoch)) return false;
   if (list?.ok) {
     const data = list.data as SessionListResult | undefined;
     sessions = (data?.sessions ?? []) as SessionInfo[];
@@ -3832,10 +4025,12 @@ async function refreshSessions(showResumeNotice = false): Promise<boolean> {
     if (label) workspaceLabel = label;
   }
   await fetchThinkingSettings();
+  if (!isCurrentSession(epoch)) return false;
   syncThinkingChat();
   populateSessionMenu();
   if (startupRpcBlocked) return false;
   const historyLoaded = await loadHistory();
+  if (!isCurrentSession(epoch)) return false;
   updateSteerPlaceholder();
   if (showResumeNotice && historyLoaded && sessionHasMessages) {
     let info = currentSession();
@@ -3853,6 +4048,7 @@ async function refreshSessions(showResumeNotice = false): Promise<boolean> {
 }
 
 async function loadHistory(): Promise<boolean> {
+  const epoch = sessionEpoch;
   if (startupRpcBlocked) return false;
   // a session switch/restart: no stale "waiting" state from the previous session
   disarmWaitingResponse();
@@ -3871,7 +4067,7 @@ async function loadHistory(): Promise<boolean> {
       rpcRequest(rpc.getMessages(), undefined, SESSION_HISTORY_TIMEOUT_MS),
       rpcRequest(rpc.getEntries(), undefined, SESSION_HISTORY_TIMEOUT_MS),
     ]);
-    if (startupRpcBlocked) return false;
+    if (startupRpcBlocked || !isCurrentSession(epoch)) return false;
     const messages = (res.data as { messages?: unknown[] } | undefined)?.messages;
     if (!res.success || !Array.isArray(messages)) {
       throw new Error(
@@ -3900,7 +4096,7 @@ async function loadHistory(): Promise<boolean> {
     });
     loaded = true;
   } catch (error) {
-    if (startupRpcBlocked) return false;
+    if (startupRpcBlocked || !isCurrentSession(epoch)) return false;
     sessionHasMessages = false;
     historyLoadFailed = true;
     addSystemBox(
@@ -3916,7 +4112,12 @@ async function loadHistory(): Promise<boolean> {
   // a session load (boot/switch/restart) cannot finish before the history is
   // rendered: only now may the loader close (quiet timer). The logs collected
   // under the spinner are appended at the END of the resumed chat.
-  loadingHistoryLoaded = true;
+  loadingHistoryLoaded = loaded;
+  if (!loaded) {
+    hideBootLoader();
+    showSessionRecovery();
+    sessionRecovery.start();
+  }
   flushLoadingLogs();
   // Errors and startup logs must not push an unanswered question out of view.
   if (loadingInteractivePending && inlineDialog?.el) {
@@ -3933,9 +4134,10 @@ async function loadHistory(): Promise<boolean> {
 }
 
 async function fetchThinkingSettings(): Promise<void> {
+  const epoch = sessionEpoch;
   hideThinkingBlock = false;
   const res = await ideRequest({ type: "getThinkingSettings" });
-  if (!res?.ok) return;
+  if (!isCurrentSession(epoch) || !res?.ok) return;
   const settings = res.data as ThinkingSettings | null;
   if (typeof settings?.hideThinkingBlock === "boolean") {
     hideThinkingBlock = settings.hideThinkingBlock;
@@ -3945,7 +4147,9 @@ async function fetchThinkingSettings(): Promise<void> {
 // pi auto-compaction thresholds (config ~/.pi/config.json): for the tooltip
 // of the context block — "(auto-compact ≥ X%)"
 async function fetchCompactionSettings(): Promise<void> {
+  const epoch = sessionEpoch;
   const res = await ideRequest({ type: "getCompactionSettings" });
+  if (!isCurrentSession(epoch)) return;
   const s = res?.ok
     ? (res.data as { enabled?: boolean; reserveTokens?: number } | null)
     : null;
@@ -5775,6 +5979,8 @@ function breakInternalActivityChain(): void {
 // E.g. pi-tokens-per-second → ⚡ 43 tokens in 0.7s (59.1 t/s).
 
 const statusSlots = new Map<string, string>();
+const statusSlotVersions = new Map<string, number>();
+let statusSlotVersion = 0;
 
 // During the first extension binding, pi.dev emits UI requests before its RPC
 // stdin reader is installed. An answer sent here cannot be consumed. Render
@@ -5784,6 +5990,8 @@ function showBlockedStartupQuestion(evt: RpcEvent): void {
   if (id && startupRpcQuestionIds.has(id)) return;
   if (id) startupRpcQuestionIds.add(id);
   startupRpcBlocked = true;
+  sessionRecovery.reset();
+  hideSessionRecovery();
   sessionLoading = true;
   clearTimeout(loadingMaxTimer ?? undefined);
   clearTimeout(loadingQuietTimer ?? undefined);
@@ -5853,6 +6061,7 @@ function handleExtensionUiRequest(evt: RpcEvent): void {
     case "setStatus": {
       const key = evt.statusKey as string | undefined;
       if (!key) return;
+      statusSlotVersions.set(key, ++statusSlotVersion);
       const text = evt.statusText as string | undefined;
       if (text && text.length > 0) statusSlots.set(key, text);
       else statusSlots.delete(key);
@@ -6302,12 +6511,18 @@ async function modelBaseUrl(): Promise<string | undefined> {
 // real provider balance: via companion/bridge, which reads the key from
 // auth.json and calls the balance endpoint of the provider's API
 async function fetchBalance(): Promise<void> {
+  const epoch = sessionEpoch;
   if (!currentModel?.provider) return;
-  const res = await ideRequest({
-    type: "getBalance",
-    provider: currentModel.provider,
-    baseUrl: await modelBaseUrl(),
-  });
+  const provider = currentModel.provider;
+  const modelId = currentModel.id;
+  const current = () =>
+    isCurrentSession(epoch) &&
+    currentModel?.provider === provider &&
+    currentModel?.id === modelId;
+  const baseUrl = await modelBaseUrl();
+  if (!current()) return;
+  const res = await ideRequest({ type: "getBalance", provider, baseUrl });
+  if (!current()) return;
   const b = res?.ok ? (res.data as { currency?: string; balance?: number } | null) : null;
   if (b && typeof b.balance === "number" && b.currency) {
     creditCurrency = b.currency === "CNY" ? "¥" : "$";
@@ -6321,9 +6536,11 @@ async function fetchBalance(): Promise<void> {
 }
 
 // session stats (tokens/context): poll after every turn and at boot
-async function fetchSessionStats(): Promise<void> {
+async function fetchSessionStats(): Promise<boolean> {
+  const epoch = sessionEpoch;
   try {
     const res = await rpcRequest(rpc.getSessionStats());
+    if (!isCurrentSession(epoch) || !res.success) return false;
     const data = res.data as
       | {
           cost?: number;
@@ -6351,8 +6568,11 @@ async function fetchSessionStats(): Promise<void> {
     }
     renderContextGauge();
     renderBalanceChip(); // the session cost updates at every turn
+    sessionStatsReady = data !== undefined;
+    return sessionStatsReady;
   } catch {
-    // pi not ready yet: the gauge stays on “–”
+    if (isCurrentSession(epoch) && !startupRpcBlocked) sessionRecovery.start();
+    return false;
   }
 }
 
@@ -7698,6 +7918,10 @@ function renderRpcEvent(evt: RpcEvent): void {
     // A successful continuation emits turn_start immediately before its next
     // provider request; do not guess that boundary from compaction completion.
   } else if (evt.type === "connection_closed") {
+    invalidateSessionRecovery();
+    statusSlots.clear();
+    statusSlotVersions.clear();
+    renderStatusSlots();
     trailingToolOutputs.clear();
     rpcInputReady = false;
     if (evt.reason === "restart") {
@@ -9267,6 +9491,22 @@ function renderHistory(messages: unknown[]): void {
 // beyond this margin from the bottom the button to go back down appears
 const SCROLL_BTN_MARGIN = 220;
 
+const sessionRecovery = new SessionRecovery({
+  isActive: () =>
+    document.visibilityState === "visible" &&
+    statusState === "open" &&
+    !piRestarting &&
+    !startupRpcBlocked,
+  attempt: recoverSessionData,
+});
+
+const chatSearch = new ChatSearch({
+  root: els.thread,
+  viewport: els.messages,
+  canOpen: () => !switchingSession && !sessionLoading && !piRestarting,
+  onNavigate: cancelPendingFollow,
+});
+
 els.scrollBottom.innerHTML = scrollDownIcon();
 els.newChat.innerHTML = newChatIcon();
 els.updatePi.innerHTML = updateIcon();
@@ -9513,6 +9753,8 @@ function updateSendButton(): void {
   els.input.disabled = interactionLocked;
   els.sessionBtn.disabled = interactionLocked;
   els.newChat.disabled = interactionLocked;
+  els.btnModel.disabled = interactionLocked;
+  els.btnThinking.disabled = interactionLocked;
   if (interactionLocked && speechController?.active) speechController.stopSilently();
   renderSpeechButton();
 }
@@ -9833,7 +10075,14 @@ async function warnWhenNoModelsAvailable(): Promise<void> {
 }
 
 async function openModelPopover(): Promise<void> {
+  const epoch = sessionEpoch;
   const res = await rpcRequest(rpc.getAvailableModels()).catch(() => null);
+  if (!isCurrentSession(epoch)) return;
+  if (!res?.success) {
+    showSessionRecovery();
+    sessionRecovery.start();
+    return;
+  }
   const models =
     (
       res?.data as

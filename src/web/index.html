@@ -45,6 +45,16 @@
       </div>
       <div class="header-actions">
         <button
+          id="btn-chat-search"
+          class="icon-btn chat-search-trigger"
+          type="button"
+          aria-controls="chat-search"
+          aria-expanded="false"
+          aria-keyshortcuts="Control+f Meta+f"
+        >
+          <span id="chat-search-label"></span>
+        </button>
+        <button
           id="btn-new-chat"
           class="icon-btn"
           title="Nuova chat in un altro pannello"
@@ -72,6 +82,30 @@
       </div>
       <div id="stats-topbar-row" class="stats-topbar-row"></div>
     </header>
+
+    <div id="chat-search" class="chat-search" role="search" hidden>
+      <div class="chat-search-row">
+        <input
+          id="chat-search-input"
+          type="search"
+          autocomplete="off"
+          spellcheck="false"
+          aria-controls="thread"
+          aria-describedby="chat-search-hint"
+        />
+        <span
+          id="chat-search-count"
+          class="chat-search-count"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        ></span>
+        <button id="chat-search-prev" class="icon-btn" type="button">↑</button>
+        <button id="chat-search-next" class="icon-btn" type="button">↓</button>
+        <button id="chat-search-close" class="icon-btn" type="button">✕</button>
+      </div>
+      <div id="chat-search-hint" class="chat-search-hint"></div>
+    </div>
 
     <!-- settings modal dialog -->
     <div id="settings-modal" class="modal-backdrop" hidden>

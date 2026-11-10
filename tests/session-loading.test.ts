@@ -99,9 +99,12 @@ test("blocked startup questions show terminal instructions, remain inert, and ke
   assert.match(web, /function loadingMaxTick\([\s\S]*?startupRpcBlocked\) return/);
   assert.match(
     web,
-    /for \(let attempt = 0; attempt < 6; attempt\+\+\) \{\s*if \(startupRpcBlocked\) return false/,
+    /for \(let attempt = 0; attempt < STARTUP_RPC_MAX_ATTEMPTS; attempt\+\+\) \{\s*if \(startupRpcBlocked \|\| !isCurrentSession\(epoch\)\) return false/,
   );
-  assert.match(web, /if \(state\.success\) \{\s*rpcInputReady = true/);
+  assert.match(
+    web,
+    /if \(state\.success\) \{\s*startupRpcReady = true;\s*rpcInputReady = true/,
+  );
   assert.match(web, /els\.newChat\.disabled = interactionLocked/);
   assert.match(
     web,

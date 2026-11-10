@@ -2,39 +2,42 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { userConfigDir, ConfigStore, DEFAULT_CONFIG } from "../src/bridge/config.ts";
 
 test("userConfigDir: percorsi per i 3 sistemi (D6)", () => {
+  const oldHome = process.env.HOME;
   const oldXdg = process.env.XDG_CONFIG_HOME;
   const oldAppData = process.env.APPDATA;
   try {
+    process.env.HOME = "/Users/test";
     process.env.XDG_CONFIG_HOME = "/home/test/.config";
     assert.equal(userConfigDir("linux"), "/home/test/.config/pi-webview");
     assert.equal(
       userConfigDir("darwin"),
-      join(process.env.HOME ?? "", "Library", "Application Support", "pi-webview"),
+      posix.join("/Users/test", "Library", "Application Support", "pi-webview"),
     );
     process.env.APPDATA = "C:\\Users\\test\\AppData\\Roaming";
     assert.equal(
       userConfigDir("win32"),
-      join("C:\\Users\\test\\AppData\\Roaming", "pi-webview"),
+      win32.join("C:\\Users\\test\\AppData\\Roaming", "pi-webview"),
     );
   } finally {
+    process.env.HOME = oldHome;
     process.env.XDG_CONFIG_HOME = oldXdg;
     process.env.APPDATA = oldAppData;
   }
 });
 
 test("userConfigDir: fallback su linux senza XDG_CONFIG_HOME", () => {
+  const oldHome = process.env.HOME;
   const oldXdg = process.env.XDG_CONFIG_HOME;
   try {
+    process.env.HOME = "/home/test";
     delete process.env.XDG_CONFIG_HOME;
-    assert.equal(
-      userConfigDir("linux"),
-      join(process.env.HOME ?? "", ".config", "pi-webview"),
-    );
+    assert.equal(userConfigDir("linux"), "/home/test/.config/pi-webview");
   } finally {
+    process.env.HOME = oldHome;
     process.env.XDG_CONFIG_HOME = oldXdg;
   }
 });

@@ -181,3 +181,10 @@ test("package scripts build Chrome before assembling the pi package", () => {
   );
   assert.match(packageJson.scripts?.["package:pi"] ?? "", /package:chrome/);
 });
+
+test("the Chrome build launches the pnpm Windows shim through ComSpec", () => {
+  const buildScript = readFileSync("tools/build-chrome-extension.mjs", "utf8");
+  assert.match(buildScript, /process\.platform === "win32"/);
+  assert.match(buildScript, /process\.env\.ComSpec \?\? "cmd\.exe"/);
+  assert.match(buildScript, /"pnpm\.cmd", "build"/);
+});

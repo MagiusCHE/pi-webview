@@ -92,7 +92,11 @@ public partial class PiToolWindowControl : UserControl
         var old = _web;
         if (old is not null)
         {
-            old.CoreWebView2?.WebMessageReceived -= OnWebMessageReceived;
+            var oldCore = old.CoreWebView2;
+            if (oldCore is not null)
+            {
+                oldCore.WebMessageReceived -= OnWebMessageReceived;
+            }
             HostGrid.Children.Remove(old);
             try
             {

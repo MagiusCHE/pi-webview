@@ -1,9 +1,18 @@
 // Resolution of the `pi` binary cross-platform (concept 0002 D6):
 // on Windows the npm shim is `pi.cmd`, elsewhere `pi`.
 
-import { accessSync, constants, readdirSync, readFileSync } from "node:fs";
+import { accessSync, constants, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, dirname } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  posix,
+  relative,
+  resolve,
+  win32,
+} from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -20,10 +29,11 @@ export function findOnPath(
   const pathEnv = process.env.PATH ?? "";
   const sep = platform === "win32" ? ";" : ":";
   const exts = platform === "win32" ? [".cmd", ".exe", ".bat", ""] : [""];
+  const pathApi = platform === "win32" ? win32 : posix;
   for (const dir of pathEnv.split(sep)) {
     if (!dir) continue;
     for (const ext of exts) {
-      const candidate = join(dir, bin + ext);
+      const candidate = pathApi.join(dir, bin + ext);
       try {
         accessSync(candidate, constants.X_OK);
         return candidate;
@@ -44,6 +54,7 @@ export interface PiResolution {
 export interface DirectNodeInvocation {
   node: string;
   script: string;
+  env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -68,8 +79,63 @@ export function resolveDirectNode(
     ? process.execPath
     : (findOnPath("node.exe", platform) ?? fallbackNodePath());
   if (!node) return null;
-  const script = parseShimScript(piPath);
-  return script ? { node, script } : null;
+  const launcher = parseShimScript(piPath);
+  if (!launcher) return null;
+  const managed = resolveManagedPiLauncher(launcher);
+  return managed
+    ? {
+        node,
+        script: managed.script,
+        env: { PI_MANAGED_INSTALL_ROOT: managed.installRoot },
+      }
+    : { node, script: launcher };
+}
+
+function resolveManagedPiLauncher(
+  launcher: string,
+): { script: string; installRoot: string } | null {
+  if (basename(launcher).toLowerCase() !== "pi-launcher.js") return null;
+  try {
+    const agentDir = dirname(dirname(launcher));
+    const installRoot = join(agentDir, "install");
+    const version = readFileSync(join(installRoot, "current-version"), "utf8").trim();
+    if (
+      !version ||
+      version === "." ||
+      version === ".." ||
+      !/^[0-9A-Za-z._+-]+$/.test(version)
+    ) {
+      return null;
+    }
+    const packageDir = join(
+      installRoot,
+      "releases",
+      version,
+      "node_modules",
+      "@earendil-works",
+      "pi-coding-agent",
+    );
+    const packageJson = JSON.parse(
+      readFileSync(join(packageDir, "package.json"), "utf8"),
+    ) as {
+      bin?: string | Record<string, string>;
+    };
+    const binPath =
+      typeof packageJson.bin === "string" ? packageJson.bin : packageJson.bin?.pi;
+    if (!binPath) return null;
+    const script = resolve(packageDir, binPath);
+    const localPath = relative(packageDir, script);
+    if (
+      localPath.startsWith("..") ||
+      isAbsolute(localPath) ||
+      !statSync(script).isFile()
+    ) {
+      return null;
+    }
+    return { script, installRoot };
+  } catch {
+    return null;
+  }
 }
 
 function fallbackNodePath(): string | null {
@@ -101,6 +167,27 @@ function parseShimScript(shim: string): string | null {
   } catch {
     return null;
   }
+
+  // Pi's managed Windows install uses a small sibling launcher:
+  // `node "%~dp0pi-launcher.js" %*`. Resolve it without going through cmd,
+  // otherwise piped RPC stdin is never consumed by the child process.
+  const localLauncher = text.match(/\bnode(?:\.exe)?\s+"%~dp0([^"\r\n]+\.js)"/i)?.[1];
+  if (
+    localLauncher &&
+    !localLauncher.includes("..") &&
+    !localLauncher.startsWith("\\") &&
+    !localLauncher.startsWith("/") &&
+    !localLauncher.includes(":")
+  ) {
+    const script = join(dirname(shim), ...localLauncher.split(/[\\/]+/));
+    try {
+      accessSync(script, constants.X_OK);
+      return script;
+    } catch {
+      return null;
+    }
+  }
+
   const marker = "node_modules\\";
   const i = text.indexOf(marker);
   if (i < 0) return null;

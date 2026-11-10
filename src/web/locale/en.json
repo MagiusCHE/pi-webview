@@ -385,6 +385,8 @@
     "browserScriptCode": "Code",
     "browserActionSuppressDefault": "browser default action suppressed",
     "browserConsentPending": "Authorization required ({operation}) is not granted yet: approve the dialog in the pi-webview side panel and retry. Nothing was executed and the page was not modified.",
-    "browserPageHostMismatch": "The active page is {active}, not {expected}. Activate the intended tab in the same window as the panel (or open the panel in that window) and retry: no action was executed."
+    "browserPageHostMismatch": "The active page is {active}, not {expected}. Activate the intended tab in the same window as the panel (or open the panel in that window) and retry: no action was executed.",
+    "messageTimestamp": "Message timestamp",
+    "yesterday": "yesterday"
   }
 }

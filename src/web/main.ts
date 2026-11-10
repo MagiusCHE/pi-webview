@@ -44,6 +44,7 @@ import {
 } from "../ide/browser-tools.ts";
 import { samePath } from "../ide/paths.ts";
 import { randomId } from "../shared/random-id.ts";
+import { messageTimeLabel } from "./message-time.ts";
 import {
   displayMessageContent,
   historyToolResultContent,
@@ -4426,14 +4427,41 @@ let toolsEl: HTMLElement | null = null;
 let toolsPre: HTMLPreElement | null = null;
 let toolsText = "";
 
+/**
+ * Message timestamp: a discreet clock shown on hover, with the full localized
+ * date and time in the native tooltip. It is part of the shared web UI, so the
+ * standalone bridge, the VS Code / Visual Studio companions and the Chrome side
+ * panel all render it the same way.
+ */
+function attachMessageTimestamp(wrapper: HTMLElement, timestamp: number): void {
+  if (!wrapper.classList.contains("user") && !wrapper.classList.contains("assistant")) {
+    return;
+  }
+  const stamp = timestamp > 0 ? timestamp : Date.now();
+  // relative to today: a session can span several days
+  const label = messageTimeLabel(stamp, {
+    locale: currentLocale,
+    yesterday: t("yesterday"),
+  });
+  const element = document.createElement("time");
+  element.className = "msg-time";
+  element.dateTime = label.iso;
+  element.textContent = label.short;
+  element.title = label.full;
+  element.setAttribute("aria-label", `${t("messageTimestamp")}: ${label.full}`);
+  wrapper.appendChild(element);
+}
+
 function addMsg(
   kind: "user" | "assistant" | "status",
   before?: HTMLElement | null,
+  timestamp = 0,
 ): HTMLElement {
   const wrapper = document.createElement("div");
   wrapper.className = `msg ${kind}`;
   if (before?.parentElement === els.thread) els.thread.insertBefore(wrapper, before);
   else els.thread.appendChild(wrapper);
+  if (kind !== "status") attachMessageTimestamp(wrapper, timestamp);
   // runtime: the history never exceeds historyLimit — truncate from the top
   while (els.thread.children.length > historyLimit) {
     els.thread.firstElementChild?.remove();
@@ -5238,10 +5266,10 @@ function prepareAssistantStream(): void {
   toolsText = "";
 }
 
-function openAssistantBubble(): void {
+function openAssistantBubble(timestamp = pendingAssistantTimestamp): void {
   if (currentMsg) return;
   prepareAssistantStream();
-  currentMsg = addMsg("assistant");
+  currentMsg = addMsg("assistant", null, timestamp);
   // The thinking slot precedes visible streamed text in non-agentic mode.
   thinkingSlot = document.createElement("div");
   thinkingSlot.className = "thinking-slot";
@@ -7652,6 +7680,8 @@ function renderRpcEvent(evt: RpcEvent): void {
     // to create and immediately remove an empty bubble, shrinking the thread
     // and occasionally breaking bottom-following.
     if (role && role !== "assistant") return;
+    // the assistant bubble shows this message's own timestamp
+    if (role === "assistant") pendingAssistantTimestamp = parseTs(evt.message);
   }
   // compaction: show the block even if started by pi (auto-compaction)
   if (evt.type === "compaction_start") {
@@ -8976,7 +9006,7 @@ function renderHistory(messages: unknown[]): void {
       if (stoppedSegment) historyTrailingOutputs.stop();
       historyStopShown = false;
       finishHistoryAgenticBlock(lastTs);
-      renderUserContent(msg.content);
+      renderUserContent(msg.content, ts);
     } else if (
       msg.role === "custom" &&
       (msg as { display?: unknown }).display !== false
@@ -8998,7 +9028,7 @@ function renderHistory(messages: unknown[]): void {
       if (stoppedSegment) historyTrailingOutputs.stop();
       else historyStopShown = false;
       finishHistoryAgenticBlock(lastTs);
-      const wrapper = addMsg("user");
+      const wrapper = addMsg("user", null, ts);
       const card = buildSessionCard(
         (msg as { customType?: string }).customType ?? "session",
         text,
@@ -9082,7 +9112,7 @@ function renderHistory(messages: unknown[]): void {
         // Visible model content always terminates the preceding consecutive chain.
         if (text || images.length > 0) {
           finishHistoryAgenticBlock(assistantTs);
-          const wrapper = addMsg("assistant");
+          const wrapper = addMsg("assistant", null, assistantTs);
           if (text) {
             const md = document.createElement("div");
             md.className = "md";
@@ -10443,7 +10473,7 @@ els.trust.addEventListener("click", (e) => {
 });
 
 /** Render a user message exclusively from pi's authoritative content. */
-function renderUserContent(content: unknown): void {
+function renderUserContent(content: unknown, timestamp = 0): void {
   const rawText = stripEditorSelectionContext(extractTextContent(content));
   const filePaths: string[] = [];
   const textBlocks = rawText.split("\n\n").filter((block) => {
@@ -10456,7 +10486,7 @@ function renderUserContent(content: unknown): void {
   const images = imageContentBlocks(content);
   if (!text && filePaths.length === 0 && images.length === 0) return;
 
-  const wrapper = addMsg("user");
+  const wrapper = addMsg("user", null, timestamp);
   appendChatImages(wrapper, images);
   for (const path of filePaths) {
     const chip = document.createElement("div");
@@ -10480,10 +10510,14 @@ function renderUserContent(content: unknown): void {
   scrollToBottom(true);
 }
 
+/** timestamp of the assistant message being streamed (set at message_start) */
+let pendingAssistantTimestamp = 0;
+
 function renderUserMessageStart(evt: RpcEvent): void {
-  const content = (evt as { message?: { content?: unknown } }).message?.content;
+  const message = (evt as { message?: { content?: unknown; timestamp?: unknown } })
+    .message;
   sessionHasMessages = true;
-  renderUserContent(content);
+  renderUserContent(message?.content, parseTs(message));
 }
 
 // Built-in pi TUI commands with NO piw counterpart: pi in RPC mode does not

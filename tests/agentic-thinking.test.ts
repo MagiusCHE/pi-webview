@@ -252,7 +252,7 @@ test("a message injected by another session closes the live Agentic block", () =
   // history already closes the block for the same message
   assert.match(
     web,
-    /finishHistoryAgenticBlock\(lastTs\);\s*\n\s*const wrapper = addMsg\("user"\);/,
+    /finishHistoryAgenticBlock\(lastTs\);\s*\n\s*const wrapper = addMsg\("user", null, ts\);/,
   );
   // the provider wait is re-armed after the boundary, like a user message
   assert.match(

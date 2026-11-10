@@ -905,6 +905,33 @@ header {
   align-items: stretch;
 }
 
+/* message timestamp: revealed on hover (and on keyboard focus), the native
+   tooltip carries the full localized date and time */
+.msg-time {
+  align-self: flex-end;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted, var(--muted));
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+.msg:hover .msg-time,
+.msg:focus-within .msg-time {
+  opacity: 1;
+}
+.msg.assistant .msg-time {
+  align-self: flex-start;
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-time {
+    transition: none;
+  }
+}
+
 .bubble.user {
   max-width: 100%;
   background: var(--user-bubble);

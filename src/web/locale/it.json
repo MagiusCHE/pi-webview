@@ -384,6 +384,8 @@
     "browserScriptCode": "Codice",
     "browserActionSuppressDefault": "azione predefinita del browser soppressa",
     "browserConsentPending": "Autorizzazione richiesta ({operation}) non ancora concessa: approva il dialog nel pannello pi-webview e riprova. Nulla è stato eseguito e la pagina non è stata modificata.",
-    "browserPageHostMismatch": "La pagina attiva è {active}, non {expected}. Attiva la scheda desiderata nella stessa finestra del pannello (o apri il pannello in quella finestra) e riprova: nessuna azione è stata eseguita."
+    "browserPageHostMismatch": "La pagina attiva è {active}, non {expected}. Attiva la scheda desiderata nella stessa finestra del pannello (o apri il pannello in quella finestra) e riprova: nessuna azione è stata eseguita.",
+    "messageTimestamp": "Orario del messaggio",
+    "yesterday": "ieri"
   }
 }

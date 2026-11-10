@@ -4,6 +4,10 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-11-10
+
+- Added localized message timestamps to the shared web UI, so the standalone bridge, the VS Code and Visual Studio webviews and the Chrome side panel all show them: every user and assistant message reveals the time on hover (or keyboard focus) and the native tooltip carries the complete localized date, time and seconds. The label follows the day, because a session can span several days: time only for today, "yesterday HH:MM" for the previous day, and a date prefix — with the year when it differs — for anything older.
+
 ## [0.7.3] - 2026-10-27
 
 - Fixed synthetic page clicks ignoring page `preventDefault()`: the generated `MouseEvent`/`PointerEvent` objects were not cancelable, so a canceled click still submitted a form or changed the URL hash. Pointer and click events are now cancelable (`view` and `detail` set as in native events), the click result reports `defaultPrevented`, and the extension never cancels or duplicates the default action itself: when the page cancels the activation nothing else runs, otherwise the real default action runs once. Added `defaultAction: "suppress"` to `browser_page_click` and to click actions for SPA controls whose handler does not cancel the event (anchors with `href="#"`, submit inputs): page handlers still run, the browser default is suppressed deterministically and the result reports `defaultActionSuppressed`, so the router is not reset by a hash change or a duplicate submit.

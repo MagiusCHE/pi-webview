@@ -116,6 +116,12 @@ export const rpc = {
 
 export type RpcEvent = { type: string } & Record<string, unknown>;
 
+/** getStartupInfo response. Optional status snapshot keeps older hosts compatible. */
+export interface StartupInfoResponse {
+  info: StartupInfo | null;
+  statusSnapshot?: Array<{ statusKey: string; statusText: string }>;
+}
+
 export interface AssistantDelta {
   type: string;
   contentIndex?: number;

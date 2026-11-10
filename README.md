@@ -96,6 +96,8 @@ pnpm dev          # then open http://localhost:5173/?demo=1&theme=dark&lang=en
 
 `?demo=1` renders a sample conversation; `?theme=light|dark|system` and `?lang=it|en` force theme/locale.
 
+For the chat-search and delayed-session-recovery browser regression checks, run `node tools/smoke-chat-search.mjs` (Chrome/Chromium required). It uses an isolated browser profile and a temporary Vite server, including the real UI entry point, without starting a pi bridge or model session or updating installed artifacts.
+
 ## Scripts
 
 | Script                                         | Description                                                                                                                                                                                                                                                                                        |

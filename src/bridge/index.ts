@@ -29,6 +29,7 @@ import type {
   RpcEvent,
 } from "../ide/protocol.ts";
 import { PiProcess } from "./pi-process.ts";
+import { ExtensionUiState } from "../ide/extension-ui-state.ts";
 import { shouldRestartPiForNewSession } from "./rpc-recovery.ts";
 import { resolvePi } from "./spawn.ts";
 import { cliFlagArgs, fetchAvailableCliFlags } from "./cli-flags.ts";
@@ -142,6 +143,7 @@ interface Options {
   token: string | null;
   bindIp: string;
   piCommand: string;
+  piArgs: string[];
   idleTimeoutMs: number;
 }
 
@@ -155,6 +157,7 @@ function parseArgs(argv: string[]): Options {
     token: null,
     bindIp: LOOPBACK_IP,
     piCommand: "pi",
+    piArgs: [],
     idleTimeoutMs: 60_000,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -184,6 +187,10 @@ function parseArgs(argv: string[]): Options {
         break;
       case "--pi":
         opts.piCommand = argv[++i] ?? "pi";
+        break;
+      case "--no-extensions":
+      case "--no-mcp":
+        opts.piArgs.push(arg);
         break;
       case "--no-idle":
         opts.idleTimeoutMs = 0;
@@ -528,30 +535,9 @@ function main(): void {
     let activeWs = ws;
     const controlCapability = randomBytes(24).toString("hex");
     const browserToolBroker = new BrowserToolBroker();
-    const extensionUiState = new Map<string, Frame>();
-    const cacheExtensionUiState = (frame: Frame): void => {
-      if (frame.channel !== "rpc") return;
-      const payload = frame.payload as {
-        type?: unknown;
-        method?: unknown;
-        statusKey?: unknown;
-        widgetKey?: unknown;
-      };
-      if (payload.type !== "extension_ui_request" || typeof payload.method !== "string") {
-        return;
-      }
-      const key =
-        payload.method === "setStatus" && typeof payload.statusKey === "string"
-          ? `status:${payload.statusKey}`
-          : payload.method === "setWidget" && typeof payload.widgetKey === "string"
-            ? `widget:${payload.widgetKey}`
-            : payload.method === "setTitle" || payload.method === "set_editor_text"
-              ? payload.method
-              : null;
-      if (key) extensionUiState.set(key, frame);
-    };
+    const extensionUiState = new ExtensionUiState();
     const send = (frame: Frame) => {
-      cacheExtensionUiState(frame);
+      if (frame.channel === "rpc") extensionUiState.record(frame.payload as RpcEvent);
       const text = JSON.stringify(frame);
       log(`→ ui ${redactDebugFrame(frame).slice(0, 200)}`);
       if (activeWs.readyState === WebSocket.OPEN) activeWs.send(text);
@@ -586,6 +572,7 @@ function main(): void {
       const modelArgs =
         modelArgsOverride ?? (sessionPath ? sessionModelArgs(sessionPath) : []);
       const args = [
+        ...opts.piArgs,
         ...(sessionPath ? ["--session", sessionPath] : []),
         ...modelArgs,
         ...cliFlagArgs(flags),
@@ -596,7 +583,10 @@ function main(): void {
         piCommand,
         {
           onEvent: (event) => send({ channel: "rpc", payload: event as RpcEvent }),
-          onBoot: () => modelFallback.reset(),
+          onBoot: () => {
+            modelFallback.reset();
+            extensionUiState.clear();
+          },
           onExit: (_code, _signal, error, kind) => {
             if (kind === "config" && modelFallback.use()) {
               // The saved session model no longer exists: relaunch on the
@@ -682,6 +672,7 @@ function main(): void {
     ): void => {
       activeCliFlags = { ...flags };
       pi.dispose();
+      extensionUiState.clear();
       // pi removes an empty session file while shutting down. Re-check after
       // dispose: never resume a vanished path, but keep the applied flags for
       // the replacement process and persist them when its JSONL appears.
@@ -763,7 +754,13 @@ function main(): void {
       if (req.type === "getStartupInfo") {
         // new-session welcome banner: NON-persistent (per-process file written
         // by the pi-side extension at session_start — never in the session jsonl)
-        respond(req.id ?? "", { ok: true, data: { info: readStartupInfo(pi.pid) } });
+        respond(req.id ?? "", {
+          ok: true,
+          data: {
+            info: readStartupInfo(pi.pid),
+            statusSnapshot: extensionUiState.statuses(),
+          },
+        });
         return;
       }
       if (req.type === "getWorkspace") {
@@ -1195,7 +1192,7 @@ function main(): void {
       channel.ws = nextWs;
       bindSocket(nextWs);
       send({ channel: "ide", payload: { type: "browser_handoff_adopted" } });
-      for (const frame of extensionUiState.values()) send(frame);
+      for (const payload of extensionUiState.events()) send({ channel: "rpc", payload });
       if (previous.readyState === WebSocket.OPEN) previous.close(1000, "handoff");
       log("channel adopted by browser companion");
     };

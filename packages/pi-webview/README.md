@@ -19,6 +19,18 @@ A rich WebView UI for [pi](https://pi.dev), the coding agent — a modern altern
 
 The three IDE companions are included in the package and installed or updated automatically when the corresponding IDE is present. Chrome requires the installation confirmation imposed by the browser; `/piw install` opens the official Web Store listing, or the guided local installation during development.
 
+## Slow session startup
+
+If Pi's initialization takes longer than the first loading window, a recovery notice appears instead of an apparently ready empty composer. The UI automatically retries session/model/context data every five seconds while the panel is visible; **Retry now** requests an immediate attempt. Returning to a visible panel also synchronizes extension statuses such as MCP and account information. Recovery does not restart Pi, interrupt an active response, change models or resend messages.
+
+Creating a new session can be canceled by an extension or take longer than expected. The UI reports cancellation/errors; after an uncertain timeout it checks the actual state instead of automatically issuing another creation request. A permanently blocked extension or broken process may still require an explicit Pi reload. After installing a companion update, reload the IDE window to activate its new host code as well as its web UI.
+
+## Find in chat
+
+Use **Find in chat** in the header (magnifying glass on narrow panels), or press **Ctrl+F** / **Cmd+F** while the chat has focus. Search is literal and case-insensitive, including phrases across inline markdown formatting. Matches are highlighted and counted; **Enter** / **Shift+Enter** move to the next / previous match, wrapping at the ends. **Esc** closes search without stopping an active response.
+
+Search covers the currently loaded messages, not the entire saved session. Expand collapsed thinking/tool blocks to include their rendered text. To load older messages, increase **History (messages)** in settings. The search is local to the UI and does not send queries to the model.
+
 ## Standalone (browser)
 
 The package also includes the web UI and a local bridge, launchable from the shell with the `piw` binary (script on Linux/macOS, `piw.cmd` on Windows):

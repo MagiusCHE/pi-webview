@@ -4,6 +4,15 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+- Fixed the VS Code host discarding Pi's resolved executable path and passing bare `pi.cmd` to the process launcher. Windows now consistently uses the direct Node/managed CLI route instead of silently falling back to `cmd /c`, which could break RPC input and address startup metadata to the wrong PID.
+- Added visible, single-flight session recovery after slow or incomplete startup: retry state, model/context metadata and extension status snapshots without restarting Pi, interrupting active runs or replaying prompts. Hosts retain status clears and late snapshots cannot overwrite newer live updates.
+- Fixed new-session creation silently timing out after 10 seconds, ignoring extension cancellation and treating failed history refreshes as loaded. Creation now uses the transition deadline, reports its outcome, and reconciles uncertain timeouts through read-only state queries rather than creating duplicates.
+- Added a localized Find in chat header button and Ctrl/Cmd+F search for loaded chat text, with literal case-insensitive phrase matching, highlighted results, a match counter, previous/next navigation and Enter/Shift+Enter shortcuts. Escape closes search without stopping an active agent run; expanded blocks and streaming updates are included without changing the transcript or model context.
+- Fixed the standalone Windows bridge failing to answer RPC requests with managed Pi installations whose `pi.cmd` delegates to `pi-launcher.js`. The bridge now resolves the managed CLI entry directly, preserves `PI_MANAGED_INSTALL_ROOT`, and the protocol smoke test disables extensions and MCP startup so it validates the bridge without unrelated bootstrap delays.
+- Fixed platform-specific config, workspace and executable paths being interpreted with the host OS path rules during cross-platform validation.
+- Fixed startup history requests being sent before Pi's RPC input reader was ready on slower extension loads. The webview now keeps probing `get_state` for the full history timeout and does not issue `get_messages` or `get_entries` until readiness is confirmed.
+- Fixed local artifact builds on Windows: Chrome packaging now launches the `pnpm.cmd` shim through `ComSpec`, and the Visual Studio companion cleanly detaches the previous WebView2 message handler during rehosting.
+
 ## [0.7.4] - 2026-11-10
 
 - Added localized message timestamps to the shared web UI, so the standalone bridge, the VS Code and Visual Studio webviews and the Chrome side panel all show them: every user and assistant message reveals the time on hover (or keyboard focus) and the native tooltip carries the complete localized date, time and seconds. The label follows the day, because a session can span several days: time only for today, "yesterday HH:MM" for the previous day, and a date prefix — with the year when it differs — for anything older.

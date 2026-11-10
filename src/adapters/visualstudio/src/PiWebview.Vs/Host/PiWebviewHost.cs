@@ -48,6 +48,29 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
     private bool _cliFlagsNeedSessionPersistence;
     private bool _restarting;
     private CliFlagInfo[]? _cachedFlags;
+    private readonly Dictionary<string, string> _statusSnapshot = new();
+    private readonly object _statusLock = new();
+
+    public object[] StatusSnapshot()
+    {
+        lock (_statusLock)
+            return _statusSnapshot.Select(item => (object)new Dictionary<string, string>
+            {
+                ["statusKey"] = item.Key, ["statusText"] = item.Value,
+            }).ToArray();
+    }
+
+    private void RememberStatus(JsonElement evt)
+    {
+        if (evt.ValueKind != JsonValueKind.Object ||
+            !evt.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String || type.GetString() != "extension_ui_request" ||
+            !evt.TryGetProperty("method", out var method) || method.ValueKind != JsonValueKind.String || method.GetString() != "setStatus" ||
+            !evt.TryGetProperty("statusKey", out var key) || key.ValueKind != JsonValueKind.String)
+            return;
+        var text = evt.TryGetProperty("statusText", out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? "" : "";
+        lock (_statusLock) _statusSnapshot[key.GetString()!] = text;
+    }
 
     public PiWebviewHost(JoinableTaskFactory jtf, DTE2 dte, IPiHostCallbacks cb)
     {
@@ -109,6 +132,7 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
 
     public void StartPi(string? sessionPath = null, CliFlags? flagsOverride = null)
     {
+        lock (_statusLock) _statusSnapshot.Clear();
         var resolution = PiResolver.ResolvePi();
         Diag.Log($"[pi] resolve: found={resolution.Found} path={resolution.Path}");
         if (!resolution.Found)
@@ -213,6 +237,7 @@ public sealed class PiWebviewHost : Microsoft.VisualStudio.Threading.IAsyncDispo
             {
                 // ALL events (including extension_ui_request) go TO THE
                 // WEBVIEW: the modals appear where the user is looking
+                RememberStatus(evt);
                 PostFrame("rpc", evt);
                 // boot probe: confirms pi really answers (the freeze symptom
                 // was boot ok + stdin never read)

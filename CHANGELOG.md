@@ -4,6 +4,8 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-11-10
+
 - Fixed the VS Code host discarding Pi's resolved executable path and passing bare `pi.cmd` to the process launcher. Windows now consistently uses the direct Node/managed CLI route instead of silently falling back to `cmd /c`, which could break RPC input and address startup metadata to the wrong PID.
 - Added visible, single-flight session recovery after slow or incomplete startup: retry state, model/context metadata and extension status snapshots without restarting Pi, interrupting active runs or replaying prompts. Hosts retain status clears and late snapshots cannot overwrite newer live updates.
 - Fixed new-session creation silently timing out after 10 seconds, ignoring extension cancellation and treating failed history refreshes as loaded. Creation now uses the transition deadline, reports its outcome, and reconciles uncertain timeouts through read-only state queries rather than creating duplicates.

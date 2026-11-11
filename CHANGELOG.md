@@ -4,6 +4,10 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-11-11
+
+- Kept the Windows launcher regression tests meaningful without breaking the suite on Linux and macOS: they assert the `pi.cmd` → Node resolution branch, which reads the platform at module load, so they now report as skipped instead of failing outside Windows.
+
 - Fixed Windows sessions staying on the loading/retry notice during new-session startup and reload. Registry checks now yield to RPC initialization and automatic companion maintenance runs in the background.
 - Slow startup remains attached to the same Pi process after the 45-second diagnostic deadline. Disposing a panel cancels pending crash restarts, and failed boots retain the bounded retry budget.
 

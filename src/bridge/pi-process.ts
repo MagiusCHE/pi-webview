@@ -43,6 +43,7 @@ export class PiProcess {
   private sending = false;
   private queue: unknown[] = [];
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null;
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private spawnError = false; // spawn failed: the following 'exit' event must be ignored
   private bootWatchdog: ReturnType<typeof setTimeout> | null = null;
   private booted = false; // first line from pi → boot ok, watchdog disarmed
@@ -70,6 +71,8 @@ export class PiProcess {
   }
 
   start(): void {
+    if (this.stopping || this.child) return;
+    this.restartTimer = null;
     this.spawnError = false;
     const args = ["--mode", "rpc", ...(this.opts.args ?? [])];
     // Windows: spawning the .cmd shim through `cmd /c` with piped stdio
@@ -95,26 +98,12 @@ export class PiProcess {
     this.child = child;
     this.booted = false;
     this.stderrTail = [];
-    // Boot watchdog: pi frozen (no output for 45s, e.g. stalled on missing
-    // networks at startup) → kill the tree; the restart follows the normal
-    // 'exit' flow (backoff 1s, cap 5) and each attempt gets a new watchdog.
+    // A slow Windows extension load can legitimately exceed 45 seconds.
+    // Keep the process alive so pending RPC reads and UI recovery can finish.
     this.bootWatchdog = setTimeout(() => {
+      this.bootWatchdog = null;
       if (this.stopping || this.booted || !this.child) return;
-      this.cb.log?.(
-        `pi unresponsive: no output in the first 45s of boot — kill + restart`,
-      );
-      const pid = this.child.pid;
-      if (pid !== undefined) {
-        if (process.platform === "win32") {
-          // kill the whole tree (cmd → node → pi)
-          const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
-            stdio: "ignore",
-          });
-          killer.on("error", () => {});
-        } else {
-          this.child.kill();
-        }
-      }
+      this.cb.log?.(`pi startup still pending after 45s; waiting for RPC readiness`);
     }, 45_000);
 
     child.stdin.on("error", (err) => {
@@ -130,6 +119,10 @@ export class PiProcess {
           clearTimeout(this.bootWatchdog);
           this.bootWatchdog = null;
         }
+        // Only a booted process can become stable and reset crash backoff.
+        this.stabilityTimer = setTimeout(() => {
+          this.restarts = 0;
+        }, 30_000);
         this.cb.onBoot?.();
       }
       try {
@@ -209,11 +202,6 @@ export class PiProcess {
       this.cb.onExit?.(null, null, err.message);
     });
 
-    // after 30s of life the process is considered stable: reset the counter
-    this.stabilityTimer = setTimeout(() => {
-      this.restarts = 0;
-    }, 30_000);
-
     child.on("exit", (code, signal) => {
       if (this.spawnError) return; // already handled by the 'error' handler
       if (this.stabilityTimer) {
@@ -241,7 +229,7 @@ export class PiProcess {
         return;
       }
       this.cb.log?.(`pi terminato (code=${code}, signal=${signal}); restart tra 1s`);
-      setTimeout(() => this.start(), 1_000);
+      this.restartTimer = setTimeout(() => this.start(), 1_000);
     });
   }
 
@@ -275,6 +263,14 @@ export class PiProcess {
 
   dispose(): void {
     this.stopping = true;
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+    if (this.stabilityTimer) {
+      clearTimeout(this.stabilityTimer);
+      this.stabilityTimer = null;
+    }
     if (this.bootWatchdog) {
       clearTimeout(this.bootWatchdog);
       this.bootWatchdog = null;

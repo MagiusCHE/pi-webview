@@ -4,6 +4,9 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+- Fixed Windows sessions staying on the loading/retry notice during new-session startup and reload. Registry checks now yield to RPC initialization and automatic companion maintenance runs in the background.
+- Slow startup remains attached to the same Pi process after the 45-second diagnostic deadline. Disposing a panel cancels pending crash restarts, and failed boots retain the bounded retry budget.
+
 ## [0.7.5] - 2026-11-10
 
 - Fixed the VS Code host discarding Pi's resolved executable path and passing bare `pi.cmd` to the process launcher. Windows now consistently uses the direct Node/managed CLI route instead of silently falling back to `cmd /c`, which could break RPC input and address startup metadata to the wrong PID.

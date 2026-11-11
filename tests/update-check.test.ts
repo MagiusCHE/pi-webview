@@ -5,7 +5,8 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import childProcess, {
-  type SpawnSyncOptionsWithStringEncoding,
+  type ExecFileOptionsWithStringEncoding,
+  type ChildProcess,
   type SpawnSyncReturns,
 } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -78,7 +79,7 @@ test("parseNpmSources: only npm: sources, deduplicated, tolerant", () => {
 interface CheckCommand {
   command: string;
   args: string[];
-  options: SpawnSyncOptionsWithStringEncoding;
+  options: ExecFileOptionsWithStringEncoding;
 }
 
 function commandResult(
@@ -105,15 +106,24 @@ function mockCommands(
   Object.defineProperty(process, "platform", { ...originalPlatform, value: platform });
   process.env.ComSpec = "C:\\Windows\\System32\\cmd.exe";
   const calls: CheckCommand[] = [];
-  const spawn = context.mock.method(childProcess, "spawnSync", (...input: unknown[]) => {
-    const [command, args, options] = input as [
+  const spawn = context.mock.method(childProcess, "execFile", (...input: unknown[]) => {
+    const [command, args, options, callback] = input as [
       string,
       string[],
-      SpawnSyncOptionsWithStringEncoding,
+      ExecFileOptionsWithStringEncoding,
+      (error: Error | null, stdout: string, stderr: string) => void,
     ];
     const call = { command, args, options };
     calls.push(call);
-    return respond(call);
+    const result = respond(call);
+    queueMicrotask(() =>
+      callback(
+        result.error ?? (result.status === 0 ? null : new Error("Command failed")),
+        result.stdout,
+        result.stderr,
+      ),
+    );
+    return {} as ChildProcess;
   });
   syncBuiltinESMExports();
   context.after(() => {
@@ -185,7 +195,7 @@ test("Windows checks pi and npm .cmd shims through the command processor", async
     assert.equal(options.windowsVerbatimArguments, true);
     assert.notEqual(options.shell, true);
     assert.ok(options.timeout);
-    assert.deepEqual(options.stdio, ["ignore", "pipe", "ignore"]);
+    assert.equal(options.encoding, "utf8");
   }
   for (const { options } of calls.slice(1)) {
     assert.ok(options.cwd);
@@ -300,4 +310,37 @@ test("checkPiUpdate: the module no longer exposes any cache surface", async () =
   assert.equal(mod.CACHE_TTL_MS, undefined);
   assert.equal(mod.readCache, undefined);
   assert.equal(mod.updateCheckFile, undefined);
+});
+
+test("Windows update checks yield while slow commands are pending", async (context) => {
+  const fixture = updateFixture(context);
+  let finish!: () => void;
+  let commands = 0;
+  mockCommands(context, "win32", () => {
+    commands++;
+    return commandResult("", 1);
+  });
+  const execute = context.mock.method(childProcess, "execFile", (...input: unknown[]) => {
+    const callback = input[3] as (error: Error | null, stdout: string) => void;
+    commands++;
+    finish = () => callback(new Error("ETIMEDOUT"), '"99.0.0"');
+    return {} as ChildProcess;
+  });
+  syncBuiltinESMExports();
+  let completed = false;
+  const checking = checkPiUpdate(fixture).then((result) => {
+    completed = true;
+    return result;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(completed, false);
+  assert.equal(commands, 1);
+  finish();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(commands, 2, "extension lookups also yield and stay sequential");
+  finish();
+  await new Promise((resolve) => setImmediate(resolve));
+  finish();
+  assert.equal(await checking, null, "partial output from a timeout is discarded");
+  execute.mock.restore();
 });

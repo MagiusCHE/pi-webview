@@ -2,10 +2,9 @@
 // At startup it does TWO ensures: 1) the IDE companions (VS Code + Visual
 // Studio, installed/updated from the bundled vsixes when missing or
 // outdated — centralized in src/bridge/companions.ts, the SAME module `piw`
-// calls) and 2) the `piw` launcher links on PATH. The companion check BLOCKS startup
-// until it finishes (the core awaits the extension factory): every phase is
-// traced to the console + ~/.pi/pi-webview/companion-install.log, so the
-// user always sees what is happening.
+// calls) and 2) the `piw` launcher links on PATH. Companion maintenance runs
+// in the background so Windows installer/CLI delays leave RPC input available.
+// Actions are traced to the console + ~/.pi/pi-webview/companion-install.log.
 // When pi runs inside the webview (env PI_WEBVIEW_COMPANION=1) the companion
 // check still runs: it is the update channel for webview-only users (the
 // package on disk is updated, the installed companion is not).
@@ -528,12 +527,12 @@ export default async function (pi: PiApi): Promise<void> {
   let updateRunning = false;
   let updateCheckRunning = false;
 
-  // at load: BLOCKS pi.dev startup until the check/installs are done (the
-  // core awaits the extension factory), so the user always sees what is
-  // happening (console + install log) and startup never proceeds with a
-  // pending install. The piw launcher links are ensured right after (logged
-  // only when at least one was actually created).
-  await tryAutoInstall();
+  // Companion maintenance must not hold the extension factory open: RPC input
+  // starts only after every factory and session_start handler have completed.
+  // Notes are delivered through lastUi if maintenance finishes after startup.
+  void tryAutoInstall().catch((error: unknown) => {
+    appendInstallLog(`Companion check failed: ${String(error)}`);
+  });
   if (ensurePiwBin()) {
     console.log("[pi-webview] piw launcher links created");
     appendInstallLog("piw launcher links created");

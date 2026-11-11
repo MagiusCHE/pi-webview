@@ -21,6 +21,8 @@ The three IDE companions are included in the package and installed or updated au
 
 ## Slow session startup
 
+On Windows, registry version checks and automatic companion maintenance run asynchronously during both new-session startup and reload. After 45 seconds of silence the host records a diagnostic and keeps waiting for the same Pi process, allowing a slow initialization to complete. Closing or reloading a panel cancels any pending crash restart from its previous process.
+
 If Pi's initialization takes longer than the first loading window, a recovery notice appears instead of an apparently ready empty composer. The UI automatically retries session/model/context data every five seconds while the panel is visible; **Retry now** requests an immediate attempt. Returning to a visible panel also synchronizes extension statuses such as MCP and account information. Recovery does not restart Pi, interrupt an active response, change models or resend messages.
 
 Creating a new session can be canceled by an extension or take longer than expected. The UI reports cancellation/errors; after an uncertain timeout it checks the actual state instead of automatically issuing another creation request. A permanently blocked extension or broken process may still require an explicit Pi reload. After installing a companion update, reload the IDE window to activate its new host code as well as its web UI.
@@ -181,9 +183,9 @@ pi install npm:@magiusche/pi-webview
 
 On the first start after an install or update, pi-webview shows one informational card, styled like the Context / Skills / Extensions startup summary. It lists every available mode—Browser View (`piw` / `piw-public`), the automatically managed VS Code and Visual Studio companions, and the [Google Chrome Side Panel companion](https://chromewebstore.google.com/detail/hcdjfkcgojomhpmcfgipginghhlncamn)—followed by the English notes for that version from the bundled [`CHANGELOG.md`](https://github.com/MagiusCHE/pi-webview/blob/main/CHANGELOG.md), with a localized heading. The reminder is stored outside conversation sessions and is not repeated for the same version.
 
-> **⚠️ The companions are checked at every pi start** — the check **blocks
-> startup until it finishes** (pi.dev / the webview never start with a pending
-> install). The check steps are silent while nothing is being done; the **first
+> **The companions are checked at every pi start in the background.**
+> Session loading can complete while a check or installation is pending.
+> The check steps are silent while nothing is being done; the **first
 > action** (install/update/error) flushes the whole trace immediately and the
 > following steps are streamed as they happen — console,
 > `~/.pi/pi-webview/companion-install.log` and notifications. When everything

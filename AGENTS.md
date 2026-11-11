@@ -391,9 +391,9 @@ companion** — modello pi-x-ide, ognuno solo se l'IDE è presente:
 > per installazione). `piw` stampa in console, l'estensione notifica
 > (status line per passo, recap finale unico) e scrive in
 > `~/.pi/pi-webview/companion-install.log`.
-> **Avvio bloccante**: l'auto-install a load dell'estensione è in `await` (il
-> core fa await sul factory), quindi pi.dev non completa l'avvio finché i
-> check/install non finiscono; i comandi espliciti passano
+> **Manutenzione in background**: il factory avvia l'auto-install in modo
+> asincrono e consente il completamento dell'avvio RPC durante i check/install.
+> Gli esiti raggiungono la UI anche dopo `session_start`; i comandi espliciti passano
 > `ignoreAutoInstall: true` (funzionano anche con `PI_WEBVIEW_AUTO_INSTALL=0`).
 
 - **VS Code**: il CLI `code` è risolto da `PATH` o dalle posizioni di

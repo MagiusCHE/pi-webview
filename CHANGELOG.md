@@ -4,6 +4,8 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+- Fixed `spawn EINVAL` when updating pi on Windows with the managed installer. The shared Node resolver now recognizes `pi-launcher.js` as well as npm shims, preserving active-release selection and `PI_MANAGED_INSTALL_ROOT` without invoking a command shell.
+
 ## [0.7.4] - 2026-11-10
 
 - Added localized message timestamps to the shared web UI, so the standalone bridge, the VS Code and Visual Studio webviews and the Chrome side panel all show them: every user and assistant message reveals the time on hover (or keyboard focus) and the native tooltip carries the complete localized date, time and seconds. The label follows the day, because a session can span several days: time only for today, "yesterday HH:MM" for the previous day, and a date prefix — with the year when it differs — for anything older.

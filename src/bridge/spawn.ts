@@ -1,7 +1,7 @@
 // Resolution of the `pi` binary cross-platform (concept 0002 D6):
-// on Windows the npm shim is `pi.cmd`, elsewhere `pi`.
+// on Windows the npm or managed-install shim is `pi.cmd`, elsewhere `pi`.
 
-import { accessSync, constants, readdirSync, readFileSync } from "node:fs";
+import { accessSync, constants, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { execFile } from "node:child_process";
@@ -47,10 +47,10 @@ export interface DirectNodeInvocation {
 }
 
 /**
- * Windows: `pi` is a .cmd npm shim. Running it through `cmd /c` with piped
- * stdio breaks pi's RPC stdin (boot completes but no request is ever read;
- * verified on pi 0.84.3). Resolve `node` + the real cli.js entry so the
- * caller can spawn pi directly (the pattern pi's own RpcClient uses).
+ * Windows: `pi` is a .cmd npm or managed-install shim. Running it through
+ * `cmd /c` with piped stdio breaks pi's RPC stdin (boot completes but no
+ * request is ever read; verified on pi 0.84.3). Resolve `node` + the JS entry
+ * so the caller can spawn pi directly (the pattern pi's own RpcClient uses).
  * Returns null on non-Windows or when resolution fails (caller falls back
  * to the previous `cmd /c` behavior).
  */
@@ -91,8 +91,9 @@ function fallbackNodePath(): string | null {
 }
 
 /**
- * Extract the real JS entry from the npm .cmd shim
- * (`…\node_modules\@earendil-works\pi-coding-agent\dist\bundle\cli.js`).
+ * Extract the JS entry from the managed installer or npm .cmd shim.
+ * Keep the managed launcher intact: it selects the active release and sets
+ * PI_MANAGED_INSTALL_ROOT, which `pi update` needs to update that installation.
  */
 function parseShimScript(shim: string): string | null {
   let text: string;
@@ -101,17 +102,22 @@ function parseShimScript(shim: string): string | null {
   } catch {
     return null;
   }
-  const marker = "node_modules\\";
-  const i = text.indexOf(marker);
-  if (i < 0) return null;
-  let end = i + marker.length;
-  while (end < text.length && !/["'%\s]/.test(text[end] ?? "")) end++;
-  const rel = text.slice(i + marker.length, end).replace(/\//g, "\\");
-  if (!rel.toLowerCase().endsWith(".js") || rel.includes("..")) return null;
-  const script = join(dirname(shim), "node_modules", rel);
+  let script: string;
+  if (/^@?node[\t ]+"%~dp0pi-launcher\.js"[\t ]+%\*[\t ]*\r?$/im.test(text)) {
+    script = join(dirname(shim), "pi-launcher.js");
+  } else {
+    const marker = "node_modules\\";
+    const i = text.indexOf(marker);
+    if (i < 0) return null;
+    let end = i + marker.length;
+    while (end < text.length && !/["'%\s]/.test(text[end] ?? "")) end++;
+    const rel = text.slice(i + marker.length, end);
+    if (!rel.toLowerCase().endsWith(".js") || rel.includes("..")) return null;
+    script = join(dirname(shim), "node_modules", ...rel.split(/[\\/]/));
+  }
   try {
     accessSync(script, constants.X_OK);
-    return script;
+    return statSync(script).isFile() ? script : null;
   } catch {
     return null;
   }

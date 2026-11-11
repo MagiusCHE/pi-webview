@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import test from "node:test";
 import { resolvePi } from "../src/bridge/spawn.ts";
 
@@ -39,7 +39,7 @@ test("resolvePi resolves a bare override name in PATH", () => {
     writeFileSync(bin, "#!/bin/sh\nexit 0\n");
     chmodSync(bin, 0o755);
     mkdirSync(dir, { recursive: true });
-    process.env.PATH = `${dir}:${previous ?? ""}`;
+    process.env.PATH = `${dir}${delimiter}${previous ?? ""}`;
     const resolved = resolvePi(process.platform, "pi-override");
     assert.equal(resolved.found, true);
     assert.equal(resolved.path, bin);

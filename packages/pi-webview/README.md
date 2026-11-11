@@ -38,7 +38,7 @@ piw --install-chrome # opens the official Chrome installation flow
 piw --uninstall-chrome # opens Chrome extension management for removal
 ```
 
-`piw` resolves `pi` on the `PATH` (on Windows the `pi.cmd` shim), spawns it with `--mode rpc` and opens `http://127.0.0.1:<port>/`. A new session starts in the shell directory from which `piw` was invoked—even when reusing an existing bridge—and falls back to the user home if that directory is unavailable. Exit with Ctrl+C.
+`piw` resolves `pi` on the `PATH` (on Windows the `pi.cmd` shim from either npm or the managed Pi installer), spawns it with `--mode rpc` and opens `http://127.0.0.1:<port>/`. A new session starts in the shell directory from which `piw` was invoked—even when reusing an existing bridge—and falls back to the user home if that directory is unavailable. Exit with Ctrl+C.
 
 The default bind remains loopback-only. `--ip <IPv4>` (also accepted as `--host <IPv4>`) adds a specific local address while preserving `127.0.0.1`; `--ip 0.0.0.0` listens on every IPv4 interface. For a non-loopback bind, `piw` prints authenticated remote-access links. Treat those links as secrets: anyone who has one can operate pi with your local user permissions. Use this only on a trusted network, preferably behind a host firewall or private VPN. If the active single-instance bridge has a different binding, stop it with `piw -k` before restarting it with the desired `--ip`.
 

@@ -26,6 +26,8 @@ public sealed class UserConfigStore
         Theme = "system",
         HistoryLimit = 30,
         StatsBarPosition = "above",
+        TimeFormat = "24",
+        KeepAwakeWhileWorking = false,
         AgenticThinking = false,
         AllowRemoteNpmUpdates = false,
         DangerouslyAllowAllNpmScripts = false,
@@ -73,6 +75,8 @@ public sealed class UserConfigStore
                 Notifications = parsed.Notifications,
                 StatsBarPosition = parsed.StatsBarPosition ?? Default.StatsBarPosition,
                 StatsBarCompact = parsed.StatsBarCompact,
+                TimeFormat = parsed.TimeFormat is "12" or "24" ? parsed.TimeFormat : Default.TimeFormat,
+                KeepAwakeWhileWorking = parsed.KeepAwakeWhileWorking,
                 AgenticThinking = parsed.AgenticThinking,
                 AllowRemoteNpmUpdates = parsed.AllowRemoteNpmUpdates,
                 DangerouslyAllowAllNpmScripts = parsed.DangerouslyAllowAllNpmScripts,
@@ -102,6 +106,17 @@ public sealed class UserConfigStore
         if (patch.TryGetValue("locale", out var locale))
         {
             _config.Locale = locale.ValueKind == JsonValueKind.Null ? null : locale.GetString();
+        }
+        if (patch.TryGetValue("timeFormat", out var timeFormat) &&
+            timeFormat.ValueKind == JsonValueKind.String)
+        {
+            var v = timeFormat.GetString();
+            _config.TimeFormat = v is "12" or "24" ? v : Default.TimeFormat;
+        }
+        if (patch.TryGetValue("keepAwakeWhileWorking", out var keepAwake) &&
+            keepAwake.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            _config.KeepAwakeWhileWorking = keepAwake.GetBoolean();
         }
         if (patch.TryGetValue("historyLimit", out var limit) &&
             limit.ValueKind == JsonValueKind.Number && limit.TryGetInt32(out var n) && n >= 1)
@@ -191,6 +206,8 @@ public sealed class UserConfigStore
         Notifications = c.Notifications,
         StatsBarPosition = c.StatsBarPosition,
         StatsBarCompact = c.StatsBarCompact,
+        TimeFormat = c.TimeFormat,
+        KeepAwakeWhileWorking = c.KeepAwakeWhileWorking,
         AgenticThinking = c.AgenticThinking,
         AllowRemoteNpmUpdates = c.AllowRemoteNpmUpdates,
         DangerouslyAllowAllNpmScripts = c.DangerouslyAllowAllNpmScripts,

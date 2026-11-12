@@ -278,6 +278,12 @@ public sealed class UserConfig
     [System.Text.Json.Serialization.JsonPropertyName("statsBarCompact")]
     public bool? StatsBarCompact { get; set; }
 
+    [System.Text.Json.Serialization.JsonPropertyName("timeFormat")]
+    public string? TimeFormat { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("keepAwakeWhileWorking")]
+    public bool KeepAwakeWhileWorking { get; set; }
+
     [System.Text.Json.Serialization.JsonPropertyName("agenticThinking")]
     public bool AgenticThinking { get; set; }
 

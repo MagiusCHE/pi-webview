@@ -349,6 +349,9 @@ export type ThemePreference = "light" | "dark" | "system";
 /** where the stats bar (context gauge + extension slots) lives */
 export type StatsBarPosition = "above" | "below" | "topbar";
 
+/** Clock format of the transcript timestamps: 24-hour (default) or 12-hour. */
+export type TimeFormat = "12" | "24";
+
 // --- pi launch CLI flags (settings block 3) ---------------------------------
 // Available dynamically: they are the flags registered by pi and its
 // extensions (e.g. --session-control of the pi-agent-extensions package): if
@@ -472,6 +475,12 @@ export interface UserConfig {
   /** setStatus keys hidden by the user. RPC exposes the key as the stable
    *  identifier of the status source. */
   hiddenStatusKeys?: string[];
+  /** Clock format of the message timestamps. Global UI preference, default
+   *  "24": the short label and the tooltip follow it in every runtime. */
+  timeFormat?: TimeFormat;
+  /** Keep the host machine awake while pi is working (default off). The
+   *  bridge holds an idle-sleep assertion only during an agent run. */
+  keepAwakeWhileWorking?: boolean;
   /** Global microphone dictation preferences. Device IDs are scoped by runtime
    *  because browser/WebView IDs are opaque and origin-specific. */
   speechToText?: SpeechToTextConfig;

@@ -10,6 +10,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import type {
   CompactionSettings,
   ThinkingSettings,
+  TimeFormat,
   UserConfig,
 } from "../ide/protocol.ts";
 import {
@@ -22,6 +23,8 @@ export const DEFAULT_CONFIG: UserConfig = {
   theme: "system",
   historyLimit: 120,
   statsBarPosition: "above",
+  timeFormat: "24",
+  keepAwakeWhileWorking: false,
   agenticThinking: false,
   allowRemoteNpmUpdates: false,
   dangerouslyAllowAllNpmScripts: false,
@@ -81,6 +84,10 @@ export function readThinkingSettings(
   return { hideThinkingBlock };
 }
 
+function normalizeTimeFormat(value: unknown): TimeFormat {
+  return value === "12" ? "12" : "24";
+}
+
 export function userConfigDir(platform: NodeJS.Platform = process.platform): string {
   const home = homedir();
   switch (platform) {
@@ -124,6 +131,7 @@ export class ConfigStore {
       return {
         ...DEFAULT_CONFIG,
         ...parsed,
+        timeFormat: normalizeTimeFormat(parsed.timeFormat),
         speechToText: normalizeSpeechToTextConfig(parsed.speechToText),
       };
     } catch {
@@ -139,6 +147,9 @@ export class ConfigStore {
     this.config = {
       ...this.config,
       ...patch,
+      ...(Object.prototype.hasOwnProperty.call(patch, "timeFormat")
+        ? { timeFormat: normalizeTimeFormat(patch.timeFormat) }
+        : {}),
       ...(Object.prototype.hasOwnProperty.call(patch, "speechToText")
         ? { speechToText: normalizeSpeechToTextConfig(patch.speechToText) }
         : {}),

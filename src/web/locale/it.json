@@ -398,6 +398,12 @@
     "browserConsentPending": "Autorizzazione richiesta ({operation}) non ancora concessa: approva il dialog nel pannello pi-webview e riprova. Nulla è stato eseguito e la pagina non è stata modificata.",
     "browserPageHostMismatch": "La pagina attiva è {active}, non {expected}. Attiva la scheda desiderata nella stessa finestra del pannello (o apri il pannello in quella finestra) e riprova: nessuna azione è stata eseguita.",
     "messageTimestamp": "Orario del messaggio",
-    "yesterday": "ieri"
+    "yesterday": "ieri",
+    "timeFormat": "Formato orario",
+    "timeFormat24": "24 ore (14:30)",
+    "timeFormat12": "12 ore (2:30 PM)",
+    "settingsKeepAwake": "Evita lo standby durante il lavoro",
+    "settingsKeepAwakeDesc": "Impedisce lo standby per inattività del computer finché pi sta lavorando. Non blocca la chiusura del coperchio né lo standby manuale e richiede il bridge piw sul computer.",
+    "timestampDateSeparator": " alle "
   }
 }

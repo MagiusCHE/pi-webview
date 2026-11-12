@@ -17,6 +17,10 @@ export interface MessageTimeOptions {
   locale: string;
   /** Localized word for "yesterday", injected by the caller (i18n). */
   yesterday: string;
+  /** Localized separator between the date and the clock of older messages. */
+  dateSeparator?: string;
+  /** 12-hour clock when true; 24-hour (default) otherwise. */
+  hour12?: boolean;
   /** Reference instant, injectable for tests. */
   now?: number;
 }
@@ -35,13 +39,22 @@ export function messageTimeLabel(
   const { locale } = options;
   const date = new Date(timestamp);
   const now = new Date(options.now ?? Date.now());
+  // explicit hourCycle: the locale default (12h in en-US) never overrides the
+  // user preference, and the tooltip obeys the same choice as the short label
+  const hourCycle = options.hour12 ? "h12" : "h23";
   const time = new Intl.DateTimeFormat(locale, {
     hour: "2-digit",
     minute: "2-digit",
+    hourCycle,
   }).format(date);
   const full = new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "medium",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle,
   }).format(date);
   const days = Math.round((startOfDay(now.getTime()) - startOfDay(timestamp)) / DAY_MS);
 
@@ -57,7 +70,7 @@ export function messageTimeLabel(
       month: "short",
       ...(sameYear ? {} : { year: "numeric" }),
     }).format(date);
-    short = `${day} ${time}`;
+    short = `${day}${options.dateSeparator ?? ", "}${time}`;
   }
 
   return { short, full, iso: date.toISOString() };

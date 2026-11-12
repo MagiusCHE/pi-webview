@@ -4,6 +4,14 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-11-12
+
+- New opt-in Webview setting **Prevent sleep while working** (default off, `keepAwakeWhileWorking` in `config.json`). While an agent run is active the bridge holds an idle-sleep assertion — `caffeinate -i` on macOS, `systemd-inhibit --what=idle` on Linux, `SetThreadExecutionState` on Windows — and releases it at `agent_settled`, on an aborted run, or when pi exits. A bridge that is merely running (the usual Chrome side-panel case) never keeps the machine awake, and every helper watches the bridge pid so a crash cannot leave an orphan assertion. Lid close, manual sleep and critical battery remain outside any API's control.
+
+- The date and the clock of older timestamps are now separated by a localized separator (`10 nov alle 16:57`, `Nov 08, 16:57`) instead of a bare space, so the day never runs into the hour.
+
+- Message timestamps now use a 24-hour clock by default, whatever the locale, and the new `Time format` setting in the Webview section switches them (and their tooltips) to 12-hour. The preference lives in `config.json` (`timeFormat`, default `"24"`), applies to history already on screen, and is mirrored by the Visual Studio companion.
+
 ## [0.7.6] - 2026-11-11
 
 - Kept the Windows launcher regression tests meaningful without breaking the suite on Linux and macOS: they assert the `pi.cmd` → Node resolution branch, which reads the platform at module load, so they now report as skipped instead of failing outside Windows.

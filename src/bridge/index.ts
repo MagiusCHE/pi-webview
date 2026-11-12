@@ -35,6 +35,7 @@ import { resolvePi } from "./spawn.ts";
 import { cliFlagArgs, fetchAvailableCliFlags } from "./cli-flags.ts";
 import { createMockIde } from "./mock-ide.ts";
 import { ConfigStore, readCompactionSettings, readThinkingSettings } from "./config.ts";
+import { SleepGuard } from "./sleep-guard.ts";
 import {
   listSessions,
   forkSession,
@@ -294,6 +295,13 @@ function main(): void {
   const launchIntents = new Map<string, LaunchIntent>();
   const mockIde = opts.mockIde ? createMockIde((m) => console.error(m)) : null;
   const configStore = new ConfigStore();
+  // Idle-sleep guard: opt-in preference, armed only while an agent run is
+  // active. It follows the pi event stream, so a bridge that is merely idle
+  // (the common case with the Chrome side panel) never holds an assertion.
+  const sleepGuard = new SleepGuard({
+    enabled: () => configStore.get().keepAwakeWhileWorking === true,
+    log: (message) => console.error(`[bridge] ${message}`),
+  });
   const browserControls = new Map<string, Channel>();
   let availableCliFlagsPromise: ReturnType<typeof fetchAvailableCliFlags> | null = null;
   const availableCliFlags = () => {
@@ -582,12 +590,17 @@ function main(): void {
       const proc = new PiProcess(
         piCommand,
         {
-          onEvent: (event) => send({ channel: "rpc", payload: event as RpcEvent }),
+          onEvent: (event) => {
+            sleepGuard.track(event);
+            send({ channel: "rpc", payload: event as RpcEvent });
+          },
           onBoot: () => {
             modelFallback.reset();
             extensionUiState.clear();
           },
           onExit: (_code, _signal, error, kind) => {
+            // a run that dies with the process must not leave the host awake
+            sleepGuard.release();
             if (kind === "config" && modelFallback.use()) {
               // The saved session model no longer exists: relaunch on the
               // default model of new sessions and tell the user about it.
@@ -1357,6 +1370,7 @@ function main(): void {
 
   // --- shutdown ---------------------------------------------------------------
   const shutdown = (code: number) => {
+    sleepGuard.release();
     for (const ch of channels) ch.dispose();
     wss.close();
     for (const server of servers) {

@@ -25,6 +25,7 @@ import type {
   ImageContent,
   BrowserPageContext,
   SessionSettings,
+  TimeFormat,
 } from "../ide/protocol.ts";
 import { rpc } from "../ide/protocol.ts";
 import {
@@ -417,6 +418,17 @@ const els = {
   settingsCliTitle: document.getElementById("settings-cli-title") as HTMLDivElement,
   lang: document.getElementById("lang") as HTMLSelectElement,
   langLabel: document.getElementById("settings-lang-label") as HTMLLabelElement,
+  keepAwake: document.getElementById("keep-awake-while-working") as HTMLInputElement,
+  keepAwakeLabel: document.getElementById(
+    "settings-keep-awake-label",
+  ) as HTMLLabelElement,
+  keepAwakeNote: document.getElementById("settings-keep-awake-note") as HTMLDivElement,
+  timeFormat: document.getElementById("settings-time-format") as HTMLSelectElement,
+  timeFormatLabel: document.getElementById(
+    "settings-time-format-label",
+  ) as HTMLLabelElement,
+  timeFormat24: document.getElementById("settings-time-format-24") as HTMLOptionElement,
+  timeFormat12: document.getElementById("settings-time-format-12") as HTMLOptionElement,
   historyInput: document.getElementById("settings-history-limit") as HTMLInputElement,
   historyLabel: document.getElementById("settings-history-label") as HTMLLabelElement,
   agenticThinking: document.getElementById("agentic-thinking") as HTMLInputElement,
@@ -1185,6 +1197,10 @@ const THEME_KEY: Record<ThemePreference, string> = {
 };
 
 let themePref: ThemePreference = "system";
+// clock format of the transcript timestamps: global preference, 24-hour default
+let timeFormatPref: TimeFormat = "24";
+// opt-in: keep the host machine awake while pi is working (bridge-side guard)
+let keepAwakeWhileWorking = false;
 
 // limit of messages shown in history (resume and runtime): comes from the
 // config (historyLimit), default 120 — the user changes it in the settings
@@ -1970,6 +1986,17 @@ function applyUiStrings(): void {
   els.lang.title = t("language");
   els.bootLoaderText.textContent = t("loading");
   els.langLabel.textContent = t("language");
+  els.keepAwakeLabel.textContent = t("settingsKeepAwake");
+  els.keepAwakeLabel.title = t("settingsKeepAwakeDesc");
+  els.keepAwake.title = t("settingsKeepAwakeDesc");
+  els.keepAwakeNote.textContent = t("settingsKeepAwakeDesc");
+  els.keepAwake.checked = keepAwakeWhileWorking;
+  els.timeFormatLabel.textContent = t("timeFormat");
+  els.timeFormat.title = t("timeFormat");
+  els.timeFormat24.textContent = t("timeFormat24");
+  els.timeFormat12.textContent = t("timeFormat12");
+  els.timeFormat.value = timeFormatPref;
+  refreshMessageTimestamps();
   els.historyLabel.textContent = t("historyLimit");
   els.historyInput.value = String(historyLimit);
   els.agenticThinkingLabel.textContent = t("settingsAgenticThinking");
@@ -2136,6 +2163,11 @@ async function requestConfig(): Promise<void> {
       themePref = cfg.theme;
       applyTheme(themePref);
     }
+    keepAwakeWhileWorking = cfg.keepAwakeWhileWorking === true;
+    els.keepAwake.checked = keepAwakeWhileWorking;
+    timeFormatPref = cfg.timeFormat === "12" ? "12" : "24";
+    els.timeFormat.value = timeFormatPref;
+    refreshMessageTimestamps();
     const loc = cfg.locale ?? null;
     if (isLocaleId(loc)) setLocale(loc);
     if (typeof cfg.historyLimit === "number" && cfg.historyLimit >= 1) {
@@ -2185,6 +2217,11 @@ function handleIdeResponse(res: IdeResponse): void {
       themePref = cfg.theme;
       applyTheme(themePref);
     }
+    keepAwakeWhileWorking = cfg.keepAwakeWhileWorking === true;
+    els.keepAwake.checked = keepAwakeWhileWorking;
+    timeFormatPref = cfg.timeFormat === "12" ? "12" : "24";
+    els.timeFormat.value = timeFormatPref;
+    refreshMessageTimestamps();
     const loc = cfg.locale ?? null;
     if (isLocaleId(loc)) setLocale(loc);
     if (typeof cfg.historyLimit === "number" && cfg.historyLimit >= 1) {
@@ -3197,6 +3234,18 @@ els.lang.addEventListener("change", () => {
       },
     });
   }
+});
+
+els.keepAwake.addEventListener("change", () => {
+  keepAwakeWhileWorking = els.keepAwake.checked;
+  persistWebviewConfig({ keepAwakeWhileWorking });
+});
+
+els.timeFormat.addEventListener("change", () => {
+  timeFormatPref = els.timeFormat.value === "12" ? "12" : "24";
+  els.timeFormat.value = timeFormatPref;
+  refreshMessageTimestamps();
+  persistWebviewConfig({ timeFormat: timeFormatPref });
 });
 
 // stats bar position: applied IMMEDIATELY (the bar moves right away), then
@@ -4646,6 +4695,8 @@ function attachMessageTimestamp(wrapper: HTMLElement, timestamp: number): void {
   const label = messageTimeLabel(stamp, {
     locale: currentLocale,
     yesterday: t("yesterday"),
+    dateSeparator: t("timestampDateSeparator"),
+    hour12: timeFormatPref === "12",
   });
   const element = document.createElement("time");
   element.className = "msg-time";
@@ -4654,6 +4705,24 @@ function attachMessageTimestamp(wrapper: HTMLElement, timestamp: number): void {
   element.title = label.full;
   element.setAttribute("aria-label", `${t("messageTimestamp")}: ${label.full}`);
   wrapper.appendChild(element);
+}
+
+// Re-render every timestamp already in the transcript: locale and clock format
+// are global preferences and must apply to history too, not only to new messages.
+function refreshMessageTimestamps(): void {
+  for (const element of els.thread.querySelectorAll<HTMLTimeElement>("time.msg-time")) {
+    const stamp = Date.parse(element.dateTime);
+    if (!Number.isFinite(stamp)) continue;
+    const label = messageTimeLabel(stamp, {
+      locale: currentLocale,
+      yesterday: t("yesterday"),
+      dateSeparator: t("timestampDateSeparator"),
+      hour12: timeFormatPref === "12",
+    });
+    element.textContent = label.short;
+    element.title = label.full;
+    element.setAttribute("aria-label", `${t("messageTimestamp")}: ${label.full}`);
+  }
 }
 
 function addMsg(

@@ -61,6 +61,8 @@ test("ConfigStore: default, patch e persistenza", () => {
       theme: "dark",
       historyLimit: 120,
       statsBarPosition: "above",
+      timeFormat: "24",
+      keepAwakeWhileWorking: false,
       agenticThinking: false,
       allowRemoteNpmUpdates: false,
       dangerouslyAllowAllNpmScripts: false,
@@ -141,6 +143,37 @@ test("ConfigStore: file corrotto → default senza crash", () => {
     writeFileSync(join(dir, "config.json"), "{non-json!");
     const store = new ConfigStore(dir);
     assert.deepEqual(store.get(), DEFAULT_CONFIG);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ConfigStore: keepAwakeWhileWorking parte spento e si persiste", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-webview-keepawake-"));
+  try {
+    assert.equal(new ConfigStore(dir).get().keepAwakeWhileWorking, false);
+    assert.equal(
+      new ConfigStore(dir).patch({ keepAwakeWhileWorking: true }).keepAwakeWhileWorking,
+      true,
+    );
+    assert.equal(new ConfigStore(dir).get().keepAwakeWhileWorking, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ConfigStore: timeFormat default 24 ore, normalizzazione e persistenza", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-webview-timeformat-"));
+  try {
+    assert.equal(new ConfigStore(dir).get().timeFormat, "24");
+    assert.equal(new ConfigStore(dir).patch({ timeFormat: "12" }).timeFormat, "12");
+    assert.equal(new ConfigStore(dir).get().timeFormat, "12");
+    // a hand-edited or legacy value never leaks into the UI
+    writeFileSync(
+      join(dir, "config.json"),
+      JSON.stringify({ timeFormat: "bogus" }) + "\n",
+    );
+    assert.equal(new ConfigStore(dir).get().timeFormat, "24");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

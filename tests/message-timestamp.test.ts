@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 const main = readFileSync("src/web/main.ts", "utf8");
 const css = readFileSync("src/web/style.css", "utf8");
+const html = readFileSync("src/web/index.html", "utf8");
 
 test("every transcript message carries a localized timestamp element", () => {
   // shared web UI: standalone bridge, IDE companions and the Chrome panel
@@ -17,6 +18,8 @@ test("every transcript message carries a localized timestamp element", () => {
   // the label is relative to today and localized through the shared module
   assert.match(main, /messageTimeLabel\(stamp, \{/);
   assert.match(main, /yesterday: t\("yesterday"\)/);
+  // localized separator between the date and the clock of older messages
+  assert.match(main, /dateSeparator: t\("timestampDateSeparator"\)/);
   // attached for user and assistant messages, never for status lines
   assert.match(
     main,
@@ -32,6 +35,20 @@ test("history and live messages pass their own timestamp", () => {
   assert.match(main, /pendingAssistantTimestamp = parseTs\(evt\.message\)/);
   // injected cross-session cards keep their entry timestamp
   assert.match(main, /const wrapper = addMsg\("user", null, ts\);/);
+});
+
+test("the clock format is a persisted setting with a 24-hour default", () => {
+  // shared web UI: the select lives in the Webview settings section
+  assert.match(html, /id="settings-time-format"/);
+  assert.match(html, /<option value="24" id="settings-time-format-24">/);
+  assert.match(html, /<option value="12" id="settings-time-format-12">/);
+  assert.match(main, /let timeFormatPref: TimeFormat = "24";/);
+  // the preference drives both the label and the tooltip
+  assert.match(main, /hour12: timeFormatPref === "12",/);
+  assert.match(main, /persistWebviewConfig\(\{ timeFormat: timeFormatPref \}\);/);
+  // changing it re-renders the transcript already on screen
+  assert.match(main, /function refreshMessageTimestamps\(\): void \{/);
+  assert.match(main, /refreshMessageTimestamps\(\);/);
 });
 
 test("the timestamp stays discreet and reveals itself on hover", () => {

@@ -135,6 +135,22 @@
             </select>
           </div>
           <div class="settings-row">
+            <label id="settings-keep-awake-label" for="keep-awake-while-working">
+              Evita lo standby durante il lavoro
+            </label>
+            <input id="keep-awake-while-working" class="field-checkbox" type="checkbox" />
+          </div>
+          <div class="settings-note" id="settings-keep-awake-note"></div>
+          <div class="settings-row">
+            <label id="settings-time-format-label" for="settings-time-format"
+              >Formato orario</label
+            >
+            <select id="settings-time-format" class="field-select">
+              <option value="24" id="settings-time-format-24">24 ore (14:30)</option>
+              <option value="12" id="settings-time-format-12">12 ore (2:30 PM)</option>
+            </select>
+          </div>
+          <div class="settings-row">
             <label id="settings-theme-label">Tema</label>
             <div class="theme-row" role="group" aria-label="Tema">
               <button data-theme-pref="system" class="theme-btn" title="Tema: sistema">

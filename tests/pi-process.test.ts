@@ -7,6 +7,8 @@ import { resolve, join } from "node:path";
 import { PassThrough } from "node:stream";
 import test, { type TestContext } from "node:test";
 import { PiProcess } from "../src/bridge/pi-process.ts";
+import { compactHistoryResponse } from "../src/ide/agent-stop.ts";
+import type { RpcEvent } from "../src/ide/protocol.ts";
 
 function harness(context: TestContext, args: string[] = []) {
   const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
@@ -92,6 +94,51 @@ for (const mode of ["new", "reload"] as const) {
     },
   );
 }
+
+test("large chunked histories preserve RPC IDs and subsequent responses", (context) => {
+  const h = harness(context);
+  h.pi.start();
+  const response = {
+    type: "response",
+    command: "get_entries",
+    id: "history-request",
+    success: true,
+    data: {
+      leafId: "tool",
+      entries: [
+        {
+          id: "tool",
+          parentId: null,
+          type: "message",
+          timestamp: "2026-11-15T10:00:00Z",
+          message: {
+            role: "toolResult",
+            timestamp: 1,
+            toolCallId: "call",
+            content: [
+              { type: "text", text: "Large response 漢字 🎮\u2028".repeat(250_000) },
+            ],
+          },
+        },
+      ],
+    },
+  };
+  const following = { type: "response", command: "get_state", id: "next", success: true };
+  const bytes = Buffer.from(
+    JSON.stringify(response) + "\n" + JSON.stringify(following) + "\n",
+  );
+  for (let offset = 0; offset < bytes.length; offset += 65_536) {
+    h.children[0]!.stdout.emit("data", bytes.subarray(offset, offset + 65_536));
+  }
+  assert.equal(h.events.length, 2);
+  assert.deepEqual(h.events[1], following);
+  const history = h.events[0] as RpcEvent;
+  assert.equal(history.id, response.id);
+  assert.deepEqual(history.data, response.data);
+  const compact = compactHistoryResponse(history);
+  assert.ok(JSON.stringify(compact).length < 500);
+  assert.equal(compact.id, response.id);
+});
 
 test("disposing during reload cancels a pending crash restart", (context) => {
   const h = harness(context);

@@ -108,6 +108,13 @@ test("a large history is not silently treated as a new session on timeout", () =
   assert.match(english.ui.sessionHistoryFailed, /\{reason\}/);
 });
 
+test("hosts compact history metadata before sending it across the UI transport", () => {
+  for (const file of ["src/adapters/vscode/host.ts", "src/bridge/index.ts"]) {
+    const host = readFileSync(file, "utf8");
+    assert.match(host, /payload: compactHistoryResponse\((?:evt|event) as RpcEvent\)/);
+  }
+});
+
 test("a failed or cancelled switch is not treated as a loaded session", () => {
   assert.equal(
     sessionSwitchOutcome({ success: true, data: { cancelled: false } }),

@@ -36,6 +36,7 @@ import { cliFlagArgs, fetchAvailableCliFlags } from "./cli-flags.ts";
 import { createMockIde } from "./mock-ide.ts";
 import { ConfigStore, readCompactionSettings, readThinkingSettings } from "./config.ts";
 import { SleepGuard } from "./sleep-guard.ts";
+import { compactHistoryResponse } from "../ide/agent-stop.ts";
 import {
   listSessions,
   forkSession,
@@ -592,7 +593,10 @@ function main(): void {
         {
           onEvent: (event) => {
             sleepGuard.track(event);
-            send({ channel: "rpc", payload: event as RpcEvent });
+            send({
+              channel: "rpc",
+              payload: compactHistoryResponse(event as RpcEvent),
+            });
           },
           onBoot: () => {
             modelFallback.reset();

@@ -9,27 +9,35 @@ export interface JsonlParser {
 
 export function createJsonlParser(onLine: (line: string) => void): JsonlParser {
   const decoder = new TextDecoder("utf-8");
-  let buffer = "";
+  // get_entries can be a single line hundreds of MB long. Keep fragments and
+  // scan only NEW text: concatenating/re-scanning the accumulated line on each
+  // stdout chunk makes large histories quadratic and can exhaust RPC timeouts.
+  let fragments: string[] = [];
+
+  function emit(): void {
+    let line = fragments.join("");
+    fragments = [];
+    if (line.endsWith("\r")) line = line.slice(0, -1);
+    onLine(line);
+  }
 
   return {
     push(chunk) {
-      buffer +=
+      const text =
         typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
-      let idx: number;
-      while ((idx = buffer.indexOf("\n")) !== -1) {
-        let line = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 1);
-        if (line.endsWith("\r")) line = line.slice(0, -1);
-        onLine(line);
+      let start = 0;
+      let end: number;
+      while ((end = text.indexOf("\n", start)) !== -1) {
+        fragments.push(text.slice(start, end));
+        emit();
+        start = end + 1;
       }
+      if (start < text.length) fragments.push(text.slice(start));
     },
     flush() {
-      buffer += decoder.decode();
-      if (buffer.length === 0) return;
-      let line = buffer;
-      if (line.endsWith("\r")) line = line.slice(0, -1);
-      buffer = "";
-      onLine(line);
+      const tail = decoder.decode();
+      if (tail) fragments.push(tail);
+      if (fragments.length > 0) emit();
     },
   };
 }

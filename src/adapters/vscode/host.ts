@@ -15,6 +15,7 @@ import {
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { PiProcess } from "../../bridge/pi-process.ts";
+import { compactHistoryResponse } from "../../ide/agent-stop.ts";
 import { ExtensionUiState } from "../../ide/extension-ui-state.ts";
 import { shouldRestartPiForNewSession } from "../../bridge/rpc-recovery.ts";
 import { resolvePi, findPiFallback, findPiViaShell } from "../../bridge/spawn.ts";
@@ -424,7 +425,10 @@ export abstract class PiWebviewHost {
           // The webview replies with extension_ui_response, which handleFrame
           // delivers to pi. Native dialogs were why ask_user seemed randomly
           // "cancelled".
-          this.post({ channel: "rpc", payload: evt as RpcEvent });
+          this.post({
+            channel: "rpc",
+            payload: compactHistoryResponse(evt as RpcEvent),
+          });
         },
         onBoot: () => {
           this.modelFallback.reset();

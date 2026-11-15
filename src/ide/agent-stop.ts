@@ -1,3 +1,5 @@
+import type { RpcEvent } from "./protocol.ts";
+
 // Stop events are session metadata, not messages sent to the model.
 export const AGENT_STOP_ENTRY_TYPE = "pi-webview-agent-stop";
 export const AGENT_STOP_ENTRY_DATA = { version: 1 } as const;
@@ -73,6 +75,59 @@ function entryMessageKeys(entry: Record<string, unknown>): string[] {
   const systemKey =
     entry.type === "compaction" ? messageKey(entry.systemMessage) : undefined;
   return [systemKey, key].filter((value): value is string => !!value);
+}
+
+function messageIdentity(value: unknown): unknown {
+  const message = record(value);
+  if (!message) return undefined;
+  return {
+    role: message.role,
+    timestamp: message.timestamp,
+    toolCallId: message.toolCallId,
+    customType: message.customType,
+  };
+}
+
+/**
+ * The UI reads get_entries only to place stop markers in get_messages history.
+ * Keep the entry graph and message identities, not a second copy of every tool
+ * result/image/thought on every branch (potentially hundreds of MB). Hosts must
+ * apply this before serializing across WebSocket or VS Code postMessage.
+ * get_messages remains Pi's complete, authoritative conversation.
+ */
+export function compactHistoryResponse(event: RpcEvent): RpcEvent {
+  if (event.type !== "response" || event.command !== "get_entries") return event;
+  const data = record(event.data);
+  if (event.success !== true || !Array.isArray(data?.entries)) return event;
+  return {
+    ...event,
+    data: {
+      ...data,
+      entries: data.entries.map((value) => {
+        const entry = record(value);
+        if (!entry) return null;
+        return {
+          id: entry.id,
+          parentId: entry.parentId,
+          type: entry.type,
+          timestamp: entry.timestamp,
+          ...(entry.type === "message"
+            ? { message: messageIdentity(entry.message) }
+            : {}),
+          ...(entry.type === "custom" || entry.type === "custom_message"
+            ? { customType: entry.customType }
+            : {}),
+          ...(isAgentStopEntry(entry) ? { data: AGENT_STOP_ENTRY_DATA } : {}),
+          ...(entry.type === "compaction"
+            ? {
+                firstKeptEntryId: entry.firstKeptEntryId,
+                systemMessage: messageIdentity(entry.systemMessage),
+              }
+            : {}),
+        };
+      }),
+    },
+  };
 }
 
 /** Merge UI-only stop events into Pi's authoritative, compaction-aware history. */

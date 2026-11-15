@@ -4,6 +4,10 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-15
+
+- Fixed large resumed histories timing out on `get_entries` in the VS Code companion and standalone bridge. JSONL framing now scans incoming chunks in linear time, and history entry responses sent to the UI retain only the graph, message identities and stop markers needed for reconstruction, rather than duplicating every historical tool result and image. Pi's message history and session files are unchanged.
+
 ## [0.7.7] - 2026-11-12
 
 - New opt-in Webview setting **Prevent sleep while working** (default off, `keepAwakeWhileWorking` in `config.json`). While an agent run is active the bridge holds an idle-sleep assertion — `caffeinate -i` on macOS, `systemd-inhibit --what=idle` on Linux, `SetThreadExecutionState` on Windows — and releases it at `agent_settled`, on an aborted run, or when pi exits. A bridge that is merely running (the usual Chrome side-panel case) never keeps the machine awake, and every helper watches the bridge pid so a crash cannot leave an orphan assertion. Lid close, manual sleep and critical battery remain outside any API's control.

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   AGENT_STOP_ENTRY_DATA,
   AGENT_STOP_ENTRY_TYPE,
+  compactHistoryResponse,
   isAbortedAssistantMessage,
   isAgentStopEntry,
   isAgentStopMessage,
@@ -276,6 +277,117 @@ test("history preclassifies interrupted activity across injected custom-message 
     assert.equal(stopped.has(value), true);
   }
   assert.equal(stoppedHistoryMessages([priorUser, priorTool]).size, 0);
+});
+
+test("history transport keeps only identities and stop metadata, without mutating Pi data", () => {
+  const large = "not needed to place a stop marker".repeat(65_536);
+  const heavyTool = {
+    ...tool,
+    message: { ...tool.message, content: [{ type: "image", data: large }] },
+    details: large,
+  };
+  const entries = [user, assistant, heavyTool, stopped];
+  const event = {
+    type: "response",
+    command: "get_entries",
+    id: "history-1",
+    success: true,
+    data: snapshot(entries, stopped.id),
+  };
+  const compact = compactHistoryResponse(event);
+  assert.notEqual(compact, event);
+  assert.equal(compact.id, event.id);
+  assert.equal(compact.success, true);
+  const wire = JSON.stringify(compact);
+  assert.ok(wire.length < 2000, `compacted metadata is ${wire.length} characters`);
+  assert.doesNotMatch(wire, /content|details|not needed/);
+  assert.deepEqual(withAgentStopEntries(original, JSON.parse(wire).data), [
+    ...original,
+    stopMessage(),
+  ]);
+  assert.equal(event.data.entries[2], heavyTool);
+  assert.equal(heavyTool.message.content[0]?.data, large);
+});
+
+test("compacted history preserves branches, compaction ranges, custom anchors and duplicate times", () => {
+  const other = message("other", tool.id, "toolResult", 3000, {
+    toolCallId: "other-call",
+  });
+  const end = stop("end", other.id);
+  const next = message("next", end.id, "assistant", 2000);
+  const compact = {
+    id: "compact",
+    parentId: stopped.id,
+    type: "compaction",
+    firstKeptEntryId: assistant.id,
+    timestamp: new Date(5000).toISOString(),
+    systemMessage: { role: "custom", timestamp: 5000, customType: "compact-info" },
+    summary: "The summary is already in get_messages",
+  };
+  const custom = {
+    id: "custom",
+    parentId: compact.id,
+    type: "custom_message",
+    timestamp: new Date(6000).toISOString(),
+    customType: "injected",
+    content: "A message from another session",
+  };
+  const customMessage = { role: "custom", timestamp: 6000, customType: "injected" };
+  const cases = [
+    {
+      messages: [...original, other.message, next.message],
+      entries: [user, assistant, tool, other, end, next],
+      leaf: next.id,
+    },
+    {
+      messages: original,
+      entries: [user, assistant, tool, stopped, other],
+      leaf: tool.id,
+    },
+    {
+      messages: [...original, compact.systemMessage, customMessage],
+      entries: [
+        user,
+        assistant,
+        tool,
+        stopped,
+        compact,
+        custom,
+        stop("after", custom.id, 7000),
+      ],
+      leaf: "after",
+    },
+    { messages: [], entries: [stop("alone", null)], leaf: "alone" },
+  ];
+  for (const item of cases) {
+    const raw = snapshot(item.entries, item.leaf);
+    const projected = compactHistoryResponse({
+      type: "response",
+      command: "get_entries",
+      success: true,
+      data: raw,
+    });
+    assert.deepEqual(
+      withAgentStopEntries(item.messages, JSON.parse(JSON.stringify(projected)).data),
+      withAgentStopEntries(item.messages, raw),
+    );
+  }
+});
+
+test("ordinary messages, failed reads and unrelated RPC responses are never projected", () => {
+  for (const event of [
+    { type: "message_end", message: assistant.message },
+    {
+      type: "response",
+      command: "get_messages",
+      success: true,
+      data: { messages: original },
+    },
+    { type: "response", command: "get_entries", success: false, error: "unavailable" },
+    { type: "response", command: "get_entries", success: true, data: null },
+  ]) {
+    assert.equal(compactHistoryResponse(event), event);
+  }
 });
 
 test("malformed cyclic session entries cannot hang history loading", () => {

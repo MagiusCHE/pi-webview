@@ -238,6 +238,18 @@ public sealed class UserConfigStoreTests : IDisposable
     }
 
     [Fact]
+    public void Manual_link_tooltip_limit_survives_other_preference_changes()
+    {
+        File.WriteAllText(Path.Combine(_dir, "config.json"), """{"linkTooltipMaxChars":80}""");
+        var store = new UserConfigStore(_dir);
+        using var doc = JsonDocument.Parse("""{"theme":"dark"}""");
+        store.Patch(new Dictionary<string, JsonElement> { ["theme"] = doc.RootElement.GetProperty("theme") });
+        var reloaded = new UserConfigStore(_dir).Get();
+        Assert.Equal("dark", reloaded.Theme);
+        Assert.Equal(80, reloaded.LinkTooltipMaxChars?.GetInt32());
+    }
+
+    [Fact]
     public void Patch_ignora_valori_non_validi()
     {
         var store = new UserConfigStore(_dir);

@@ -229,6 +229,15 @@ indicata sopra, incluso il VSIX Visual Studio compilato tramite Wine su Linux.
   La history ricostruisce la stessa decisione. Il renderer è type-aware: testo,
   JSON, code fence, immagini, file, media e resource link hanno presentazioni
   dedicate; un tipo sconosciuto usa sempre un fallback JSON e non viene perso
+- **Link in chat**: le destinazioni locali Markdown sono inerti nel DOM e
+  il click esplicito invia `openLocalLink` all'host, che risolve i percorsi
+  relativi al workspace della sessione. VS Code rivela il file in Explorer e
+  lo apre con `vscode.open`; fuori workspace, o da browser/Chrome, apre il
+  sistema operativo dell'host (solo documenti/media ammessi e cartelle).
+  `openFile` resta l'azione separata dei tool/allegati. Solo dopo un hover
+  si caricano le anteprime immagine: `readLinkImage` per i file locali (raster
+  verificato, massimo 8 MiB), direttamente nel browser senza referrer per
+  gli URL web. `linkTooltipMaxChars` vive solo in `config.json`, fallback 50.
 - **Cambio cartella dalla dropdown sessioni**: standalone e Chrome mostrano il pulsante cartella (`changeWorkspace` → `askWorkspaceAction`) con tre scelte — **sposta la sessione** nella nuova cartella, **fork**, **nuova sessione** (`setWorkspace`, `action: "move" | "fork" | "new"`). `move` copia la conversazione con l'header del nuovo workspace e rimuove l'originale (nessun duplicato; la copia eredita il `parentSession` dell'originale per non lasciare un riferimento pendente): il bridge ferma pi prima della copia/rimozione, riparte sulla copia e, se la copia fallisce, riavvia pi sulla sessione intatta. Una sessione vuota salta il dialog e si sposta direttamente.
 - **Header**: niente brand/stato testuale — dropdown sessioni (lista da
   `src/bridge/sessions.ts`, `~/.pi/agent/sessions/`; switch via

@@ -4,6 +4,10 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-21
+
+- Chat links to workspace files now reveal and open them in VS Code. External local files open with their default app in VS Code, and browser and Chrome Side Panel file links open on the `piw` host. Links also have a localized **Copy link** action alongside text-editing actions, a destination tooltip (50 characters by default, configurable in `config.json`), and a hover preview for reachable images.
+
 ## [0.8.0] - 2026-11-15
 
 - Fixed large resumed histories timing out on `get_entries` in the VS Code companion and standalone bridge. JSONL framing now scans incoming chunks in linear time, and history entry responses sent to the UI retain only the graph, message identities and stop markers needed for reconstruction, rather than duplicating every historical tool result and image. Pi's message history and session files are unchanged.

@@ -63,7 +63,12 @@ import { ModelConfigFallback } from "./pi-config-errors.ts";
 import { readStartupInfo } from "./startup-info.ts";
 import { saveAttachment, pathExists, attachFromPath } from "./attachments.ts";
 import { fetchProviderBalance } from "./balance.ts";
-import { revealFileInSystemManager } from "./open-file.ts";
+import {
+  inspectLocalLink,
+  openLocalLinkNatively,
+  revealFileInSystemManager,
+} from "./open-file.ts";
+import { readLinkImage } from "./link-image.ts";
 import { clearLock } from "./lock.ts";
 import { normalizeLaunchCwd } from "./launch-context.ts";
 import { listDirectory } from "./folders.ts";
@@ -1037,6 +1042,27 @@ function main(): void {
       }
       if (req.type === "pathExists") {
         respond(req.id ?? "", { ok: true, data: { exists: pathExists(req.path) } });
+        return;
+      }
+      if (req.type === "readLinkImage") {
+        void readLinkImage(req.path, workspaceDir).then((data) =>
+          respond(req.id ?? "", { ok: true, data }),
+        );
+        return;
+      }
+      if (req.type === "openLocalLink") {
+        void inspectLocalLink(req.path, workspaceDir)
+          .then(openLocalLinkNatively)
+          .then(() => respond(req.id ?? "", { ok: true }))
+          .catch((err: unknown) =>
+            respond(req.id ?? "", {
+              ok: false,
+              error:
+                err instanceof Error && err.message === "nativeLinkBlocked"
+                  ? "nativeLinkBlocked"
+                  : "openLocalLinkFailed",
+            }),
+          );
         return;
       }
       if (req.type === "openFile") {

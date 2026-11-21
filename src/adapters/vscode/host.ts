@@ -15,6 +15,12 @@ import {
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { PiProcess } from "../../bridge/pi-process.ts";
+import {
+  inspectLocalLink,
+  openLocalLinkNatively,
+  pathInWorkspace,
+} from "../../bridge/open-file.ts";
+import { readLinkImage } from "../../bridge/link-image.ts";
 import { compactHistoryResponse } from "../../ide/agent-stop.ts";
 import { ExtensionUiState } from "../../ide/extension-ui-state.ts";
 import { shouldRestartPiForNewSession } from "../../bridge/rpc-recovery.ts";
@@ -645,6 +651,55 @@ export abstract class PiWebviewHost {
         this.cb.onNewChat();
         this.respond(req.id, true);
         return;
+      case "clipboardWrite":
+        try {
+          await vscode.env.clipboard.writeText(req.text);
+          this.respond(req.id, true);
+        } catch {
+          this.respond(req.id, false);
+        }
+        return;
+      case "readLinkImage":
+        this.respond(
+          req.id,
+          true,
+          await readLinkImage(req.path, this.workspace() ?? process.cwd()),
+        );
+        return;
+      case "openLocalLink": {
+        try {
+          const target = await inspectLocalLink(
+            req.path,
+            this.workspace() ?? process.cwd(),
+          );
+          const folders = vscode.workspace.workspaceFolders ?? [];
+          const workspacePath = (
+            await Promise.all(
+              folders.map((folder) => pathInWorkspace(target.path, folder.uri.fsPath)),
+            )
+          ).find(Boolean);
+          if (workspacePath) {
+            const uri = vscode.Uri.file(workspacePath);
+            await vscode.commands.executeCommand("revealInExplorer", uri);
+            // vscode.open uses normal editor associations, including image previews.
+            if (!target.directory)
+              await vscode.commands.executeCommand("vscode.open", uri);
+          } else {
+            await openLocalLinkNatively(target);
+          }
+          this.respond(req.id, true);
+        } catch (err) {
+          this.respond(
+            req.id,
+            false,
+            undefined,
+            err instanceof Error && err.message === "nativeLinkBlocked"
+              ? "nativeLinkBlocked"
+              : "openLocalLinkFailed",
+          );
+        }
+        return;
+      }
       case "openFile": {
         try {
           const filePath = isAbsolute(req.path)
@@ -1090,7 +1145,7 @@ export abstract class PiWebviewHost {
     html = html.replace(/href="\/style\.css"/g, `href="${root}/style.css"`);
     html = html.replace(
       "<head>",
-      `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; media-src ${webview.cspSource} data: blob:; style-src ${webview.cspSource}; script-src ${webview.cspSource}; font-src ${webview.cspSource};">`,
+      `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data: https: http:; media-src ${webview.cspSource} data: blob:; style-src ${webview.cspSource}; script-src ${webview.cspSource}; font-src ${webview.cspSource};">`,
     );
     return html;
   }

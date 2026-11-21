@@ -41,8 +41,9 @@ export function createMockIde(log: (msg: string) => void): MockIde {
           respond(send, req);
           break;
         }
+        case "openLocalLink":
         case "openFile":
-          log(`[mock-ide] openFile ${req.path} (no-op)`);
+          log(`[mock-ide] ${req.type} ${req.path} (no-op)`);
           respond(send, req);
           break;
         case "showQuickPick":

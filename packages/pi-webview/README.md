@@ -33,6 +33,12 @@ Use **Find in chat** in the header (magnifying glass on narrow panels), or press
 
 Search covers the currently loaded messages, not the entire saved session. Expand collapsed thinking/tool blocks to include their rendered text. To load older messages, increase **History (messages)** in settings. The search is local to the UI and does not send queries to the model.
 
+## Links in chat
+
+Relative file links in Markdown resolve from the session workspace. In VS Code, clicking a workspace file reveals it in the Explorer and opens it in its usual editor (including image previews); folder links reveal the folder. Outside the workspace, VS Code uses the system's default app. The standalone browser and Chrome Side Panel open local links on the machine running `piw`, not on the browser's machine if the bridge is remote. Native opening supports common documents, media and folders, but does not launch scripts, shortcuts or executables.
+
+Right-click a link and choose **Copy link**, alongside the usual text-editing actions, to copy the complete destination. Hover to see the first 50 characters. If a linked image loads, the tooltip is replaced by a preview with the same destination text. Local previews support PNG, JPEG, GIF, WebP, AVIF and BMP up to 8 MiB; web previews depend on what the browser can load. To use a different limit, add `"linkTooltipMaxChars": 80` (or another positive integer) to the pi-webview `config.json` and restart the bridge or reload the IDE window. This preference is not shown in Settings. The file is under `$XDG_CONFIG_HOME/pi-webview` (normally `~/.config/pi-webview`) on Linux, `~/Library/Application Support/pi-webview` on macOS and `%APPDATA%\pi-webview` on Windows.
+
 ## Standalone (browser)
 
 The package also includes the web UI and a local bridge, launchable from the shell with the `piw` binary (script on Linux/macOS, `piw.cmd` on Windows):

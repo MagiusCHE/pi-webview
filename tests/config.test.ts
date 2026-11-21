@@ -137,6 +137,19 @@ test("ConfigStore: persiste preferenze UI e sorgenti di stato nascoste", () => {
   }
 });
 
+test("ConfigStore preserves the hand-edited tooltip limit across other settings changes", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-webview-config-"));
+  try {
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ linkTooltipMaxChars: 80 }));
+    const store = new ConfigStore(dir);
+    assert.equal(store.get().linkTooltipMaxChars, 80);
+    store.patch({ theme: "dark" });
+    assert.equal(new ConfigStore(dir).get().linkTooltipMaxChars, 80);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("ConfigStore: file corrotto → default senza crash", () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-webview-config-"));
   try {

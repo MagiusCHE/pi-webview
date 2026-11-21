@@ -250,6 +250,16 @@ public static class IdeBridge
                     // (SelectionTracker → all webviews)
                     host.PostIdeResponse(Ok(req, null));
                     return;
+                case "readLinkImage":
+                {
+                    var path = req.Path;
+                    var workspace = host.Workspace();
+                    var preview = path is null ? null : await Task.Run(() =>
+                        LinkImagePreview.Read(ResolveExistingLocalFile(path, workspace)));
+                    host.PostIdeResponse(Ok(req, preview));
+                    return;
+                }
+                case "openLocalLink":
                 case "openFile":
                     if (req.Path is null) { host.PostIdeResponse(Fail(req, "openFile: missing path")); return; }
                     await host.Jtf.SwitchToMainThreadAsync();
@@ -257,8 +267,12 @@ public static class IdeBridge
                     {
                         var filePath = req.Path;
                         var workspace = host.Workspace();
-                        if (!System.IO.Path.IsPathRooted(filePath) && !string.IsNullOrWhiteSpace(workspace))
-                            filePath = System.IO.Path.GetFullPath(System.IO.Path.Combine(workspace, filePath));
+                        if (req.Type == "openLocalLink")
+                        {
+                            filePath = ResolveExistingLocalFile(filePath, workspace);
+                        }
+                        else if (!Path.IsPathRooted(filePath) && !string.IsNullOrWhiteSpace(workspace))
+                            filePath = Path.GetFullPath(Path.Combine(workspace, filePath));
                         host.Dte.ItemOperations.OpenFile(filePath);
                         host.PostIdeResponse(Ok(req, new Dictionary<string, object?> { ["path"] = filePath }));
                     }
@@ -342,6 +356,27 @@ public static class IdeBridge
         {
             host.PostIdeResponse(Fail(req, ex.Message));
         }
+    }
+
+    // Chat destinations are arbitrary Markdown. Do not resolve devices,
+    // network shares, alternate streams or other URI schemes as local files.
+    private static string ResolveExistingLocalFile(string path, string? workspace)
+    {
+        path = path.Replace('/', '\\');
+        var hasDrive = System.Text.RegularExpressions.Regex.IsMatch(path, @"^[a-zA-Z]:\\");
+        if (path.StartsWith(@"\\") || path.Any(char.IsControl) ||
+            (hasDrive ? path.Substring(2) : path).Contains(":"))
+            throw new ArgumentException("Invalid local file path");
+        var root = workspace ?? Environment.CurrentDirectory;
+        if (path.StartsWith(@"~\"))
+            path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path.Substring(2).TrimStart('\\'));
+        else if (path.StartsWith(@"\"))
+            path = Path.Combine(Path.GetPathRoot(root), path.TrimStart('\\'));
+        else if (!hasDrive)
+            path = Path.Combine(root, path);
+        path = Path.GetFullPath(path);
+        if (path.StartsWith(@"\\") || !File.Exists(path)) throw new FileNotFoundException();
+        return path;
     }
 
     // Version shown in the settings dialog: the assembly informational version

@@ -269,6 +269,10 @@ public sealed class UserConfig
     [System.Text.Json.Serialization.JsonPropertyName("historyLimit")]
     public int? HistoryLimit { get; set; }
 
+    // Preserve the hand-edited value; the shared Webview validates it.
+    [System.Text.Json.Serialization.JsonPropertyName("linkTooltipMaxChars")]
+    public JsonElement? LinkTooltipMaxChars { get; set; }
+
     [System.Text.Json.Serialization.JsonPropertyName("notifications")]
     public string? Notifications { get; set; }
 

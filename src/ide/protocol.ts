@@ -142,6 +142,8 @@ export interface AssistantDelta {
 export type IdeRequest =
   | { type: "attachSelection"; id?: string }
   | { type: "openFile"; path: string; id?: string }
+  | { type: "openLocalLink"; path: string; id?: string }
+  | { type: "readLinkImage"; path: string; id?: string }
   | { type: "showQuickPick"; items: string[]; title?: string; id?: string }
   | { type: "showInputBox"; title?: string; placeholder?: string; id?: string }
   | {
@@ -449,6 +451,8 @@ export interface UserConfig {
   locale?: LocaleId;
   /** max number of messages shown in history (resume and runtime) */
   historyLimit?: number;
+  /** Max characters shown in link tooltips (default 50; config file only). */
+  linkTooltipMaxChars?: number;
   /** DEFAULT for NEW sessions: where turn-complete notifications go:
    *  desktop | vscode | off. Per-session overrides live INSIDE the session
    *  file (SessionSettings), not here. The "vscode" value only makes sense

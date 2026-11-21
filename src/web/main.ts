@@ -134,6 +134,12 @@ import {
   setBrowserServerUrl,
 } from "../adapters/browser/runtime.ts";
 import { renderMarkdown } from "./markdown.ts";
+import { copyWithSelection, installChatLinks } from "./chat-links.ts";
+import {
+  DEFAULT_LINK_TOOLTIP_MAX_CHARS,
+  normalizeLinkTooltipMaxChars,
+} from "../ide/local-link.ts";
+import type { LinkImage } from "../ide/link-image.ts";
 import { ChatSearch } from "./chat-search.ts";
 import { SessionRecovery } from "./session-recovery.ts";
 import { recoverableStatuses } from "../ide/extension-ui-state.ts";
@@ -2155,10 +2161,59 @@ function renderHiddenStatusSettings(): void {
   }
 }
 
+let linkTooltipMaxChars = DEFAULT_LINK_TOOLTIP_MAX_CHARS;
+installChatLinks({
+  tooltipMaxChars: () => linkTooltipMaxChars,
+  menuLabel: t,
+  copy: (text) => void copyLink(text),
+  openLocal: (path) => void openLocalLink(path),
+  readImage: async (path) => {
+    const epoch = sessionEpoch;
+    const result = await ideRequest({ type: "readLinkImage", path });
+    return result?.ok && isCurrentSession(epoch)
+      ? (result.data as LinkImage | null)
+      : null;
+  },
+});
+
+async function copyLink(destination: string): Promise<void> {
+  try {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(destination);
+      return;
+    }
+  } catch {
+    // Try a host or document clipboard if the Webview denies the Clipboard API.
+  }
+  if (!usesWebSocketBridge) {
+    const response = await ideRequest({ type: "clipboardWrite", text: destination });
+    if (response?.ok) return;
+  }
+  try {
+    if (copyWithSelection(destination)) return;
+  } catch {
+    // Report failures instead of implying the clipboard was updated.
+  }
+  addSystemBox("error", t("copyLinkFailed"));
+}
+
+async function openLocalLink(path: string): Promise<void> {
+  const epoch = sessionEpoch;
+  const response = await ideRequest({ type: "openLocalLink", path });
+  if (!response?.ok && isCurrentSession(epoch)) {
+    const key =
+      response?.error === "nativeLinkBlocked"
+        ? "nativeLinkBlocked"
+        : "openLocalLinkFailed";
+    addSystemBox("error", tpl(t(key), { path }));
+  }
+}
+
 async function requestConfig(): Promise<void> {
   const res = await ideRequest({ type: "getConfig" });
   if (res?.ok && typeof res.data === "object" && res.data !== null) {
     const cfg = res.data as Partial<UserConfig>;
+    linkTooltipMaxChars = normalizeLinkTooltipMaxChars(cfg.linkTooltipMaxChars);
     if (cfg.theme && !forcedTheme) {
       themePref = cfg.theme;
       applyTheme(themePref);

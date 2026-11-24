@@ -1,0 +1,6 @@
+{
+  "unavailable": "pi-webview: {names} could not be verified in {dir}. Check that the package is installed and that the launcher links can be created there.",
+  "path": "pi-webview: Pi’s current PATH does not resolve {names} to this installation. If your terminal has the same problem, put {dir} first in its PATH.",
+  "persist": "To keep this setting for new terminals, add the export to your shell’s startup file.",
+  "verify": "In your terminal, verify with: {checks}"
+}

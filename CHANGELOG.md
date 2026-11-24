@@ -4,6 +4,10 @@ pi-webview release notes are maintained in English. When a release is prepared, 
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-24
+
+- On macOS and Linux, companion setup now checks whether Pi’s `PATH` resolves both `piw` and `piw-public` to this installation and shows how to fix it if needed. Shell startup files are left untouched.
+
 ## [0.9.0] - 2026-11-21
 
 - Chat links to workspace files now reveal and open them in VS Code. External local files open with their default app in VS Code, and browser and Chrome Side Panel file links open on the `piw` host. Links also have a localized **Copy link** action alongside text-editing actions, a destination tooltip (50 characters by default, configurable in `config.json`), and a hover preview for reachable images.

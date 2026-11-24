@@ -52,6 +52,7 @@ import { checkPiUpdate, locatePi } from "./lib/update-check.ts";
 import type { UpdateAvailable } from "./lib/update-check.ts";
 import { registerBrowserTools, type BrowserToolPiApi } from "./lib/browser-tools.ts";
 import { registerAgentStopPersistence, type AgentStopPiApi } from "./lib/agent-stop.ts";
+import { checkLauncherPath, launcherPathMessage } from "./lib/launcher-path.ts";
 import {
   formatReleaseReminder,
   ReleaseReminderStore,
@@ -191,6 +192,7 @@ const PIW_BIN_NAMES = ["piw", "piw-public"] as const;
 type PiwBinName = (typeof PIW_BIN_NAMES)[number];
 
 function piwBinPaths(name: PiwBinName): {
+  name: PiwBinName;
   dir: string;
   link: string;
   target: string;
@@ -207,6 +209,7 @@ function piwBinPaths(name: PiwBinName): {
         : ""
       : join(homedir(), ".local", "bin"));
   return {
+    name,
     dir,
     link: dir ? join(dir, isWindows ? `${name}.cmd` : name) : "",
     target,
@@ -291,6 +294,16 @@ function ensurePiwBin(force = false): boolean {
     if (ensurePiwLauncher(name, force)) changed = true;
   }
   return changed;
+}
+
+function launcherPathWarning(): string | undefined {
+  const issue = checkLauncherPath(PIW_BIN_NAMES.map(piwBinPaths), {
+    platform: process.platform,
+    path: process.env.PATH,
+  });
+  if (!issue) return;
+  const locale = new ConfigStore().get().locale;
+  return launcherPathMessage(issue, process.env.SHELL ?? "", locale);
 }
 
 function unlinkPiwLauncher(name: PiwBinName): void {
@@ -538,14 +551,20 @@ export default async function (pi: PiApi): Promise<void> {
     appendInstallLog("piw launcher links created");
   }
 
-  // notify the user as soon as there is a UI context (or immediately, if a
-  // session already started before the install finished)
+  // Notify once per process, independently of whether companion maintenance
+  // installed anything or the launcher links already existed.
+  let launcherPathChecked = false;
   pi.on("session_start", (_event, ctx) => {
     const ui = (ctx as { ui?: { notify: Notify } }).ui;
     if (ui) lastUi = ui;
     if (ui && pendingNotify) {
       ui.notify(pendingNotify, "info");
       pendingNotify = null;
+    }
+    if (ui && !launcherPathChecked) {
+      launcherPathChecked = true;
+      const warning = launcherPathWarning();
+      if (warning) ui.notify(warning, "warning");
     }
     if (
       !ui ||
@@ -687,12 +706,14 @@ export default async function (pi: PiApi): Promise<void> {
           case "status": {
             const ide = detectIde();
             const companion = process.env.PI_WEBVIEW_COMPANION === "1";
-            // Presence of both launcher shims on PATH, pointing at this package.
+            // Presence of both managed launcher shims, independent of PATH.
             // Windows .cmd launchers are regular files, not symlinks.
             const piw = piwPointsHere() ? "present" : "missing";
+            const status = `pi-webview: IDE detected = ${ide ?? "none"}; companion active = ${companion ? "yes (webview)" : "no"}; piw links = ${piw}`;
+            const warning = launcherPathWarning();
             notify(
-              `pi-webview: IDE detected = ${ide ?? "none"}; companion active = ${companion ? "yes (webview)" : "no"}; piw links = ${piw}`,
-              "info",
+              warning ? `${status}\n${warning}` : status,
+              warning ? "warning" : "info",
             );
             return;
           }
@@ -718,7 +739,9 @@ export default async function (pi: PiApi): Promise<void> {
                 "pi-webview: nothing to install — all companions already current.",
               );
             if (piwLink) recap.push("pi-webview: piw launcher links created.");
-            notify(recap.join("\n"), "info");
+            const warning = launcherPathWarning();
+            if (warning) recap.push(warning);
+            notify(recap.join("\n"), warning ? "warning" : "info");
             return;
           }
           case "reinstall": {
@@ -734,14 +757,14 @@ export default async function (pi: PiApi): Promise<void> {
               onStep: (step) => notify(`pi-webview: ${step}`, "info"),
             });
             ensurePiwBin(true);
-            notify(
-              [
-                ...formatCompanionNotes(notes, "en", "pi-webview: "),
-                ...companionReloadHints(notes, "en", "pi-webview: "),
-                "pi-webview: piw launcher links re-created.",
-              ].join("\n"),
-              "info",
-            );
+            const recap = [
+              ...formatCompanionNotes(notes, "en", "pi-webview: "),
+              ...companionReloadHints(notes, "en", "pi-webview: "),
+            ];
+            const warning = launcherPathWarning();
+            if (warning) recap.push(warning);
+            else recap.push("pi-webview: piw launcher links re-created.");
+            notify(recap.join("\n"), warning ? "warning" : "info");
             return;
           }
           case "uninstall": {

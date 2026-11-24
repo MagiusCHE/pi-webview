@@ -232,7 +232,11 @@ pi -e npm:@magiusche/pi-webview
 
 ### Launcher links (no install scripts)
 
-This package has **no npm install scripts** (nothing to approve, no `npm warn install-scripts`). The `piw` and `piw-public` links on your `PATH` (`~/.local/bin/<name>`, or `%APPDATA%\npm\<name>.cmd` on Windows) are created together by the extension at the **first pi start** and re-created whenever either is missing. So: install the package, start pi once, and both launchers work. If you need them before the first pi start, just start pi or create the links manually.
+This package has **no npm install scripts** (nothing to approve, no `npm warn install-scripts`). Start Pi once after installing: the extension creates the `piw` and `piw-public` launchers in `~/.local/bin` (on Windows, `%APPDATA%\npm`), and re-creates them if they go missing.
+
+On macOS and Linux, Pi checks whether its current `PATH` resolves both commands to this installation. A warning explains what to do if either is missing or another executable takes precedence. You can repeat the check with `/piw status`, `/piw install`, or `/piw reinstall` inside Pi. An IDE may have a different `PATH` from your terminal, so verify in a new terminal with `command -v piw` and `command -v piw-public`.
+
+If `~/.local/bin` is missing from your terminal’s `PATH`, add `export PATH="$HOME/.local/bin:$PATH"` to your shell’s startup file (usually `~/.zshrc` for zsh, or `~/.bashrc` for interactive non-login Bash). For fish, run `fish_add_path --move "$HOME/.local/bin"`. The installer does not edit shell startup files or require exposing Pi’s internal `node_modules/.bin` directory.
 
 ### Uninstalling
 
@@ -256,7 +260,7 @@ If `pi remove` fails, or you already removed the package manually, do it by hand
 
 The extension and standalone bridge run the **same centralized companion logic** (`ensureCompanions` in `src/bridge/companions.ts`):
 
-- **`pi` start (the extension)**: (1) checks the **VS Code companion** against the bundled VSIX (installs/updates if missing or outdated; idempotent; the `code` CLI is resolved from `PATH` or known install locations, falling back to safe in-process VSIX extraction across detected desktop and VS Code Server/Remote SSH extension directories when no CLI exists; silent when VS Code is not installed; disable with `PI_WEBVIEW_AUTO_INSTALL=0`), (2) checks the **Visual Studio companion** on Windows (vswhere → `VSIXInstaller /instanceIds:` for **each** VS 2022/2026 instance, silent when no VS or no bundled vsix) and (3) re-creates the **`piw` and `piw-public` links** on your `PATH` if either is missing (the package has no install scripts; it never touches user files, only its own links).
+- **`pi` start (the extension)**: (1) checks the **VS Code companion** against the bundled VSIX (installs/updates if missing or outdated; idempotent; the `code` CLI is resolved from `PATH` or known install locations, falling back to safe in-process VSIX extraction across detected desktop and VS Code Server/Remote SSH extension directories when no CLI exists; silent when VS Code is not installed; disable with `PI_WEBVIEW_AUTO_INSTALL=0`), (2) checks the **Visual Studio companion** on Windows (vswhere → `VSIXInstaller /instanceIds:` for **each** VS 2022/2026 instance, silent when no VS or no bundled vsix) and (3) re-creates missing **`piw` and `piw-public` links** and checks their `PATH` resolution on macOS and Linux (see above).
 - **`piw` start (standalone bridge)**: runs the same silent IDE companion check (VS Code + Visual Studio), printing an outcome only when work is required. Browser installation remains an explicit, user-confirmed action.
 
 Every install/update/error is reported — in the pi.dev TUI and in the webview (via `ui.notify`, `pi-webview: …`) and on the `piw` console (`piw: …`). Only two cases stay silent: the target app is not installed, or the installed companion already matches the bundled VSIX.

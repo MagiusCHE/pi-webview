@@ -1,0 +1,6 @@
+{
+  "unavailable": "pi-webview: impossibile verificare {names} in {dir}. Controlla che il pacchetto sia installato e che sia possibile creare i link in quella cartella.",
+  "path": "pi-webview: il PATH corrente di Pi non trova {names} di questa installazione. Se succede anche nel terminale, metti {dir} all’inizio del suo PATH.",
+  "persist": "Per mantenere l’impostazione nei nuovi terminali, aggiungi l’export al file di avvio della shell.",
+  "verify": "Verifica nel terminale con: {checks}"
+}
